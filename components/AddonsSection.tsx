@@ -4,27 +4,39 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Blocks,
   BookOpen,
+  Brush,
   CheckCircle2,
   Code2,
+  Cog,
   ExternalLink,
+  FlaskConical,
+  GraduationCap,
+  Layers,
   Loader2,
+  Network,
+  Palette,
   Plug,
   Plus,
   Puzzle,
   RefreshCw,
+  Rocket,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
   Trash2,
+  Wrench,
+  Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import {
   addClaudeMarketplace,
   addClaudeMcp,
   installClaudePlugin,
+  listClaudeMarketplaceCatalog,
   listClaudeMcp,
   listClaudePlugins,
   listClaudeSkills,
+  listCodexMarketplaceCatalog,
   listCodexPlugins,
   listCodexSkills,
   removeClaudeMcp,
@@ -40,6 +52,7 @@ import {
   type CuratedAddon,
   type UniCategory,
 } from "@/lib/addons";
+import { describePlugin, type Locale } from "@/lib/plugin-descriptions";
 
 interface Props {
   workspace?: string | null;
@@ -134,23 +147,39 @@ export function AddonsSection({
     "codex-skill": [],
     "uni-series": [],
   });
+  const [marketplaceCatalog, setMarketplaceCatalog] = useState<AddonItem[]>([]);
+  const [codexCatalog, setCodexCatalog] = useState<AddonItem[]>([]);
   const [pendingToggle, setPendingToggle] = useState<string | null>(null);
   const [pendingInstall, setPendingInstall] = useState<string | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [locale, setLocale] = useState<Locale>("ja");
+
+  // localStorage で言語選好を永続化（プラグインタブのみのスコープ）
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = localStorage.getItem("unicrew.addons.locale");
+    if (saved === "ja" || saved === "en") setLocale(saved);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("unicrew.addons.locale", locale);
+  }, [locale]);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [cp, cs, cm, xp, xs] = await Promise.all([
+      const [cp, cs, cm, xp, xs, catalog, xcatalog] = await Promise.all([
         listClaudePlugins().catch(() => []),
         listClaudeSkills(workspace ?? null).catch(() => []),
         listClaudeMcp().catch(() => []),
         listCodexPlugins().catch(() => []),
         listCodexSkills().catch(() => []),
+        listClaudeMarketplaceCatalog().catch(() => []),
+        listCodexMarketplaceCatalog().catch(() => []),
       ]);
       setInstalled({
         "claude-plugin": cp,
@@ -160,6 +189,8 @@ export function AddonsSection({
         "codex-skill": xs,
         "uni-series": [],
       });
+      setMarketplaceCatalog(catalog);
+      setCodexCatalog(xcatalog);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -247,16 +278,28 @@ export function AddonsSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="font-semibold text-[var(--color-text)] flex items-center gap-2">
-            <TerminalSquare size={16} className="text-[var(--color-accent)]" />
-            機能の追加
-          </div>
-          <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5">
-            プラグイン・スキル・MCP を 1クリックで追加できます。インストール先は Claude / Codex
-            公式 CLI と同じなので、外部のクライアントとも互換性があります。
-          </div>
+      <div className="flex items-center justify-end gap-2">
+        {/* 言語切替（プラグイン説明の表示言語のみを切替） */}
+        <div
+          className="inline-flex rounded-md border border-[var(--color-border)] overflow-hidden text-[11px] font-mono"
+          role="group"
+          aria-label="Description language"
+        >
+          {(["ja", "en"] as const).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLocale(l)}
+              className={clsx(
+                "px-2.5 py-1 transition",
+                locale === l
+                  ? "bg-[var(--color-accent)] text-white"
+                  : "bg-white hover:bg-[var(--color-surface)] text-[var(--color-muted)]",
+              )}
+              title={l === "ja" ? "日本語表示" : "English"}
+            >
+              {l === "ja" ? "日本語" : "EN"}
+            </button>
+          ))}
         </div>
         <button
           onClick={() => void reload()}
@@ -269,7 +312,7 @@ export function AddonsSection({
           ) : (
             <RefreshCw size={13} />
           )}
-          再読み込み
+          {locale === "ja" ? "再読み込み" : "Reload"}
         </button>
       </div>
 
@@ -332,11 +375,13 @@ export function AddonsSection({
       )}
 
       {isUniSeries ? (
-        <UniSeriesPanel />
+        <UniSeriesPanel locale={locale} />
       ) : (
         <div>
           <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
-            インストール済み（{activeItems.length}）
+            {locale === "ja"
+              ? `インストール済み（${activeItems.length}）`
+              : `Installed (${activeItems.length})`}
           </div>
           {activeItems.length === 0 ? (
             <div className="text-[12px] text-[var(--color-muted)] bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-md px-3 py-3">
@@ -348,6 +393,7 @@ export function AddonsSection({
                 <InstalledRow
                   key={`${it.kind}:${it.id}`}
                   item={it}
+                  locale={locale}
                   pending={pendingToggle === it.id}
                   uninstalling={pendingUninstall === it.id}
                   onToggle={
@@ -370,13 +416,16 @@ export function AddonsSection({
       {recommendations.length > 0 && (
         <div>
           <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5 mt-3">
-            おすすめ（公式・検証済み {recommendations.length}）
+            {locale === "ja"
+              ? `おすすめ（公式・検証済み ${recommendations.length}）`
+              : `Recommended (verified ${recommendations.length})`}
           </div>
           <ul className="space-y-1.5">
             {recommendations.map((c) => (
               <RecommendationRow
                 key={c.id}
                 item={c}
+                locale={locale}
                 installing={pendingInstall === c.id}
                 onInstall={
                   c.kind === "plugin" && c.source === "claude"
@@ -387,6 +436,33 @@ export function AddonsSection({
             ))}
           </ul>
         </div>
+      )}
+
+      {/* Claude プラグインタブ：marketplace 全件カタログ（実物リスト）。 */}
+      {active === "claude-plugin" && marketplaceCatalog.length > 0 && (
+        <MarketplaceCatalogPanel
+          catalog={marketplaceCatalog}
+          installed={installed["claude-plugin"]}
+          locale={locale}
+          pendingInstall={pendingInstall}
+          onInstall={(id) => void onInstallPlugin(id)}
+        />
+      )}
+      {/* Codex プラグインタブ：bundled-marketplaces から全件 */}
+      {active === "codex-plugin" && codexCatalog.length > 0 && (
+        <MarketplaceCatalogPanel
+          catalog={codexCatalog}
+          installed={installed["codex-plugin"]}
+          locale={locale}
+          pendingInstall={null}
+          onInstall={() => {
+            setError(
+              locale === "ja"
+                ? "Codex 側の 1 クリックインストールは Phase D で実装予定です"
+                : "Codex 1-click install will land in Phase D",
+            );
+          }}
+        />
       )}
 
       <div className="border-t border-[var(--color-border)] pt-3 mt-3">
@@ -430,19 +506,27 @@ export function AddonsSection({
 
 function InstalledRow({
   item,
+  locale,
   pending,
   uninstalling,
   onToggle,
   onUninstall,
 }: {
   item: AddonItem;
+  locale: Locale;
   pending?: boolean;
   uninstalling?: boolean;
   onToggle?: (next: boolean) => void;
   onUninstall?: () => void;
 }) {
+  // Claude のプラグイン/スキルは多言語化テーブルでローカライズ
+  const localized =
+    item.source === "claude" && (item.kind === "plugin" || item.kind === "skill")
+      ? describePlugin(item.id, item.description, locale)
+      : { description: item.description ?? "" };
   return (
     <li className="flex items-start justify-between gap-3 px-3 py-2 rounded-md border border-[var(--color-border)] bg-white">
+      <CategoryIcon category={item.category ?? item.kind} name={item.name} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold text-[13px] truncate">{item.name}</span>
@@ -464,12 +548,23 @@ function InstalledRow({
                 : "bg-zinc-200 text-zinc-600",
             )}
           >
-            {item.enabled ? "有効" : "無効"}
+            {locale === "ja"
+              ? item.enabled
+                ? "有効"
+                : "無効"
+              : item.enabled
+                ? "Enabled"
+                : "Disabled"}
           </span>
+          {item.author && (
+            <span className="text-[10.5px] text-[var(--color-muted)]">
+              by {item.author}
+            </span>
+          )}
         </div>
-        {item.description && (
-          <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 truncate">
-            {item.description}
+        {localized.description && (
+          <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 line-clamp-2">
+            {localized.description}
           </div>
         )}
         {item.path && (
@@ -521,28 +616,226 @@ function InstalledRow({
   );
 }
 
-function UniSeriesPanel() {
+/**
+ * カテゴリーから lucide アイコンと色を返す。アイコンが取れないプラグインの代替表示。
+ * marketplace.json の `category` フィールド（development / productivity / frontend 等）
+ * を見て、適切な視覚アンカーを与える。
+ */
+function categoryVisual(category: string | null | undefined, name: string): {
+  Icon: typeof Code2;
+  bg: string;
+  fg: string;
+} {
+  const c = (category ?? "").toLowerCase();
+  if (c.includes("front") || c.includes("design") || c.includes("ui"))
+    return { Icon: Palette, bg: "#f0e7ff", fg: "#6d28d9" };
+  if (c.includes("creat") || c.includes("art") || c.includes("image"))
+    return { Icon: Brush, bg: "#fff1f2", fg: "#be185d" };
+  if (c.includes("integration") || c.includes("connect"))
+    return { Icon: Network, bg: "#ecfeff", fg: "#0891b2" };
+  if (c.includes("product") || c.includes("commit") || c.includes("git"))
+    return { Icon: Zap, bg: "#fef3c7", fg: "#b45309" };
+  if (c.includes("learn") || c.includes("educ") || c.includes("teach"))
+    return { Icon: GraduationCap, bg: "#dcfce7", fg: "#15803d" };
+  if (c.includes("test") || c.includes("qa") || c.includes("debug"))
+    return { Icon: FlaskConical, bg: "#fef9c3", fg: "#a16207" };
+  if (c.includes("security") || c.includes("audit"))
+    return { Icon: ShieldCheck, bg: "#fee2e2", fg: "#b91c1c" };
+  if (c.includes("perf") || c.includes("optim") || c.includes("bench"))
+    return { Icon: Rocket, bg: "#ede9fe", fg: "#5b21b6" };
+  if (c.includes("infra") || c.includes("deploy") || c.includes("ops"))
+    return { Icon: Cog, bg: "#e0e7ff", fg: "#3730a3" };
+  if (c === "skill" || c.includes("skill"))
+    return { Icon: Sparkles, bg: "#fef3c7", fg: "#92400e" };
+  if (c === "mcp" || c.includes("mcp"))
+    return { Icon: Blocks, bg: "#ddd6fe", fg: "#5b21b6" };
+  if (c === "tool" || c.includes("tool"))
+    return { Icon: Wrench, bg: "#e2e8f0", fg: "#334155" };
+  if (c.includes("dev")) return { Icon: Code2, bg: "#dbeafe", fg: "#1d4ed8" };
+  // 名前から推測
+  const lname = name.toLowerCase();
+  if (lname.includes("review")) return { Icon: ShieldCheck, bg: "#fee2e2", fg: "#b91c1c" };
+  if (lname.includes("commit") || lname.includes("git"))
+    return { Icon: Zap, bg: "#fef3c7", fg: "#b45309" };
+  if (lname.includes("design") || lname.includes("ui") || lname.includes("frontend"))
+    return { Icon: Palette, bg: "#f0e7ff", fg: "#6d28d9" };
+  if (lname.includes("image") || lname.includes("nano-banana"))
+    return { Icon: Brush, bg: "#fff1f2", fg: "#be185d" };
+  // 既定
+  return { Icon: Layers, bg: "#f1f5f9", fg: "#475569" };
+}
+
+function CategoryIcon({
+  category,
+  name,
+  size = 32,
+}: {
+  category: string | null | undefined;
+  name: string;
+  size?: number;
+}) {
+  const { Icon, bg, fg } = categoryVisual(category, name);
+  return (
+    <div
+      className="rounded-lg shrink-0 flex items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: bg,
+        color: fg,
+      }}
+      aria-hidden
+    >
+      <Icon size={Math.round(size * 0.55)} />
+    </div>
+  );
+}
+
+function MarketplaceCatalogPanel({
+  catalog,
+  installed,
+  locale,
+  pendingInstall,
+  onInstall,
+}: {
+  catalog: AddonItem[];
+  installed: AddonItem[];
+  locale: Locale;
+  pendingInstall: string | null;
+  onInstall: (id: string) => void;
+}) {
+  const installedIds = new Set(installed.map((it) => it.id));
+  const grouped = catalog.reduce<Record<string, AddonItem[]>>((acc, item) => {
+    const ns = item.namespace ?? "(unknown)";
+    (acc[ns] ??= []).push(item);
+    return acc;
+  }, {});
+  const namespaces = Object.keys(grouped).sort();
+  const totalAvailable = catalog.filter((c) => !installedIds.has(c.id)).length;
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+      <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
+        {locale === "ja"
+          ? `Marketplace カタログ（全 ${catalog.length} 件 / 未追加 ${totalAvailable} 件）`
+          : `Marketplace catalog (${catalog.length} total / ${totalAvailable} not installed)`}
+      </div>
+      <div className="text-[11px] text-[var(--color-muted)] mb-2 leading-relaxed">
+        {locale === "ja"
+          ? "ローカルに clone 済みの marketplace から実在する全プラグインを表示しています。"
+          : "Showing every plugin found in locally cloned marketplaces."}
+      </div>
+      <div className="space-y-3">
+        {namespaces.map((ns) => (
+          <div key={ns}>
+            <div className="text-[10.5px] font-mono text-[var(--color-muted)] mb-1">
+              {ns}（{grouped[ns].length}）
+            </div>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {grouped[ns].map((it) => {
+                const isInstalled = installedIds.has(it.id);
+                const localized = describePlugin(it.id, it.description, locale);
+                const installing = pendingInstall === it.id;
+                return (
+                  <li
+                    key={it.id}
+                    className="flex items-start justify-between gap-2 px-3 py-2 rounded-md border border-[var(--color-border)] bg-white"
+                  >
+                    <CategoryIcon
+                      category={it.category}
+                      name={it.name}
+                      size={28}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-[12.5px] truncate">
+                          {it.name}
+                        </span>
+                        {it.version && (
+                          <span className="text-[10px] font-mono text-[var(--color-muted)]">
+                            v{it.version}
+                          </span>
+                        )}
+                        {isInstalled && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+                            {locale === "ja" ? "インストール済み" : "Installed"}
+                          </span>
+                        )}
+                        {it.author && (
+                          <span className="text-[10px] text-[var(--color-muted)]">
+                            by {it.author}
+                          </span>
+                        )}
+                      </div>
+                      {localized.description && (
+                        <div className="text-[11px] text-[var(--color-muted)] mt-0.5 line-clamp-2">
+                          {localized.description}
+                        </div>
+                      )}
+                    </div>
+                    {!isInstalled && (
+                      <button
+                        onClick={() => onInstall(it.id)}
+                        disabled={installing}
+                        className="shrink-0 px-2 py-1 text-[11px] rounded-md bg-[var(--color-accent)] text-white hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1"
+                        title={
+                          locale === "ja"
+                            ? "1 クリックで追加"
+                            : "Install with one click"
+                        }
+                      >
+                        {installing ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : (
+                          <Plus size={10} />
+                        )}
+                        {locale === "ja" ? "追加" : "Install"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UniSeriesPanel({ locale }: { locale: Locale }) {
   const grouped = uniProductsByCategory();
-  const sections: { id: UniCategory; label: string; description: string }[] = [
+  const sections: {
+    id: UniCategory;
+    label: string;
+    descriptionJa: string;
+    descriptionEn: string;
+  }[] = [
     {
       id: "service",
       label: "Services",
-      description: "uniLinks が運営する SaaS 群（販売開始準備中）",
+      descriptionJa: "uniLinks が運営する SaaS 群（販売開始準備中）",
+      descriptionEn: "SaaS suite by uniLinks (preparing for launch)",
     },
     {
       id: "mcp",
       label: "MCP Servers",
-      description: "各 UNI 製品を任意の AI クライアントから操作する HTTP MCP",
+      descriptionJa: "各 UNI 製品を任意の AI クライアントから操作する HTTP MCP",
+      descriptionEn:
+        "HTTP MCP servers to operate each UNI product from any AI client",
     },
     {
       id: "skill",
       label: "Claude Skills",
-      description: "UNI シリーズ向け専用スキル（landing pages, theming など）",
+      descriptionJa: "UNI シリーズ向け専用スキル（LP・テーマ展開など）",
+      descriptionEn:
+        "Claude skills tailored for UNI workflows (LPs, theming, etc.)",
     },
     {
       id: "extension",
       label: "Extensions",
-      description: "VS Code など外部ツール用拡張",
+      descriptionJa: "VS Code など外部ツール用拡張",
+      descriptionEn: "Extensions for VS Code and other external tools",
     },
   ];
   return (
@@ -552,9 +845,9 @@ function UniSeriesPanel() {
           <Puzzle size={13} />
           UNI Series — Coming Soon
         </div>
-        UNICREW 内から uniLinks の SaaS 群・MCP・スキル・拡張をワンクリックで
-        導入できる UNI ハブを開発中です。販売開始までは英語版プレビューの一覧
-        のみ公開しています。
+        {locale === "ja"
+          ? "UNICREW 内から uniLinks の SaaS 群・MCP・スキル・拡張をワンクリックで導入できる UNI ハブを開発中です。販売開始までは一覧プレビューのみ公開しています。"
+          : "We are building a one-click UNI hub inside UNICREW for the uniLinks SaaS suite, MCP servers, skills, and extensions. Until launch this is a preview-only listing."}
       </div>
       {sections.map((sec) => {
         const items = grouped[sec.id];
@@ -565,7 +858,7 @@ function UniSeriesPanel() {
               {sec.label}（{items.length}）
             </div>
             <div className="text-[11.5px] text-[var(--color-muted)] mb-1.5">
-              {sec.description}
+              {locale === "ja" ? sec.descriptionJa : sec.descriptionEn}
             </div>
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {items.map((p) => (
@@ -583,7 +876,7 @@ function UniSeriesPanel() {
                       </span>
                     </div>
                     <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 leading-snug">
-                      {p.tagline}
+                      {locale === "ja" ? p.taglineJa : p.tagline}
                     </div>
                   </div>
                   {p.url && (
@@ -609,14 +902,19 @@ function UniSeriesPanel() {
 
 function RecommendationRow({
   item,
+  locale,
   installing,
   onInstall,
 }: {
   item: CuratedAddon;
+  locale: Locale;
   installing?: boolean;
   onInstall?: () => void;
 }) {
   const supported = !!onInstall;
+  const localized = describePlugin(item.id, item.description, locale);
+  const description = localized.description || item.description;
+  const benefit = locale === "ja" ? (localized.benefit ?? item.benefit) : null;
   return (
     <li className="flex items-start gap-3 px-3 py-2.5 rounded-md border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-accent)_4%,white)]">
       <div className="min-w-0 flex-1">
@@ -625,7 +923,7 @@ function RecommendationRow({
           {item.verified && (
             <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
               <CheckCircle2 size={10} />
-              検証済み
+              {locale === "ja" ? "検証済み" : "Verified"}
             </span>
           )}
           <span className="text-[10.5px] font-mono text-[var(--color-muted)]">
@@ -633,19 +931,25 @@ function RecommendationRow({
           </span>
         </div>
         <div className="text-[12px] text-[var(--color-text)] mt-0.5">
-          {item.description}
+          {description}
         </div>
-        <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 italic">
-          → {item.benefit}
-        </div>
+        {benefit && (
+          <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 italic">
+            → {benefit}
+          </div>
+        )}
       </div>
       <button
         disabled={!supported || installing}
         onClick={onInstall}
         title={
           supported
-            ? "1クリックで追加（claude CLI 経由）"
-            : "Codex 側の 1 クリック追加は Phase D で実装予定"
+            ? locale === "ja"
+              ? "1クリックで追加（claude CLI 経由）"
+              : "Install with one click (via claude CLI)"
+            : locale === "ja"
+              ? "Codex 側の 1 クリック追加は Phase D で実装予定"
+              : "Codex 1-click install coming in Phase D"
         }
         className={clsx(
           "px-3 py-1.5 text-[12px] rounded-md text-white whitespace-nowrap inline-flex items-center gap-1.5",
@@ -657,15 +961,17 @@ function RecommendationRow({
         {installing ? (
           <>
             <Loader2 size={12} className="animate-spin" />
-            追加中…
+            {locale === "ja" ? "追加中…" : "Installing…"}
           </>
         ) : supported ? (
           <>
             <Plus size={12} />
-            追加
+            {locale === "ja" ? "追加" : "Install"}
           </>
-        ) : (
+        ) : locale === "ja" ? (
           "近日"
+        ) : (
+          "Soon"
         )}
       </button>
     </li>

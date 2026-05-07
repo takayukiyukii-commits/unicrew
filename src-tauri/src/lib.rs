@@ -224,6 +224,8 @@ pub struct AddonItem {
     pub kind: String,
     pub source: String,
     pub path: Option<String>,
+    pub category: Option<String>,
+    pub author: Option<String>,
 }
 
 fn home_dir() -> Result<std::path::PathBuf, String> {
@@ -286,6 +288,8 @@ fn list_claude_plugins() -> Result<Vec<AddonItem>, String> {
                             kind: "plugin".into(),
                             source: "claude".into(),
                             path,
+                            category: None,
+                            author: None,
                         });
                     }
                 }
@@ -352,6 +356,8 @@ fn collect_skills_from(dir: &std::path::Path, scope: &str, source: &str) -> Vec<
             kind: "skill".into(),
             source: source.to_string(),
             path: Some(path.to_string_lossy().to_string()),
+            category: Some("skill".into()),
+            author: None,
         });
     }
     out
@@ -427,6 +433,8 @@ fn list_claude_mcp() -> Result<Vec<AddonItem>, String> {
             kind: "mcp".into(),
             source: "claude".into(),
             path: None,
+            category: Some("mcp".into()),
+            author: None,
         });
     }
     Ok(out)
@@ -467,6 +475,8 @@ fn list_codex_plugins() -> Result<Vec<AddonItem>, String> {
                 kind: "plugin".into(),
                 source: "codex".into(),
                 path: None,
+                category: None,
+                author: None,
             });
         }
     }
@@ -801,6 +811,270 @@ fn toggle_claude_mcp(name: String, enabled: bool) -> Result<(), String> {
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json の書き込み失敗: {}", e))?;
     Ok(())
+}
+
+/// `~/.claude/plugins/marketplaces/<id>/` を walk し、各 marketplace 内の
+/// `plugin.json` を読み込んで「実在の全プラグイン」を返す。
+///
+/// レイアウトは marketplace ごとに揺れる（claude-code-plugins は
+/// `plugins/<name>/.claude-plugin/plugin.json`、awesome-claude-plugins は
+/// `<name>/.claude-plugin/plugin.json`）ので、深さ 4 まで再帰探索する。
+#[tauri::command]
+fn list_claude_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
+    let home = home_dir()?;
+    let marketplaces_dir = home.join(".claude").join("plugins").join("marketplaces");
+    if !marketplaces_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let installed = read_json_file(
+        &home.join(".claude").join("plugins").join("installed_plugins.json"),
+    );
+    let installed_ids: Vec<String> = installed
+        .as_ref()
+        .and_then(|v| v.get("plugins"))
+        .and_then(|p| p.as_object())
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let mut out: Vec<AddonItem> = Vec::new();
+    let mp_entries = match std::fs::read_dir(&marketplaces_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(out),
+    };
+    for mp in mp_entries.flatten() {
+        let mp_path = mp.path();
+        if !mp_path.is_dir() {
+            continue;
+        }
+        let mp_id = mp_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        // Prefer marketplace.json (richer metadata: category/author/tags)
+        let mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "claude");
+        let known: std::collections::HashSet<String> =
+            mp_json.iter().map(|x| x.name.clone()).collect();
+        out.extend(mp_json);
+        // Fallback: walk plugin.json files for anything not covered
+        let mut walked: Vec<AddonItem> = Vec::new();
+        find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
+        for item in walked {
+            if !known.contains(&item.name) {
+                out.push(item);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// `<marketplace>/.claude-plugin/marketplace.json` または `<marketplace>/marketplace.json`
+/// から plugins[] を抽出し、richer メタデータ付き AddonItem を返す。
+fn parse_marketplace_json(
+    marketplace_dir: &std::path::Path,
+    marketplace_id: &str,
+    installed_ids: &[String],
+    source: &str,
+) -> Vec<AddonItem> {
+    let candidates = [
+        marketplace_dir.join(".claude-plugin").join("marketplace.json"),
+        marketplace_dir.join(".codex-plugin").join("marketplace.json"),
+        marketplace_dir.join(".agents").join("plugins").join("marketplace.json"),
+        marketplace_dir.join("marketplace.json"),
+    ];
+    let mut out: Vec<AddonItem> = Vec::new();
+    for path in &candidates {
+        if !path.exists() {
+            continue;
+        }
+        let v = match read_json_file(path) {
+            Some(v) => v,
+            None => continue,
+        };
+        let plugins = match v.get("plugins").and_then(|p| p.as_array()) {
+            Some(p) => p,
+            None => continue,
+        };
+        for entry in plugins {
+            let name = match entry.get("name").and_then(|s| s.as_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let description = entry
+                .get("description")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            let version = entry
+                .get("version")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            let category = entry
+                .get("category")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            let author = entry.get("author").and_then(|a| {
+                if let Some(s) = a.as_str() {
+                    Some(s.to_string())
+                } else {
+                    a.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
+                }
+            });
+            let id = format!("{}@{}", name, marketplace_id);
+            let installed = installed_ids.iter().any(|x| x == &id);
+            out.push(AddonItem {
+                id,
+                name,
+                namespace: Some(marketplace_id.to_string()),
+                version,
+                enabled: installed,
+                scope: if installed { "user".into() } else { "marketplace".into() },
+                description,
+                kind: "plugin".into(),
+                source: source.to_string(),
+                path: None,
+                category,
+                author,
+            });
+        }
+        // 1 個見つかれば終わり
+        if !out.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+/// Codex 側 marketplace（~/.codex/.tmp/bundled-marketplaces/, ~/.codex/plugins/marketplaces/）の全件カタログ。
+#[tauri::command]
+fn list_codex_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
+    let home = home_dir()?;
+    let cfg = read_codex_config();
+    let installed_ids: Vec<String> = cfg
+        .as_ref()
+        .and_then(|c| c.get("plugins"))
+        .and_then(|p| p.as_table())
+        .map(|t| t.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let mut out: Vec<AddonItem> = Vec::new();
+    for root in [
+        home.join(".codex").join(".tmp").join("bundled-marketplaces"),
+        home.join(".codex").join("plugins").join("marketplaces"),
+    ] {
+        if !root.exists() {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for mp in entries.flatten() {
+            let mp_path = mp.path();
+            if !mp_path.is_dir() {
+                continue;
+            }
+            let mp_id = mp_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "codex");
+            let known: std::collections::HashSet<String> =
+                mp_json.iter().map(|x| x.name.clone()).collect();
+            out.extend(mp_json);
+            let mut walked: Vec<AddonItem> = Vec::new();
+            find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
+            for mut item in walked {
+                if !known.contains(&item.name) {
+                    item.source = "codex".into();
+                    out.push(item);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn find_plugin_jsons(
+    dir: &std::path::Path,
+    marketplace_id: &str,
+    installed_ids: &[String],
+    out: &mut Vec<AddonItem>,
+    depth: usize,
+) {
+    if depth > 4 {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if name == "node_modules" || name == "target" || name.starts_with(".git") {
+            continue;
+        }
+        if p.is_file() && name == "plugin.json" {
+            if let Some(item) = parse_plugin_json(&p, marketplace_id, installed_ids) {
+                out.push(item);
+            }
+        } else if p.is_dir() {
+            find_plugin_jsons(&p, marketplace_id, installed_ids, out, depth + 1);
+        }
+    }
+}
+
+fn parse_plugin_json(
+    path: &std::path::Path,
+    marketplace_id: &str,
+    installed_ids: &[String],
+) -> Option<AddonItem> {
+    let v = read_json_file(path)?;
+    let name = v.get("name").and_then(|s| s.as_str())?.to_string();
+    let description = v
+        .get("description")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    let version = v
+        .get("version")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    let category = v
+        .get("category")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    let author = v
+        .get("author")
+        .and_then(|a| {
+            if let Some(s) = a.as_str() {
+                Some(s.to_string())
+            } else {
+                a.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
+            }
+        });
+    let id = format!("{}@{}", name, marketplace_id);
+    let installed = installed_ids.iter().any(|x| x == &id);
+    Some(AddonItem {
+        id,
+        name,
+        namespace: Some(marketplace_id.to_string()),
+        version,
+        enabled: installed,
+        scope: if installed { "user".into() } else { "marketplace".into() },
+        description,
+        kind: "plugin".into(),
+        source: "claude".into(),
+        path: Some(path.parent()?.to_string_lossy().to_string()),
+        category,
+        author,
+    })
 }
 
 #[tauri::command]
@@ -1615,6 +1889,8 @@ pub fn run() {
             install_claude_plugin,
             uninstall_claude_plugin,
             add_claude_marketplace,
+            list_claude_marketplace_catalog,
+            list_codex_marketplace_catalog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

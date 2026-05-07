@@ -169,7 +169,10 @@ export interface UniProduct {
   id: string;
   name: string;
   category: UniCategory;
+  /** 英語のショートタグライン（海外向け）。 */
   tagline: string;
+  /** 日本語の短い説明（既定の表示）。 */
+  taglineJa: string;
   url: string | null;
   status: "coming-soon" | "live";
 }
@@ -180,47 +183,47 @@ export interface UniProduct {
  */
 export const UNI_PRODUCTS: UniProduct[] = [
   // Services
-  { id: "unicore", name: "UNICORE", category: "service", tagline: "Member sites & LMS", url: "https://uni-core.jp", status: "coming-soon" },
-  { id: "unidesk", name: "UNIDESK", category: "service", tagline: "Personal desk & social hub", url: "https://desk.uni-core.jp", status: "coming-soon" },
-  { id: "unicarte", name: "UNICARTE", category: "service", tagline: "Coaching & client management", url: "https://carte.uni-core.jp", status: "coming-soon" },
-  { id: "unihub", name: "UNIHUB", category: "service", tagline: "Team chat for tiny teams", url: "https://hub.uni-core.jp", status: "coming-soon" },
-  { id: "unistep", name: "UNISTEP", category: "service", tagline: "LINE-first marketing automation", url: "https://step.uni-core.jp", status: "coming-soon" },
-  { id: "unibase", name: "UNIBASE", category: "service", tagline: "All-in-one growth toolkit", url: "https://base.uni-core.jp", status: "coming-soon" },
-  { id: "uniscan", name: "UNISCAN", category: "service", tagline: "Market & persona analytics", url: "https://scan.uni-core.jp", status: "coming-soon" },
-  { id: "uniwrite", name: "UNIWRITE", category: "service", tagline: "Long-form writing AI", url: "https://uniwrite.uni-core.jp", status: "coming-soon" },
-  { id: "uniwire", name: "UNIWIRE", category: "service", tagline: "AI knowledge media", url: "https://uniwire.uni-core.jp", status: "coming-soon" },
-  { id: "unipin", name: "UNIPIN", category: "service", tagline: "Visual bookmarking", url: "https://pin.uni-core.jp", status: "coming-soon" },
-  { id: "unidrop", name: "UNIDROP", category: "service", tagline: "MCP marketplace", url: "https://drop.uni-core.jp", status: "coming-soon" },
-  { id: "uniskill", name: "UNISKILL", category: "service", tagline: "Skill share marketplace", url: "https://uniskill.uni-core.jp", status: "coming-soon" },
-  { id: "unireach", name: "UNIREACH", category: "service", tagline: "Multi-channel social posting", url: "https://reach.uni-core.jp", status: "coming-soon" },
-  { id: "unipost", name: "UNIPOST", category: "service", tagline: "Cross-platform broadcasting", url: null, status: "coming-soon" },
-  { id: "unisign", name: "UNISIGN", category: "service", tagline: "Lightweight e-signing", url: "https://sign.uni-core.jp", status: "coming-soon" },
-  { id: "unibook", name: "UNIBOOK", category: "service", tagline: "Course authoring", url: null, status: "coming-soon" },
-  { id: "unidrive", name: "UNIDRIVE", category: "service", tagline: "Knowledge drive", url: null, status: "coming-soon" },
-  { id: "unicart", name: "UNICART", category: "service", tagline: "Lightweight checkout", url: null, status: "coming-soon" },
-  { id: "uniwiki", name: "UNIWIKI", category: "service", tagline: "Internal AI knowledge wiki", url: null, status: "coming-soon" },
+  { id: "unicore", name: "UNICORE", category: "service", tagline: "Member sites & LMS", taglineJa: "会員サイト・教材販売・コース運営の本体", url: "https://uni-core.jp", status: "coming-soon" },
+  { id: "unidesk", name: "UNIDESK", category: "service", tagline: "Personal desk & social hub", taglineJa: "個人の作業デスク＋ソーシャル機能（家族・カップル・友人モード）", url: "https://desk.uni-core.jp", status: "coming-soon" },
+  { id: "unicarte", name: "UNICARTE", category: "service", tagline: "Coaching & client management", taglineJa: "コーチング・クライアント管理・カルテ記録", url: "https://carte.uni-core.jp", status: "coming-soon" },
+  { id: "unihub", name: "UNIHUB", category: "service", tagline: "Team chat for tiny teams", taglineJa: "少人数チーム向けのチャット（Slack 代替・人数課金なし）", url: "https://hub.uni-core.jp", status: "coming-soon" },
+  { id: "unistep", name: "UNISTEP", category: "service", tagline: "LINE-first marketing automation", taglineJa: "LINE 公式アカウントを中心としたステップ配信・CRM", url: "https://step.uni-core.jp", status: "coming-soon" },
+  { id: "unibase", name: "UNIBASE", category: "service", tagline: "All-in-one growth toolkit", taglineJa: "5カテゴリ16機能をひとまとめにした成長支援ハブ", url: "https://base.uni-core.jp", status: "coming-soon" },
+  { id: "uniscan", name: "UNISCAN", category: "service", tagline: "Market & persona analytics", taglineJa: "市場・トレンド・競合・顧客心理の分析", url: "https://scan.uni-core.jp", status: "coming-soon" },
+  { id: "uniwrite", name: "UNIWRITE", category: "service", tagline: "Long-form writing AI", taglineJa: "note 記事・YouTube 台本（長尺/ショート）を執筆する AI", url: "https://uniwrite.uni-core.jp", status: "coming-soon" },
+  { id: "uniwire", name: "UNIWIRE", category: "service", tagline: "AI knowledge media", taglineJa: "AI 専門の自動更新メディア（記事＋X 投稿を毎日生成）", url: "https://uniwire.uni-core.jp", status: "coming-soon" },
+  { id: "unipin", name: "UNIPIN", category: "service", tagline: "Visual bookmarking", taglineJa: "サムネイル付きの見やすいブックマーク", url: "https://pin.uni-core.jp", status: "coming-soon" },
+  { id: "unidrop", name: "UNIDROP", category: "service", tagline: "MCP marketplace", taglineJa: "UNI 製品の MCP を一覧から導入できるマーケットプレイス", url: "https://drop.uni-core.jp", status: "coming-soon" },
+  { id: "uniskill", name: "UNISKILL", category: "service", tagline: "Skill share marketplace", taglineJa: "Claude スキル・MCP を売買できるマーケットプレイス", url: "https://uniskill.uni-core.jp", status: "coming-soon" },
+  { id: "unireach", name: "UNIREACH", category: "service", tagline: "Multi-channel social posting", taglineJa: "X / Instagram / Threads など複数 SNS への一括投稿", url: "https://reach.uni-core.jp", status: "coming-soon" },
+  { id: "unipost", name: "UNIPOST", category: "service", tagline: "Cross-platform broadcasting", taglineJa: "1ネタを6媒体（X/note/IG/Threads/YouTube 長尺/ショート）に展開", url: null, status: "coming-soon" },
+  { id: "unisign", name: "UNISIGN", category: "service", tagline: "Lightweight e-signing", taglineJa: "個人事業主・小規模事業者向けの軽量な電子契約", url: "https://sign.uni-core.jp", status: "coming-soon" },
+  { id: "unibook", name: "UNIBOOK", category: "service", tagline: "Course authoring", taglineJa: "コース教材の構成・執筆を支援", url: null, status: "coming-soon" },
+  { id: "unidrive", name: "UNIDRIVE", category: "service", tagline: "Knowledge drive", taglineJa: "AI から参照できるナレッジドライブ", url: null, status: "coming-soon" },
+  { id: "unicart", name: "UNICART", category: "service", tagline: "Lightweight checkout", taglineJa: "軽量な決済・カート（Stripe 直接連携）", url: null, status: "coming-soon" },
+  { id: "uniwiki", name: "UNIWIKI", category: "service", tagline: "Internal AI knowledge wiki", taglineJa: "社内向けの AI 参照ナレッジ Wiki", url: null, status: "coming-soon" },
 
   // MCP servers (one per UNI product, exposed via HTTP MCP)
-  { id: "unicore-mcp", name: "UNICORE MCP", category: "mcp", tagline: "Member-site automation from any AI", url: null, status: "coming-soon" },
-  { id: "unidesk-mcp", name: "UNIDESK MCP", category: "mcp", tagline: "Desk + social actions from any AI", url: null, status: "coming-soon" },
-  { id: "unihub-mcp", name: "UNIHUB MCP", category: "mcp", tagline: "Team chat actions from any AI", url: null, status: "coming-soon" },
-  { id: "unistep-mcp", name: "UNISTEP MCP", category: "mcp", tagline: "LINE step delivery from any AI", url: null, status: "coming-soon" },
-  { id: "uniwire-mcp", name: "UNIWIRE MCP", category: "mcp", tagline: "Article publishing from any AI", url: null, status: "coming-soon" },
-  { id: "unireach-mcp", name: "UNIREACH MCP", category: "mcp", tagline: "Cross-channel posting from any AI", url: null, status: "coming-soon" },
-  { id: "unipin-mcp", name: "UNIPIN MCP", category: "mcp", tagline: "Bookmark search from any AI", url: null, status: "coming-soon" },
-  { id: "uniscan-mcp", name: "UNISCAN MCP", category: "mcp", tagline: "Persona research from any AI", url: null, status: "coming-soon" },
-  { id: "unicarte-mcp", name: "UNICARTE MCP", category: "mcp", tagline: "Coaching ops from any AI", url: null, status: "coming-soon" },
-  { id: "unisign-mcp", name: "UNISIGN MCP", category: "mcp", tagline: "E-signing from any AI", url: null, status: "coming-soon" },
+  { id: "unicore-mcp", name: "UNICORE MCP", category: "mcp", tagline: "Member-site automation from any AI", taglineJa: "任意の AI クライアントから UNICORE の会員管理・教材操作を行う MCP", url: null, status: "coming-soon" },
+  { id: "unidesk-mcp", name: "UNIDESK MCP", category: "mcp", tagline: "Desk + social actions from any AI", taglineJa: "UNIDESK のデスク・ソーシャル操作を AI から行う MCP", url: null, status: "coming-soon" },
+  { id: "unihub-mcp", name: "UNIHUB MCP", category: "mcp", tagline: "Team chat actions from any AI", taglineJa: "UNIHUB のチームチャット操作を AI から行う MCP", url: null, status: "coming-soon" },
+  { id: "unistep-mcp", name: "UNISTEP MCP", category: "mcp", tagline: "LINE step delivery from any AI", taglineJa: "UNISTEP の LINE ステップ配信を AI から制御する MCP", url: null, status: "coming-soon" },
+  { id: "uniwire-mcp", name: "UNIWIRE MCP", category: "mcp", tagline: "Article publishing from any AI", taglineJa: "UNIWIRE への記事投稿を AI から行う MCP", url: null, status: "coming-soon" },
+  { id: "unireach-mcp", name: "UNIREACH MCP", category: "mcp", tagline: "Cross-channel posting from any AI", taglineJa: "UNIREACH の SNS 一括投稿を AI から行う MCP", url: null, status: "coming-soon" },
+  { id: "unipin-mcp", name: "UNIPIN MCP", category: "mcp", tagline: "Bookmark search from any AI", taglineJa: "UNIPIN のブックマーク検索を AI から呼べる MCP", url: null, status: "coming-soon" },
+  { id: "uniscan-mcp", name: "UNISCAN MCP", category: "mcp", tagline: "Persona research from any AI", taglineJa: "UNISCAN のペルソナ・市場調査を AI から実行する MCP", url: null, status: "coming-soon" },
+  { id: "unicarte-mcp", name: "UNICARTE MCP", category: "mcp", tagline: "Coaching ops from any AI", taglineJa: "UNICARTE のコーチング業務操作を AI から行う MCP", url: null, status: "coming-soon" },
+  { id: "unisign-mcp", name: "UNISIGN MCP", category: "mcp", tagline: "E-signing from any AI", taglineJa: "UNISIGN の電子契約処理を AI から呼べる MCP", url: null, status: "coming-soon" },
 
   // Claude Skills (curated UNI-specific)
-  { id: "uni-lp-studio", name: "uni-lp-studio", category: "skill", tagline: "End-to-end UNI landing page pipeline", url: null, status: "coming-soon" },
-  { id: "uni-appearance-rollout", name: "uni-appearance-rollout", category: "skill", tagline: "Theme/dark/radius rollout to UNI products", url: null, status: "coming-soon" },
-  { id: "lp-illustration-enhancer", name: "lp-illustration-enhancer", category: "skill", tagline: "Inject Gemini illustrations into UNI LPs", url: null, status: "coming-soon" },
-  { id: "uni-mcp-builder", name: "uni-mcp-builder", category: "skill", tagline: "Scaffold a new UNI HTTP MCP", url: null, status: "coming-soon" },
+  { id: "uni-lp-studio", name: "uni-lp-studio", category: "skill", tagline: "End-to-end UNI landing page pipeline", taglineJa: "UNI 製品の LP を多段パイプラインで一気に作るスキル", url: null, status: "coming-soon" },
+  { id: "uni-appearance-rollout", name: "uni-appearance-rollout", category: "skill", tagline: "Theme/dark/radius rollout to UNI products", taglineJa: "テーマ色・ダークモード・角丸の設定を UNI 製品全部に横展開", url: null, status: "coming-soon" },
+  { id: "lp-illustration-enhancer", name: "lp-illustration-enhancer", category: "skill", tagline: "Inject Gemini illustrations into UNI LPs", taglineJa: "既存 LP に Gemini で生成したイラストを注入して強化", url: null, status: "coming-soon" },
+  { id: "uni-mcp-builder", name: "uni-mcp-builder", category: "skill", tagline: "Scaffold a new UNI HTTP MCP", taglineJa: "新しい UNI 製品用の HTTP MCP を雛形から立ち上げ", url: null, status: "coming-soon" },
 
   // Extensions (VS Code etc.)
-  { id: "uni-cmd-launcher", name: "UNI Command Launcher", category: "extension", tagline: "VS Code: Ctrl+Alt+C → Japanese command palette", url: null, status: "coming-soon" },
-  { id: "uni-claude-pack", name: "UNI Claude Pack", category: "extension", tagline: "VS Code recommended extensions for UNI dev", url: null, status: "coming-soon" },
+  { id: "uni-cmd-launcher", name: "UNI Command Launcher", category: "extension", tagline: "VS Code: Ctrl+Alt+C → Japanese command palette", taglineJa: "VS Code 拡張：Ctrl+Alt+C で日本語ラベルからコマンドを呼ぶ", url: null, status: "coming-soon" },
+  { id: "uni-claude-pack", name: "UNI Claude Pack", category: "extension", tagline: "VS Code recommended extensions for UNI dev", taglineJa: "UNI 開発用の VS Code 推奨拡張パック", url: null, status: "coming-soon" },
 ];
 
 export function uniProductsByCategory(): Record<UniCategory, UniProduct[]> {

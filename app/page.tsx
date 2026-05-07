@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
-import { Sidebar } from "@/components/Sidebar";
+import { Sidebar, type MainView } from "@/components/Sidebar";
+import { AddonsSection } from "@/components/AddonsSection";
+import { AppMenuBar, type MenuDef } from "@/components/AppMenuBar";
 import { ChatPane } from "@/components/ChatPane";
 import { RightPane } from "@/components/RightPane";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -137,6 +139,7 @@ export default function Page() {
     showActivity: true,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mainView, setMainView] = useState<MainView>("chat");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSplitMode, setPickerSplitMode] = useState(false);
   const [pickerConferenceMode, setPickerConferenceMode] = useState(false);
@@ -1032,20 +1035,201 @@ ${command}
     abortAll: handleAbortAll,
   };
 
+  const menuDefs: MenuDef[] = [
+    {
+      id: "file",
+      label: "ファイル",
+      items: [
+        {
+          label: "新しい会話",
+          shortcut: "Ctrl+N",
+          onSelect: () => {
+            setMainView("chat");
+            handleCreate();
+          },
+        },
+        {
+          label: "ワークスペースを開く…",
+          onSelect: () => {
+            void handleChangeWorkspace();
+          },
+        },
+        { divider: true },
+        {
+          label: "設定…",
+          shortcut: "Ctrl+,",
+          onSelect: () => setSettingsOpen(true),
+        },
+      ],
+    },
+    {
+      id: "edit",
+      label: "編集",
+      items: [
+        {
+          label: "コピー",
+          shortcut: "Ctrl+C",
+          onSelect: () => document.execCommand("copy"),
+        },
+        {
+          label: "貼り付け",
+          shortcut: "Ctrl+V",
+          onSelect: () => document.execCommand("paste"),
+        },
+        {
+          label: "すべて選択",
+          shortcut: "Ctrl+A",
+          onSelect: () => document.execCommand("selectAll"),
+        },
+      ],
+    },
+    {
+      id: "view",
+      label: "表示",
+      items: [
+        {
+          label: mainView === "chat" ? "会話表示（現在）" : "会話表示に切替",
+          onSelect: () => setMainView("chat"),
+        },
+        {
+          label:
+            mainView === "addons" ? "機能の追加（現在）" : "機能の追加を開く",
+          onSelect: () => setMainView("addons"),
+        },
+        { divider: true },
+        {
+          label: settings.beginnerMode
+            ? "初心者モード ON（クリックで OFF）"
+            : "初心者モード OFF（クリックで ON）",
+          onSelect: () => {
+            const next = !(settings.beginnerMode ?? true);
+            const updated = {
+              ...settings,
+              beginnerMode: next,
+              showActivity: next ? false : settings.showActivity,
+            };
+            setSettings(updated);
+            saveSettings(updated);
+          },
+        },
+        {
+          label: settings.showActivity
+            ? "ツール詳細表示 ON（クリックで OFF）"
+            : "ツール詳細表示 OFF（クリックで ON）",
+          onSelect: () => {
+            const updated = {
+              ...settings,
+              showActivity: !settings.showActivity,
+              beginnerMode: settings.showActivity ? settings.beginnerMode : false,
+            };
+            setSettings(updated);
+            saveSettings(updated);
+          },
+        },
+      ],
+    },
+    {
+      id: "window",
+      label: "ウィンドウ",
+      items: [
+        {
+          label: splitId
+            ? "並列ペインを閉じる"
+            : "右側に並列ペインを開く",
+          onSelect: () => {
+            if (splitId) handleCloseSplitPane();
+            else handleOpenSplitPane();
+          },
+        },
+        { divider: true },
+        {
+          label: "全スレッドを停止",
+          shortcut: "Ctrl+Shift+C",
+          onSelect: () => handleAbortAll(),
+        },
+      ],
+    },
+    {
+      id: "help",
+      label: "ヘルプ",
+      items: [
+        {
+          label: "GitHub リポジトリを開く",
+          onSelect: () =>
+            window.open(
+              "https://github.com/takayukiyukii-commits/unicrew",
+              "_blank",
+            ),
+        },
+        {
+          label: "問題を報告（Issues）",
+          onSelect: () =>
+            window.open(
+              "https://github.com/takayukiyukii-commits/unicrew/issues",
+              "_blank",
+            ),
+        },
+        { divider: true },
+        {
+          label: "バージョン情報",
+          onSelect: () => {
+            alert(
+              "UNICREW v0.1.0\nあなた専属のAIチームを、5分で。\n\nClaude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。\n\n© 2026 ZUBOLAND / uniLinks",
+            );
+          },
+        },
+      ],
+    },
+  ];
+
   return (
     <ActivityVisibilityContext.Provider value={settings.showActivity}>
-      <div className="h-screen w-screen flex bg-white overflow-hidden">
+      <div className="h-screen w-screen flex flex-col bg-white overflow-hidden">
+        <AppMenuBar menus={menuDefs} />
+        <div className="flex-1 min-h-0 flex">
         <Sidebar
           threads={threads}
           activeThreadId={activeId}
           splitThreadId={splitId}
           streamingThreadIds={streamingThreadIds}
-          onSelect={handleSidebarSelect}
-          onCreate={handleCreate}
+          onSelect={(id, mods) => {
+            setMainView("chat");
+            handleSidebarSelect(id, mods);
+          }}
+          onCreate={() => {
+            setMainView("chat");
+            handleCreate();
+          }}
           onDelete={handleDelete}
           onOpenSettings={() => setSettingsOpen(true)}
+          mainView={mainView}
+          onOpenAddons={() => setMainView("addons")}
         />
-        {isEmpty ? (
+        {mainView === "addons" ? (
+          <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-white">
+            <div className="max-w-5xl mx-auto px-6 py-8">
+              <header className="mb-6">
+                <h1 className="text-[22px] font-bold tracking-tight">
+                  機能の追加
+                </h1>
+                <p className="text-[13px] text-[var(--color-muted)] mt-1 leading-relaxed">
+                  Claude / Codex のプラグイン・スキル・MCP を一覧して、1クリックで追加できます。
+                  <br />
+                  ローカルにある実物（installed_plugins.json / ~/.claude/skills/ / ~/.codex/config.toml）と marketplace 全件を表示します。
+                </p>
+              </header>
+              <AddonsSection
+                workspace={activeThread?.workspace ?? null}
+                advancedMode={settings.advancedMode ?? false}
+                onAdvancedModeChange={(next) => {
+                  const updated = { ...settings, advancedMode: next };
+                  setSettings(updated);
+                  saveSettings(updated);
+                }}
+              />
+            </div>
+          </main>
+        ) : isEmpty ? (
           <WelcomeLanding
             onCreate={handleCreate}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1115,13 +1299,16 @@ ${command}
             )}
           </div>
         )}
-        <RightPane
-          thread={activeThread}
-          onChangeCharacter={handleChangeCharacter}
-          onChangeSplitCharacter={handleChangeSplitCharacter}
-          onChangeModel={handleChangeModel}
-          onChangeWorkspace={handleChangeWorkspace}
-        />
+        {mainView === "chat" && (
+          <RightPane
+            thread={activeThread}
+            onChangeCharacter={handleChangeCharacter}
+            onChangeSplitCharacter={handleChangeSplitCharacter}
+            onChangeModel={handleChangeModel}
+            onChangeWorkspace={handleChangeWorkspace}
+          />
+        )}
+        </div>
       <SettingsModal
         open={settingsOpen}
         settings={settings}

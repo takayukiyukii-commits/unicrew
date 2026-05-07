@@ -417,6 +417,8 @@ export interface AddonItem {
   kind: AddonKind;
   source: AddonSource;
   path: string | null;
+  category: string | null;
+  author: string | null;
 }
 
 export async function listClaudePlugins(): Promise<AddonItem[]> {
@@ -449,6 +451,25 @@ export async function listCodexSkills(): Promise<AddonItem[]> {
   if (!isTauri()) return [];
   const invoke = await loadInvoke();
   return invoke<AddonItem[]>("list_codex_skills");
+}
+
+/**
+ * ~/.claude/plugins/marketplaces/ 配下の **全プラグイン** を返す。
+ * marketplace.json があれば richer メタデータ（category/author/tags）込で。
+ */
+export async function listClaudeMarketplaceCatalog(): Promise<AddonItem[]> {
+  if (!isTauri()) return [];
+  const invoke = await loadInvoke();
+  return invoke<AddonItem[]>("list_claude_marketplace_catalog");
+}
+
+/**
+ * ~/.codex/.tmp/bundled-marketplaces/ と ~/.codex/plugins/marketplaces/ の全プラグイン。
+ */
+export async function listCodexMarketplaceCatalog(): Promise<AddonItem[]> {
+  if (!isTauri()) return [];
+  const invoke = await loadInvoke();
+  return invoke<AddonItem[]>("list_codex_marketplace_catalog");
 }
 
 // ---------- Voice input (Whisper) ----------

@@ -1,10 +1,12 @@
 "use client";
 
-import { Plus, Trash2, Settings, FolderOpen, Loader2, Columns2 } from "lucide-react";
+import { Plus, Trash2, Settings, FolderOpen, Loader2, Columns2, Puzzle } from "lucide-react";
 import type { Thread } from "@/lib/types";
 import { getCharacter } from "@/lib/characters";
 import { CharacterAvatar } from "./CharacterAvatar";
 import clsx from "clsx";
+
+export type MainView = "chat" | "addons";
 
 interface Props {
   threads: Thread[];
@@ -18,6 +20,10 @@ interface Props {
   onCreate: () => void;
   onDelete: (id: string) => void;
   onOpenSettings: () => void;
+  /** 現在中央に表示している view。"addons" の場合はサイドバーのプラグインボタンをアクティブ化。 */
+  mainView?: MainView;
+  /** プラグイン/スキル/MCP のページに切替 */
+  onOpenAddons?: () => void;
 }
 
 export function Sidebar({
@@ -29,6 +35,8 @@ export function Sidebar({
   onCreate,
   onDelete,
   onOpenSettings,
+  mainView = "chat",
+  onOpenAddons,
 }: Props) {
   const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
   return (
@@ -132,7 +140,22 @@ export function Sidebar({
         })}
       </div>
 
-      <div className="border-t border-[var(--color-border)] p-2">
+      <div className="border-t border-[var(--color-border)] p-2 space-y-0.5">
+        {onOpenAddons && (
+          <button
+            onClick={onOpenAddons}
+            className={clsx(
+              "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition",
+              mainView === "addons"
+                ? "bg-white text-[var(--color-accent)] font-medium shadow-sm border border-[var(--color-border)]"
+                : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+            )}
+            title="Claude / Codex のプラグイン・スキル・MCP を一覧"
+          >
+            <Puzzle size={15} />
+            機能の追加
+          </button>
+        )}
         <button
           onClick={onOpenSettings}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)] transition"

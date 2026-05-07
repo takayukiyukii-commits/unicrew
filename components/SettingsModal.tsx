@@ -35,7 +35,6 @@ import {
 } from "@/lib/tauri";
 import clsx from "clsx";
 import { CharactersSection } from "./CharactersSection";
-import { AddonsSection } from "./AddonsSection";
 
 interface Props {
   open: boolean;
@@ -749,13 +748,6 @@ export function SettingsModal({
 
           <div className="border-t border-[var(--color-border)] pt-5">
             <CharactersSection onCharactersChanged={onCharactersChanged} />
-          </div>
-
-          <div className="border-t border-[var(--color-border)] pt-5">
-            <AddonsSection
-              advancedMode={advancedMode}
-              onAdvancedModeChange={setAdvancedMode}
-            />
           </div>
 
           <section className="border-t border-[var(--color-border)] pt-4 text-[12px] text-[var(--color-muted)] leading-relaxed">
