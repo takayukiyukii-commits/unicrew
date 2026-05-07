@@ -472,6 +472,18 @@ export async function listCodexMarketplaceCatalog(): Promise<AddonItem[]> {
   return invoke<AddonItem[]>("list_codex_marketplace_catalog");
 }
 
+/**
+ * GitHub ユーザー/組織のアバターを data URL で取得。失敗時は null。
+ * Tauri 側で 7 日キャッシュ（`~/.claude/plugins/cache/avatars/`）を持つ。
+ */
+export async function fetchGithubAvatar(
+  user: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return invoke<string | null>("fetch_github_avatar", { user });
+}
+
 // ---------- Voice input (Whisper) ----------
 
 export async function getOpenAiApiKey(): Promise<string | null> {

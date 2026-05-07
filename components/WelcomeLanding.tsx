@@ -50,12 +50,12 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
     <main className="flex-1 overflow-y-auto bg-gradient-to-b from-white to-[var(--color-surface)]">
       <div className="max-w-3xl mx-auto px-8 py-16">
         <div className="text-center mb-10">
-          <div
-            className="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center text-white shadow-lg mb-5"
-            aria-hidden
-          >
-            <span className="text-3xl">✈</span>
-          </div>
+          <img
+            src="/brand/logo-mark.png"
+            alt="UNICREW"
+            className="mx-auto w-24 h-24 mb-5 select-none"
+            draggable={false}
+          />
           <h1 className="text-3xl font-bold tracking-tight text-[var(--color-text)] mb-2">
             UNICREW
             <span className="ml-2 text-[11px] align-middle px-2 py-0.5 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold">
@@ -63,10 +63,10 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
             </span>
           </h1>
           <p className="text-[15px] text-[var(--color-muted)]">
-            Claude を誰でも、5 分で。
+            あなた専属のAIチームを、5分で。
           </p>
           <p className="text-[12.5px] text-[var(--color-muted)] mt-1">
-            ローカルファイルを開いて、会話しながら開発・編集ができるデスクトップアプリ
+            Claude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。完全無料。
           </p>
         </div>
 

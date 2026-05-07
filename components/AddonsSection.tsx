@@ -53,6 +53,7 @@ import {
   type UniCategory,
 } from "@/lib/addons";
 import { describePlugin, type Locale } from "@/lib/plugin-descriptions";
+import { PluginAvatar } from "./PluginAvatar";
 
 interface Props {
   workspace?: string | null;
@@ -526,7 +527,12 @@ function InstalledRow({
       : { description: item.description ?? "" };
   return (
     <li className="flex items-start justify-between gap-3 px-3 py-2 rounded-md border border-[var(--color-border)] bg-white">
-      <CategoryIcon category={item.category ?? item.kind} name={item.name} />
+      <PluginAvatar
+        name={item.name}
+        category={item.category ?? item.kind}
+        namespace={item.namespace}
+        author={item.author}
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold text-[13px] truncate">{item.name}</span>
@@ -741,9 +747,11 @@ function MarketplaceCatalogPanel({
                     key={it.id}
                     className="flex items-start justify-between gap-2 px-3 py-2 rounded-md border border-[var(--color-border)] bg-white"
                   >
-                    <CategoryIcon
-                      category={it.category}
+                    <PluginAvatar
                       name={it.name}
+                      category={it.category}
+                      namespace={it.namespace}
+                      author={it.author}
                       size={28}
                     />
                     <div className="min-w-0 flex-1">

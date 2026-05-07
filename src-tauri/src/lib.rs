@@ -869,6 +869,72 @@ fn list_claude_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
     Ok(out)
 }
 
+/// GitHub のユーザー/組織アバターを `~/.claude/plugins/cache/avatars/<key>.png` に保存し、
+/// data URL を返す。
+///
+/// 戦略:
+///   1. キャッシュにあり、かつ 7 日以内ならそれを使う
+///   2. なければ `https://github.com/<user>.png?size=128` を取りに行く
+///   3. 取れなかった場合は `Ok(None)` を返し、UI 側でフォールバック表示
+///
+/// ネットワーク失敗時はログに出すだけで Err を投げない（UX を阻害しない）。
+#[tauri::command]
+async fn fetch_github_avatar(user: String) -> Result<Option<String>, String> {
+    use base64::Engine;
+    if user.trim().is_empty() {
+        return Ok(None);
+    }
+    let safe_user: String = user
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if safe_user.is_empty() {
+        return Ok(None);
+    }
+    let home = home_dir()?;
+    let cache_dir = home.join(".claude").join("plugins").join("cache").join("avatars");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let cache_path = cache_dir.join(format!("{}.png", safe_user));
+    let max_age_secs: u64 = 7 * 24 * 60 * 60;
+    let cache_fresh = std::fs::metadata(&cache_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs() < max_age_secs)
+        .unwrap_or(false);
+
+    if !cache_fresh {
+        let url = format!("https://github.com/{}.png?size=128", safe_user);
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .user_agent("unicrew-avatar-fetcher/0.1")
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = match client.get(&url).send().await {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
+        };
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(_) => return Ok(None),
+        };
+        if bytes.len() < 100 {
+            return Ok(None);
+        }
+        let _ = std::fs::write(&cache_path, &bytes);
+    }
+
+    let bytes = match std::fs::read(&cache_path) {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:image/png;base64,{}", b64)))
+}
+
 /// `<marketplace>/.claude-plugin/marketplace.json` または `<marketplace>/marketplace.json`
 /// から plugins[] を抽出し、richer メタデータ付き AddonItem を返す。
 fn parse_marketplace_json(
@@ -1891,6 +1957,7 @@ pub fn run() {
             add_claude_marketplace,
             list_claude_marketplace_catalog,
             list_codex_marketplace_catalog,
+            fetch_github_avatar,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
