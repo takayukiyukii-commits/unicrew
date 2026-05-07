@@ -51,7 +51,7 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
       <div className="max-w-3xl mx-auto px-8 py-16">
         <div className="text-center mb-10">
           <img
-            src="/brand/logo-mark.png"
+            src="/brand/logo-mark-transparent.png"
             alt="UNICREW"
             className="mx-auto w-24 h-24 mb-5 select-none"
             draggable={false}
