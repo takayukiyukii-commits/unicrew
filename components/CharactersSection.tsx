@@ -1,0 +1,179 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Plus, Pencil, Copy, Sparkles, Users } from "lucide-react";
+import {
+  TEMPLATE_CHARACTERS,
+  cloneFromTemplate,
+  loadUserCharacters,
+  saveUserCharacters,
+  blankCharacter,
+} from "@/lib/characters";
+import { getPersonality } from "@/lib/personalities";
+import type { Character } from "@/lib/types";
+import { CharacterAvatar } from "./CharacterAvatar";
+import { CharacterEditModal } from "./CharacterEditModal";
+import { deleteAvatar } from "@/lib/tauri";
+
+interface Props {
+  onCharactersChanged?: () => void;
+}
+
+export function CharactersSection({ onCharactersChanged }: Props) {
+  const [userChars, setUserChars] = useState<Character[]>([]);
+  const [editing, setEditing] = useState<Character | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const reload = () => setUserChars(loadUserCharacters());
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  const persistAndNotify = (next: Character[]) => {
+    saveUserCharacters(next);
+    setUserChars(next);
+    onCharactersChanged?.();
+  };
+
+  const onCreateBlank = () => {
+    setEditing(null);
+    setEditorOpen(true);
+  };
+
+  const onCloneTemplate = (tmpl: Character) => {
+    setEditing(cloneFromTemplate(tmpl));
+    setEditorOpen(true);
+  };
+
+  const onEditExisting = (c: Character) => {
+    setEditing(c);
+    setEditorOpen(true);
+  };
+
+  const onSave = (c: Character) => {
+    const exists = userChars.find((x) => x.id === c.id);
+    const next = exists
+      ? userChars.map((x) => (x.id === c.id ? c : x))
+      : [...userChars, c];
+    persistAndNotify(next);
+    setEditorOpen(false);
+  };
+
+  const onDelete = async (c: Character) => {
+    if (c.avatarPath) {
+      await deleteAvatar(c.avatarPath).catch(() => {});
+    }
+    persistAndNotify(userChars.filter((x) => x.id !== c.id));
+    setEditorOpen(false);
+  };
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-sm flex items-center gap-1.5">
+          <Users size={15} />
+          キャラクター
+        </h3>
+        <button
+          onClick={onCreateBlank}
+          className="flex items-center gap-1 px-2.5 py-1 text-[11.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
+        >
+          <Plus size={12} />
+          新規作成
+        </button>
+      </div>
+
+      <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
+        自分専用のキャラクターを作って、用途別に呼び出せます。名前・アバター・口調・専門を自由にカスタマイズできます。
+      </p>
+
+      {/* User characters */}
+      {userChars.length > 0 && (
+        <div className="space-y-1.5 mb-4">
+          {userChars.map((c) => {
+            const p = getPersonality(c.personalityId ?? "");
+            return (
+              <div
+                key={c.id}
+                className="flex items-center gap-3 border border-[var(--color-border)] rounded-md px-3 py-2 bg-white hover:shadow-sm transition"
+              >
+                <CharacterAvatar character={c} size={36} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-[13px] truncate">
+                      {c.name || "（名前未設定）"}
+                    </span>
+                    {c.roleTag && (
+                      <span className="text-[10.5px] text-[var(--color-muted)] truncate">
+                        {c.roleTag}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[var(--color-muted)] truncate">
+                    {p ? `${p.emoji} ${p.label}` : "口調未設定"} ・{" "}
+                    {c.description || "説明なし"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onEditExisting(c)}
+                  className="px-2 py-1 text-[11px] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface)] flex items-center gap-1"
+                >
+                  <Pencil size={11} />
+                  編集
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {userChars.length === 0 && (
+        <div className="border border-dashed border-[var(--color-border)] rounded-md p-4 text-center text-[12px] text-[var(--color-muted)] mb-4">
+          まだキャラクターがありません。
+          <br />
+          下のテンプレートから作るか、「新規作成」してください。
+        </div>
+      )}
+
+      {/* Templates */}
+      <div>
+        <div className="text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide flex items-center gap-1">
+          <Sparkles size={11} />
+          テンプレートから作る
+        </div>
+        <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
+          テンプレを選んで複製→自分用に名前・アバター・口調を編集します。
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {TEMPLATE_CHARACTERS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onCloneTemplate(t)}
+              className="flex items-center gap-2 border border-[var(--color-border)] rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface)] transition"
+            >
+              <CharacterAvatar character={t} size={28} />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-[12px] truncate">
+                  {t.name}
+                </div>
+                <div className="text-[10.5px] text-[var(--color-muted)] truncate">
+                  {t.roleTag}
+                </div>
+              </div>
+              <Copy size={12} className="text-[var(--color-muted)]" />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <CharacterEditModal
+        open={editorOpen}
+        initial={editing}
+        onClose={() => setEditorOpen(false)}
+        onSave={onSave}
+        onDelete={onDelete}
+      />
+    </section>
+  );
+}

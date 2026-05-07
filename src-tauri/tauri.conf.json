@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "UNICREW",
+  "version": "0.1.0",
+  "identifier": "jp.unilinks.unicrew",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:tauri",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "UNICREW",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "center": true,
+        "theme": "Light"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "あなた専属のAIチームを、5分で。",
+    "longDescription": "UNICREW は Claude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップアプリです。複数 AI を同時に並べて議論させたり、キャラクター別の役割で頼み分けたりできます。",
+    "copyright": "© 2026 ZUBOLAND / uniLinks",
+    "publisher": "ZUBOLAND",
+    "resources": [
+      "../sidecar/agent.mjs",
+      "../sidecar/package.json"
+    ],
+    "windows": {
+      "wix": {
+        "language": "ja-JP"
+      }
+    }
+  }
+}

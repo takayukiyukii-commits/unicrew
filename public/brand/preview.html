@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>UNICREW ブランド画像 (gpt-image-2)</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", sans-serif;
+        background: #f6f7f9;
+        color: #1f2937;
+        margin: 0;
+        padding: 40px;
+      }
+      h1 {
+        margin: 0 0 8px;
+      }
+      .sub {
+        color: #6b7280;
+        margin: 0 0 28px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+      .card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      }
+      .card h3 {
+        margin: 0;
+        padding: 12px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .card h3 small {
+        font-weight: 400;
+        color: #6b7280;
+        font-size: 11px;
+        margin-left: auto;
+      }
+      .stage {
+        background:
+          conic-gradient(#fff 25%, #f3f4f6 0 50%, #fff 0 75%, #f3f4f6 0) 0 0 / 16px 16px;
+        padding: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 240px;
+      }
+      .stage.dark {
+        background:
+          conic-gradient(#1e293b 25%, #0f172a 0 50%, #1e293b 0 75%, #0f172a 0) 0 0 /
+          16px 16px;
+      }
+      img {
+        max-width: 100%;
+        max-height: 320px;
+        height: auto;
+      }
+      .small-row {
+        display: flex;
+        gap: 16px;
+        align-items: end;
+        padding: 16px;
+        flex-wrap: wrap;
+      }
+      .small-row figure {
+        margin: 0;
+        text-align: center;
+      }
+      .small-row img {
+        display: block;
+        margin: 0 auto;
+      }
+      .small-row figcaption {
+        font-size: 10.5px;
+        color: #6b7280;
+        margin-top: 4px;
+      }
+      .full {
+        grid-column: 1 / -1;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>UNICREW ブランド画像</h1>
+    <p class="sub">
+      gpt-image-2 / OpenAI で生成 ・ public/brand/
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>
+          ✈ app-icon.png
+          <small>1024×1024 / macOS・Windows アプリアイコン</small>
+        </h3>
+        <div class="stage">
+          <img src="app-icon.png" alt="app-icon" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          🔷 logo-mark.png
+          <small>1024×1024 / シンボル単体・透過</small>
+        </h3>
+        <div class="stage">
+          <img src="logo-mark.png" alt="logo-mark" />
+        </div>
+      </div>
+
+      <div class="card full">
+        <h3>
+          🅰 logo-wordmark.png
+          <small>1536×1024 / シンボル+UNICREW 文字</small>
+        </h3>
+        <div class="stage">
+          <img src="logo-wordmark.png" alt="logo-wordmark" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          🟦 favicon-source.png
+          <small>1024×1024 / 縮小用原本</small>
+        </h3>
+        <div class="small-row">
+          <figure>
+            <img src="favicon-source.png" alt="fav 256" width="256" />
+            <figcaption>256px</figcaption>
+          </figure>
+          <figure>
+            <img src="favicon-source.png" alt="fav 64" width="64" />
+            <figcaption>64px</figcaption>
+          </figure>
+          <figure>
+            <img src="favicon-source.png" alt="fav 32" width="32" />
+            <figcaption>32px</figcaption>
+          </figure>
+          <figure>
+            <img src="favicon-source.png" alt="fav 16" width="16" />
+            <figcaption>16px</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          🌗 ダーク背景チェック
+          <small>logo-mark on dark</small>
+        </h3>
+        <div class="stage dark">
+          <img src="logo-mark.png" alt="logo-mark on dark" />
+        </div>
+      </div>
+
+      <div class="card full">
+        <h3>
+          🖼 og-card.png
+          <small>1536×1024 / SNS共有・OG用</small>
+        </h3>
+        <div class="stage">
+          <img src="og-card.png" alt="og-card" />
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

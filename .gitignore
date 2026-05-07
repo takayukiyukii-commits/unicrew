@@ -1,0 +1,27 @@
+node_modules
+.next
+out
+dist
+build
+
+# Tauri
+src-tauri/target
+src-tauri/Cargo.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Logs
+*.log
+npm-debug.log*
