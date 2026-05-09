@@ -1,0 +1,14 @@
+{
+  "name": "UNICREW Remote",
+  "short_name": "UNICREW",
+  "description": "AIを動かすことに特化したマルチAIデスクトップ「UNICREW」のスマホ用リモコン",
+  "start_url": "/m",
+  "scope": "/m",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "icons": [
+    { "src": "/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

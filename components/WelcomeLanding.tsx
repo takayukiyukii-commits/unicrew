@@ -63,12 +63,20 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
             </span>
           </h1>
           <p className="text-[15px] text-[var(--color-muted)]">
-            あなた専属のAIチームを、5分で。
+            AIを動かすことに、特化したデスクトップ。
           </p>
           <p className="text-[12.5px] text-[var(--color-muted)] mt-1">
-            Claude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。完全無料。
+            Claude / Codex を公式CLI経由で束ねるマルチAIランチャー。サブスクでそのまま動く・完全無料。
           </p>
         </div>
+
+        {/* セットアップウィザード（AIガイドのセリフ） */}
+        <SetupGuide
+          claude={claude}
+          codex={codex}
+          onOpenSettings={onOpenSettings}
+          onCreate={onCreate}
+        />
 
         {/* 接続ステータス */}
         <div className="grid grid-cols-2 gap-3 mb-8">
@@ -138,6 +146,104 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * アイデア8: 5分セットアップウィザード（最小実装）。
+ *
+ * Claude キャラの「セリフ風」ガイドで、現在のCLI状態に応じて次の一歩を提示する。
+ * フルウィザード（多段モーダル）は将来実装。今はセリフ＋CTAボタンの組合せで誘導する。
+ */
+function SetupGuide({
+  claude,
+  codex,
+  onOpenSettings,
+  onCreate,
+}: {
+  claude: Status | null;
+  codex: Status | null;
+  onOpenSettings: () => void;
+  onCreate: () => void;
+}) {
+  if (!claude) return null; // 確認中は表示しない
+
+  const stepIndex = (() => {
+    if (!claude.installed) return 1;
+    if (!claude.logged_in) return 2;
+    return 3;
+  })();
+
+  const message = (() => {
+    if (!claude.installed) {
+      return {
+        title: "ようこそ！まずは Claude Code をインストールしましょう",
+        body: "UNICREW は公式 CLI を使ってAIを動かします。1分で終わるので、設定画面から「Claude Code をインストール」を押してください。",
+        primary: { label: "セットアップを開く", onClick: onOpenSettings },
+      };
+    }
+    if (!claude.logged_in) {
+      return {
+        title: "Claude Code が入りました！次はログインを",
+        body: "Claude Pro / Max のアカウントでログインすると、API キーなしで使えます。設定画面の「ログイン」を押してください。",
+        primary: { label: "ログインに進む", onClick: onOpenSettings },
+      };
+    }
+    if (codex && !codex.logged_in) {
+      return {
+        title: "準備OK！もし Codex も並列で使うなら",
+        body: "Codex CLI を入れてログインすると、Claude と並列で動かして相互レビューや議論モードが使えます（任意）。今すぐ最初の会話を始めても大丈夫です。",
+        primary: { label: "最初の会話を始める", onClick: onCreate },
+      };
+    }
+    return {
+      title: "セットアップ完了！最初の会話を始めましょう",
+      body: "ノーマル Claude / Codex で素のCLIをそのまま動かせます。どんな依頼でもいいので、まず一言投げてみてください。",
+      primary: { label: "最初の会話を始める", onClick: onCreate },
+    };
+  })();
+
+  return (
+    <div className="mb-6 rounded-2xl border border-[var(--color-accent)]/30 bg-gradient-to-br from-sky-50 via-white to-amber-50/50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 w-10 h-10 rounded-full bg-white border border-[var(--color-accent)]/40 flex items-center justify-center text-lg shadow-sm">
+          🤖
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-[11px] font-semibold text-[var(--color-accent)]">
+              UNICREW セットアップ
+            </span>
+            <span className="text-[10.5px] text-[var(--color-muted)] font-mono">
+              Step {stepIndex}/3
+            </span>
+          </div>
+          <div className="font-bold text-[14px] text-[var(--color-text)] mb-1">
+            {message.title}
+          </div>
+          <div className="text-[12px] text-[var(--color-muted)] leading-relaxed mb-2">
+            {message.body}
+          </div>
+          <button
+            type="button"
+            onClick={message.primary.onClick}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-white text-[12px] font-semibold hover:opacity-90"
+          >
+            {message.primary.label}
+          </button>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-1">
+        {[1, 2, 3].map((s) => (
+          <div
+            key={s}
+            className={`flex-1 h-1 rounded ${
+              s <= stepIndex ? "bg-[var(--color-accent)]" : "bg-gray-200"
+            }`}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 

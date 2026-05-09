@@ -11,20 +11,32 @@ import {
   X,
   MessageCircle,
 } from "lucide-react";
-import type { Block, Message, Provider, Thread } from "@/lib/types";
-import { characterFor, getCharacter } from "@/lib/characters";
+import type {
+  Block,
+  Message,
+  ParticipantSlot,
+  Provider,
+  Thread,
+} from "@/lib/types";
+import { PROVIDER_BADGES, PROVIDER_COLORS, PROVIDER_LABELS } from "@/lib/types";
+import { getCharacter } from "@/lib/characters";
+import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { ActivityPanel } from "./ActivityPanel";
 import { useShowActivity } from "./ActivityContext";
+import { SlashCommandPicker } from "./SlashCommandPicker";
+import type { SlashCommandDef } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface ActiveDraftLite {
   threadId: string;
+  /** どのスロットの draft か。N-way並列で同じproviderが複数いるケースに対応。 */
+  slotId: string;
   provider: Provider;
   blocks: Block[];
   startedAt: number;
@@ -38,7 +50,8 @@ interface ActiveDraftLite {
 interface Props {
   thread: Thread | null;
   isStreaming: boolean;
-  threadDrafts: Record<Provider, ActiveDraftLite | null>;
+  /** スロットID → draft。単独モード時は単一エントリ（"single"）、並列時はN個。 */
+  threadDrafts: Record<string, ActiveDraftLite | null>;
   onSend: (text: string) => void;
   onAbort: () => void;
   /** "single" = 単一表示 / "primary" = 並列の左 / "split" = 並列の右 */
@@ -51,12 +64,14 @@ interface Props {
   onContinueConference?: () => void;
   /** メッセージ内のコマンドを「UNICREWで実行」する。AI に Bash 実行を依頼する。 */
   onExecuteCommand?: (command: string, lang: string) => void;
+  /** アイデア10: エラーメッセージ用の「AIに助けてもらう」ボタン押下時のハンドラ。 */
+  onSosForError?: (errorText: string) => void;
+  /**
+   * メッセージ末尾に差し込むカード。フィードバックアンケート等の単発UIをここから注入する。
+   * 主ペインだけに渡し、split側には出さない（重複表示防止）。
+   */
+  feedbackSlot?: React.ReactNode;
 }
-
-const PROVIDER_BADGE: Record<Provider, { emoji: string; label: string; color: string }> = {
-  claude: { emoji: "🟠", label: "Claude", color: "#dd6b20" },
-  codex: { emoji: "🟢", label: "Codex", color: "#10a37f" },
-};
 
 export function ChatPane({
   thread,
@@ -69,16 +84,18 @@ export function ChatPane({
   onCloseSplit,
   onContinueConference,
   onExecuteCommand,
+  onSosForError,
+  feedbackSlot,
 }: Props) {
   const showActivity = useShowActivity();
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  // 単独モードでは characterId そのまま、並列モードでは provider 別に解決。
+  // 参加者リスト（N-way対応）。単独モードでも1要素配列が返る。
+  const slots: ParticipantSlot[] = thread ? effectiveParticipants(thread) : [];
+  const isParallel = slots.length >= 2;
   const character = thread ? getCharacter(thread.characterId) : undefined;
-  const claudeCharacter = thread ? characterFor(thread, "claude") : undefined;
-  const codexCharacter = thread ? characterFor(thread, "codex") : undefined;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -106,6 +123,30 @@ export function ChatPane({
     onSend(value);
     setInput("");
   };
+
+  // スラッシュコマンドピッカーから選ばれたら、textarea にコマンド文字列を反映する。
+  // 末尾スペース付き（引数を要するもの）はそのまま挿入し、ユーザーが続きを書ける状態にする。
+  // 既に入力中ならスペース区切りで追記、空ならそのまま設定。
+  const handlePickCommand = (cmd: SlashCommandDef) => {
+    setInput((prev) => {
+      const trimmed = prev.trimEnd();
+      if (trimmed.length === 0) return cmd.command;
+      return `${trimmed} ${cmd.command}`;
+    });
+    setTimeout(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }, 0);
+  };
+
+  // 並列モード時は両プロバイダのコマンドを表示する
+  const activeProviders: Provider[] = thread?.splitMode
+    ? ["claude", "codex"]
+    : ["claude"];
 
   const isSplitPane = paneRole === "split";
   const paneBorderClass = isSplitPane
@@ -177,10 +218,14 @@ export function ChatPane({
               </span>
             </span>
           )}
-          {thread.splitMode && (
+          {isParallel && (
             <span className="flex items-center gap-1 ml-auto px-1.5 py-0.5 bg-[var(--color-accent-soft)] text-[var(--color-accent)] rounded font-medium">
               <Split size={11} />
-              並列モード（🟠 Claude × 🟢 Codex）
+              並列モード（{slots.length}-way：
+              {slots
+                .map((s) => `${PROVIDER_BADGES[s.provider]} ${PROVIDER_LABELS[s.provider]}`)
+                .join(" × ")}
+              ）
             </span>
           )}
           {thread.conferenceMode && (
@@ -205,11 +250,10 @@ export function ChatPane({
           </div>
         )}
 
-        {thread.splitMode ? (
-          <SplitView
+        {isParallel ? (
+          <NwayView
             messages={thread.messages}
-            claudeCharacter={claudeCharacter}
-            codexCharacter={codexCharacter}
+            slots={slots}
             drafts={threadDrafts}
             conferenceMode={thread.conferenceMode}
             onExecuteCommand={onExecuteCommand}
@@ -219,40 +263,45 @@ export function ChatPane({
             messages={thread.messages}
             character={character}
             draft={
-              threadDrafts.claude ?? threadDrafts.codex ?? null
+              // 単独モード時はキー何でも先頭1個を採用
+              Object.values(threadDrafts).find((d) => d) ?? null
             }
             onExecuteCommand={onExecuteCommand}
+            onSosForError={onSosForError}
           />
         )}
+        {feedbackSlot}
       </div>
 
       {showActivity && (
         <div className="shrink-0">
           <ActivityPanel
             messages={thread.messages}
-            draftBlocks={[
-              ...(threadDrafts.claude?.blocks ?? []),
-              ...(threadDrafts.codex?.blocks ?? []),
-            ]}
+            draftBlocks={Object.values(threadDrafts).flatMap((d) =>
+              d ? d.blocks : [],
+            )}
           />
         </div>
       )}
 
-      {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示 */}
+      {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示。N-way対応。 */}
       {(() => {
         if (!onContinueConference) return null;
-        if (!thread.conferenceMode || !thread.splitMode) return null;
+        if (!thread.conferenceMode || !isParallel) return null;
         if (isStreaming) return null;
-        const lastTwo = thread.messages
-          .filter((m) => m.role === "assistant")
-          .slice(-2);
-        if (lastTwo.length !== 2) return null;
-        if (lastTwo.some((m) => m.conferenceRound === undefined)) return null;
-        if (
-          lastTwo[0].content.trim().startsWith("[合意]") ||
-          lastTwo[1].content.trim().startsWith("[合意]")
-        )
-          return null;
+        const participantCount = slots.filter(
+          (s) => s.role !== "moderator",
+        ).length;
+        // 末尾から participantCount 件の assistant メッセージを取り、
+        // 全員が同じラウンドで揃っているか + [合意] が出ていないかチェック。
+        const lastN = thread.messages
+          .filter((m) => m.role === "assistant" && m.participantRole !== "moderator")
+          .slice(-participantCount);
+        if (lastN.length !== participantCount) return null;
+        if (lastN.some((m) => m.conferenceRound === undefined)) return null;
+        const round = lastN[0].conferenceRound;
+        if (lastN.some((m) => m.conferenceRound !== round)) return null;
+        if (lastN.some((m) => m.content.trim().startsWith("[合意]"))) return null;
         return (
           <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-amber-50/60 flex items-center gap-2 text-[12px]">
             <MessageCircle size={13} className="text-amber-600 shrink-0" />
@@ -292,6 +341,11 @@ export function ChatPane({
               setTimeout(() => textareaRef.current?.focus(), 0);
             }}
           />
+          <SlashCommandPicker
+            activeProviders={activeProviders}
+            onPick={handlePickCommand}
+            disabled={isStreaming}
+          />
           {isStreaming ? (
             <button
               onClick={onAbort}
@@ -330,11 +384,13 @@ function SingleView({
   character,
   draft,
   onExecuteCommand,
+  onSosForError,
 }: {
   messages: Message[];
   character: ReturnType<typeof getCharacter>;
   draft: ActiveDraftLite | null;
   onExecuteCommand?: (command: string, lang: string) => void;
+  onSosForError?: (errorText: string) => void;
 }) {
   return (
     <>
@@ -344,6 +400,7 @@ function SingleView({
           message={m}
           character={character}
           onExecute={onExecuteCommand}
+          onSosForError={onSosForError}
         />
       ))}
       {draft && <DraftBubble draft={draft} character={character} />}
@@ -351,12 +408,13 @@ function SingleView({
   );
 }
 
-// ----- Split view (Claude × Codex 横並び) -----
+// ----- N-way view (参加者2人以上を横並び表示) -----
 
+/** 同じラウンド内の各参加者の応答をまとめる構造。 */
 interface RoundData {
   round: number;
-  claude: Message | null;
-  codex: Message | null;
+  /** slotId → Message。moderator も含めて格納（表示時にフィルタ可能）。 */
+  bySlot: Map<string, Message>;
 }
 interface RoundsGroup {
   kind: "rounds";
@@ -368,7 +426,25 @@ interface UserGroup {
 }
 type Group = UserGroup | RoundsGroup;
 
-function groupMessagesForSplit(messages: Message[]): Group[] {
+/**
+ * N-way対応のラウンド集約。
+ *
+ * provider と participantSlotId の両方で slot を引く（後方互換）。
+ * - participantSlotId があればそれを使う
+ * - 無ければ provider 名を slotId として扱う（旧2way構造のメッセージ）
+ */
+function resolveSlotId(m: Message, slots: ParticipantSlot[]): string {
+  if (m.participantSlotId) return m.participantSlotId;
+  if (!m.provider) return slots[0]?.id ?? "single";
+  // 同じproviderが複数いる場合は先頭を採用（旧データの近似）
+  const found = slots.find((s) => s.provider === m.provider);
+  return found?.id ?? m.provider;
+}
+
+function groupMessagesForNway(
+  messages: Message[],
+  slots: ParticipantSlot[],
+): Group[] {
   const groups: Group[] = [];
   let pending: Map<number, RoundData> = new Map();
   const flushPending = () => {
@@ -387,9 +463,9 @@ function groupMessagesForSplit(messages: Message[]): Group[] {
     } else {
       const round = m.conferenceRound ?? 0;
       const existing =
-        pending.get(round) ?? { round, claude: null, codex: null };
-      if (m.provider === "codex") existing.codex = m;
-      else existing.claude = m;
+        pending.get(round) ?? { round, bySlot: new Map<string, Message>() };
+      const slotId = resolveSlotId(m, slots);
+      existing.bySlot.set(slotId, m);
       pending.set(round, existing);
     }
   }
@@ -397,36 +473,36 @@ function groupMessagesForSplit(messages: Message[]): Group[] {
   return groups;
 }
 
-function SplitView({
+function NwayView({
   messages,
-  claudeCharacter,
-  codexCharacter,
+  slots,
   drafts,
   conferenceMode,
   onExecuteCommand,
 }: {
   messages: Message[];
-  claudeCharacter: ReturnType<typeof getCharacter>;
-  codexCharacter: ReturnType<typeof getCharacter>;
-  drafts: Record<Provider, ActiveDraftLite | null>;
+  slots: ParticipantSlot[];
+  drafts: Record<string, ActiveDraftLite | null>;
   conferenceMode: boolean;
   onExecuteCommand?: (command: string, lang: string) => void;
 }) {
-  const groups = groupMessagesForSplit(messages);
-  const hasDrafts = !!(drafts.claude || drafts.codex);
+  const groups = groupMessagesForNway(messages, slots);
+  const hasDrafts = Object.values(drafts).some((d) => d != null);
   const lastGroup = groups[groups.length - 1];
+  const slotsForView = slots.filter((s) => s.role !== "moderator");
+
+  // moderator (中立審判) の発言は通常列ではなく、ラウンド下部に独立して表示する。
+  const moderatorSlotId = slots.find((s) => s.role === "moderator")?.id;
 
   return (
     <>
       {groups.map((g, gi) => {
         if (g.kind === "user") {
-          // user メッセージはどちらの provider のキャラでも表示は同じ（"あなた"）。
-          // 念のため Claude 側を渡しておく。
           return (
             <MessageItem
               key={g.message.id}
               message={g.message}
-              character={claudeCharacter}
+              character={getCharacter(slotsForView[0]?.characterId ?? "")}
               onExecute={onExecuteCommand}
             />
           );
@@ -437,21 +513,15 @@ function SplitView({
             {g.rounds.map((r, ri) => {
               const isLastRound =
                 isLastGroup && ri === g.rounds.length - 1;
-              const claudeDraft =
-                isLastRound && drafts.claude && !r.claude ? drafts.claude : null;
-              const codexDraft =
-                isLastRound && drafts.codex && !r.codex ? drafts.codex : null;
               return (
-                <SplitResponsesRow
+                <NwayResponsesRow
                   key={`r-${gi}-${ri}`}
-                  claudeCharacter={claudeCharacter}
-                  codexCharacter={codexCharacter}
+                  slots={slotsForView}
                   round={r.round}
                   showRoundLabel={conferenceMode}
-                  claudeMsg={r.claude}
-                  codexMsg={r.codex}
-                  claudeDraft={claudeDraft}
-                  codexDraft={codexDraft}
+                  bySlot={r.bySlot}
+                  drafts={isLastRound ? drafts : {}}
+                  moderatorSlotId={moderatorSlotId}
                 />
               );
             })}
@@ -459,40 +529,51 @@ function SplitView({
         );
       })}
       {hasDrafts && (!lastGroup || lastGroup.kind === "user") && (
-        <SplitResponsesRow
-          claudeCharacter={claudeCharacter}
-          codexCharacter={codexCharacter}
+        <NwayResponsesRow
+          slots={slotsForView}
           round={0}
           showRoundLabel={conferenceMode}
-          claudeMsg={null}
-          codexMsg={null}
-          claudeDraft={drafts.claude}
-          codexDraft={drafts.codex}
+          bySlot={new Map()}
+          drafts={drafts}
+          moderatorSlotId={moderatorSlotId}
         />
       )}
     </>
   );
 }
 
-function SplitResponsesRow({
-  claudeCharacter,
-  codexCharacter,
+/** Tailwindのgrid-cols-{N}は動的生成だとパージされるため、固定値で持つ。 */
+const GRID_COLS_BY_N: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+  5: "grid-cols-5",
+  6: "grid-cols-6",
+};
+
+function NwayResponsesRow({
+  slots,
   round,
   showRoundLabel,
-  claudeMsg,
-  codexMsg,
-  claudeDraft,
-  codexDraft,
+  bySlot,
+  drafts,
+  moderatorSlotId,
 }: {
-  claudeCharacter: ReturnType<typeof getCharacter>;
-  codexCharacter: ReturnType<typeof getCharacter>;
+  slots: ParticipantSlot[];
   round: number;
   showRoundLabel: boolean;
-  claudeMsg: Message | null;
-  codexMsg: Message | null;
-  claudeDraft: ActiveDraftLite | null;
-  codexDraft: ActiveDraftLite | null;
+  bySlot: Map<string, Message>;
+  drafts: Record<string, ActiveDraftLite | null>;
+  moderatorSlotId?: string;
 }) {
+  const cols = Math.min(Math.max(slots.length, 1), 6);
+  const moderatorMsg = moderatorSlotId
+    ? bySlot.get(moderatorSlotId)
+    : undefined;
+  const moderatorDraft = moderatorSlotId
+    ? drafts[moderatorSlotId] ?? null
+    : null;
   return (
     <div className="border-b border-[var(--color-border)]">
       {showRoundLabel && (
@@ -502,49 +583,51 @@ function SplitResponsesRow({
             : `ラウンド ${round + 1}：相互レビュー`}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-0">
-        <ProviderColumn
-          provider="claude"
-          character={claudeCharacter}
-          message={claudeMsg}
-          draft={claudeDraft}
-        />
-        <ProviderColumn
-          provider="codex"
-          character={codexCharacter}
-          message={codexMsg}
-          draft={codexDraft}
-          leftBorder
-        />
+      <div className={`grid ${GRID_COLS_BY_N[cols] ?? "grid-cols-2"} gap-0`}>
+        {slots.map((slot, i) => (
+          <SlotColumn
+            key={slot.id}
+            slot={slot}
+            character={getCharacter(slot.characterId)}
+            message={bySlot.get(slot.id) ?? null}
+            draft={drafts[slot.id] ?? null}
+            leftBorder={i > 0}
+          />
+        ))}
       </div>
+      {(moderatorMsg || moderatorDraft) && (
+        <ModeratorPanel message={moderatorMsg ?? null} draft={moderatorDraft} />
+      )}
     </div>
   );
 }
 
-function ProviderColumn({
-  provider,
+function SlotColumn({
+  slot,
   character,
   message,
   draft,
   leftBorder = false,
 }: {
-  provider: Provider;
+  slot: ParticipantSlot;
   character: ReturnType<typeof getCharacter>;
   message: Message | null;
   draft: ActiveDraftLite | null;
   leftBorder?: boolean;
 }) {
-  const badge = PROVIDER_BADGE[provider];
+  const color = PROVIDER_COLORS[slot.provider];
+  const badge = PROVIDER_BADGES[slot.provider];
+  const label = PROVIDER_LABELS[slot.provider];
   return (
     <div
       className={`min-w-0 ${leftBorder ? "border-l border-[var(--color-border)]" : ""}`}
     >
-      <div className="px-4 py-1.5 flex items-center gap-2 text-[11px] font-medium bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] sticky top-0">
-        <span style={{ color: badge.color }} className="shrink-0">
-          {badge.emoji}
+      <div className="px-3 py-1.5 flex items-center gap-2 text-[11px] font-medium bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] sticky top-0">
+        <span style={{ color }} className="shrink-0">
+          {badge}
         </span>
-        <span style={{ color: badge.color }} className="shrink-0">
-          {badge.label}
+        <span style={{ color }} className="shrink-0">
+          {label}
         </span>
         {character && (
           <>
@@ -573,6 +656,281 @@ function ProviderColumn({
       </div>
     </div>
   );
+}
+
+/**
+ * 中立審判（moderator）のラウンド総括パネル。
+ *
+ * Phase 2機能：JSONで返ってきた評価を整形表示する。
+ * - 通常ラウンド: 合意度・残論点・推奨アクション
+ * - 議論終了時: 上記＋議事録（decisions / tasks / parking）→ コピー/ダウンロード可能
+ */
+function ModeratorPanel({
+  message,
+  draft,
+}: {
+  message: Message | null;
+  draft: ActiveDraftLite | null;
+}) {
+  const text =
+    message?.content ??
+    draft?.blocks
+      ?.filter((b) => b.kind === "text")
+      .map((b) => (b.kind === "text" ? b.text : ""))
+      .join("") ??
+    "";
+
+  // JSONで返ってきていれば整形表示、テキストならそのまま
+  let parsed: ModeratorJudgement | null = null;
+  try {
+    const jsonStart = text.indexOf("{");
+    const jsonEnd = text.lastIndexOf("}");
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      const slice = text.slice(jsonStart, jsonEnd + 1);
+      parsed = JSON.parse(slice);
+    }
+  } catch {
+    parsed = null;
+  }
+
+  const hasMinutes =
+    parsed?.minutes &&
+    ((parsed.minutes.decisions?.length ?? 0) > 0 ||
+      (parsed.minutes.tasks?.length ?? 0) > 0 ||
+      (parsed.minutes.parking?.length ?? 0) > 0);
+
+  return (
+    <div className="border-t border-amber-200 bg-amber-50/50 px-4 py-2.5 text-[12.5px]">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 mb-1.5">
+        <MessageCircle size={11} />
+        {hasMinutes ? "議論クロージング・議事録" : "中立審判の総括"}
+        {draft && <StreamingStatus draft={draft} variant="row" />}
+        {parsed && hasMinutes && message && (
+          <MinutesActions parsed={parsed} createdAt={message.createdAt} />
+        )}
+      </div>
+      {parsed ? (
+        <div className="space-y-1.5 text-amber-950">
+          {typeof parsed.agreementScore === "number" && (
+            <div>
+              <span className="text-amber-700 font-semibold">合意度: </span>
+              <span className="font-mono">{parsed.agreementScore}/100</span>
+            </div>
+          )}
+          {parsed.openIssues && parsed.openIssues.length > 0 && (
+            <div>
+              <span className="text-amber-700 font-semibold">残論点: </span>
+              <ul className="list-disc pl-5 mt-0.5">
+                {parsed.openIssues.map((issue, i) => (
+                  <li key={i}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {parsed.recommendedActions && parsed.recommendedActions.length > 0 && (
+            <div>
+              <span className="text-amber-700 font-semibold">推奨アクション: </span>
+              <ul className="list-disc pl-5 mt-0.5">
+                {parsed.recommendedActions.map((act, i) => (
+                  <li key={i}>{act}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {parsed.summary && (
+            <div className="mt-1 text-[11.5px] text-amber-900/80 italic">
+              {parsed.summary}
+            </div>
+          )}
+          {hasMinutes && parsed.minutes && (
+            <MinutesView minutes={parsed.minutes} />
+          )}
+        </div>
+      ) : (
+        <div className="md-body text-[12.5px] leading-relaxed text-amber-950">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text || "…"}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MinutesView({ minutes }: { minutes: ModeratorMinutes }) {
+  return (
+    <div className="mt-2 pt-2 border-t border-amber-200/70 space-y-2">
+      {minutes.decisions && minutes.decisions.length > 0 && (
+        <MinutesSection title="✅ 決定事項" items={minutes.decisions} />
+      )}
+      {minutes.tasks && minutes.tasks.length > 0 && (
+        <MinutesSection title="📋 タスク" items={minutes.tasks} />
+      )}
+      {minutes.parking && minutes.parking.length > 0 && (
+        <MinutesSection title="🅿️ 保留事項" items={minutes.parking} />
+      )}
+    </div>
+  );
+}
+
+function MinutesSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: string[];
+}) {
+  return (
+    <div>
+      <div className="text-amber-700 font-semibold text-[11.5px]">{title}</div>
+      <ul className="list-disc pl-5 mt-0.5 space-y-0.5">
+        {items.map((it, i) => (
+          <li key={i}>{it}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * 議事録のコピー/ダウンロード操作。
+ * - クリップボードに Markdown でコピー
+ * - .md ファイルとしてブラウザダウンロード（OS標準保存ダイアログ経由）
+ */
+function MinutesActions({
+  parsed,
+  createdAt,
+}: {
+  parsed: ModeratorJudgement;
+  createdAt: number;
+}) {
+  const buildMarkdown = (): string => {
+    const date = new Date(createdAt);
+    const ts = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(date.getDate()).padStart(2, "0")} ${String(
+      date.getHours(),
+    ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    const lines: string[] = [];
+    lines.push(`# 議事録（UNICREW）`);
+    lines.push(``);
+    lines.push(`- 作成日時: ${ts}`);
+    if (typeof parsed.agreementScore === "number") {
+      lines.push(`- 最終合意度: ${parsed.agreementScore}/100`);
+    }
+    lines.push(``);
+    if (parsed.summary) {
+      lines.push(`## 総括`);
+      lines.push(``);
+      lines.push(parsed.summary);
+      lines.push(``);
+    }
+    if (parsed.minutes?.decisions && parsed.minutes.decisions.length > 0) {
+      lines.push(`## 決定事項`);
+      lines.push(``);
+      for (const d of parsed.minutes.decisions) lines.push(`- ${d}`);
+      lines.push(``);
+    }
+    if (parsed.minutes?.tasks && parsed.minutes.tasks.length > 0) {
+      lines.push(`## タスク`);
+      lines.push(``);
+      for (const t of parsed.minutes.tasks) lines.push(`- [ ] ${t}`);
+      lines.push(``);
+    }
+    if (parsed.minutes?.parking && parsed.minutes.parking.length > 0) {
+      lines.push(`## 保留事項`);
+      lines.push(``);
+      for (const p of parsed.minutes.parking) lines.push(`- ${p}`);
+      lines.push(``);
+    }
+    if (parsed.openIssues && parsed.openIssues.length > 0) {
+      lines.push(`## 残論点`);
+      lines.push(``);
+      for (const i of parsed.openIssues) lines.push(`- ${i}`);
+      lines.push(``);
+    }
+    if (
+      parsed.recommendedActions &&
+      parsed.recommendedActions.length > 0
+    ) {
+      lines.push(`## 推奨アクション`);
+      lines.push(``);
+      for (const a of parsed.recommendedActions) lines.push(`- ${a}`);
+      lines.push(``);
+    }
+    return lines.join("\n");
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(buildMarkdown());
+    } catch {
+      // クリップボード権限が無い環境のフォールバック
+      const ta = document.createElement("textarea");
+      ta.value = buildMarkdown();
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  };
+
+  const handleDownload = () => {
+    const md = buildMarkdown();
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const date = new Date(createdAt);
+    const fname = `議事録_${date.getFullYear()}${String(
+      date.getMonth() + 1,
+    ).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}_${String(
+      date.getHours(),
+    ).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}.md`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <span className="ml-auto flex items-center gap-1">
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200"
+        title="議事録をMarkdownでコピー"
+      >
+        コピー
+      </button>
+      <button
+        type="button"
+        onClick={handleDownload}
+        className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-600 text-white hover:opacity-90"
+        title="議事録を.mdファイルでダウンロード"
+      >
+        .md保存
+      </button>
+    </span>
+  );
+}
+
+interface ModeratorJudgement {
+  agreementScore?: number;
+  openIssues?: string[];
+  recommendedActions?: string[];
+  summary?: string;
+  /** 議論終了時のみ存在する議事録ブロック（buildModeratorMinutesPrompt が要求） */
+  minutes?: ModeratorMinutes;
+}
+
+interface ModeratorMinutes {
+  decisions?: string[];
+  tasks?: string[];
+  parking?: string[];
 }
 
 /**

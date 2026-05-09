@@ -31,16 +31,20 @@ import clsx from "clsx";
 import {
   addClaudeMarketplace,
   addClaudeMcp,
+  addCodexMcp,
   installClaudePlugin,
   listClaudeMarketplaceCatalog,
   listClaudeMcp,
+  listCodexMcp,
   listClaudePlugins,
   listClaudeSkills,
   listCodexMarketplaceCatalog,
   listCodexPlugins,
   listCodexSkills,
   removeClaudeMcp,
+  removeCodexMcp,
   toggleClaudeMcp,
+  toggleCodexMcp,
   uninstallClaudePlugin,
   type AddonItem,
   type AddonSource,
@@ -67,6 +71,7 @@ type TabId =
   | "claude-mcp"
   | "codex-plugin"
   | "codex-skill"
+  | "codex-mcp"
   | "uni-series";
 
 interface TabDef {
@@ -123,6 +128,15 @@ const TABS: TabDef[] = [
     icon: BookOpen,
     emptyHint: "~/.codex/skills/ にスキルが見つかりません。",
   },
+  {
+    id: "codex-mcp",
+    label: "Codex MCP",
+    source: "codex",
+    kind: "mcp",
+    icon: Blocks,
+    emptyHint:
+      "Codex の MCP サーバーは未登録です。GitHub / Slack 等の外部サービスを Codex から操作したい場合に追加します。",
+  },
   // UNI Series は別構造（Coming Soon カタログ表示）。kind/source は plugin/claude のダミー。
   {
     id: "uni-series",
@@ -146,6 +160,7 @@ export function AddonsSection({
     "claude-mcp": [],
     "codex-plugin": [],
     "codex-skill": [],
+    "codex-mcp": [],
     "uni-series": [],
   });
   const [marketplaceCatalog, setMarketplaceCatalog] = useState<AddonItem[]>([]);
@@ -173,12 +188,13 @@ export function AddonsSection({
     setLoading(true);
     setError(null);
     try {
-      const [cp, cs, cm, xp, xs, catalog, xcatalog] = await Promise.all([
+      const [cp, cs, cm, xp, xs, xm, catalog, xcatalog] = await Promise.all([
         listClaudePlugins().catch(() => []),
         listClaudeSkills(workspace ?? null).catch(() => []),
         listClaudeMcp().catch(() => []),
         listCodexPlugins().catch(() => []),
         listCodexSkills().catch(() => []),
+        listCodexMcp().catch(() => []),
         listClaudeMarketplaceCatalog().catch(() => []),
         listCodexMarketplaceCatalog().catch(() => []),
       ]);
@@ -188,6 +204,7 @@ export function AddonsSection({
         "claude-mcp": cm,
         "codex-plugin": xp,
         "codex-skill": xs,
+        "codex-mcp": xm,
         "uni-series": [],
       });
       setMarketplaceCatalog(catalog);
@@ -216,10 +233,14 @@ export function AddonsSection({
 
   const onToggleMcp = useCallback(
     async (item: AddonItem, nextEnabled: boolean) => {
-      if (item.kind !== "mcp" || item.source !== "claude") return;
+      if (item.kind !== "mcp") return;
       setPendingToggle(item.id);
       try {
-        await toggleClaudeMcp(item.name, nextEnabled);
+        if (item.source === "codex") {
+          await toggleCodexMcp(item.name, nextEnabled);
+        } else {
+          await toggleClaudeMcp(item.name, nextEnabled);
+        }
         await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -250,15 +271,19 @@ export function AddonsSection({
 
   const onUninstallItem = useCallback(
     async (item: AddonItem) => {
-      if (item.source !== "claude") {
-        setError("Codex 側のアンインストールは Phase D で対応予定です");
+      // Codex MCP は対応済（codex mcp remove 経由）。それ以外の Codex（plugin/skill）は Phase D 留保
+      if (item.source === "codex" && item.kind !== "mcp") {
+        setError("Codex プラグイン / スキルの削除は Phase D で対応予定です");
         return;
       }
       setPendingUninstall(item.id);
       setError(null);
       setInfo(null);
       try {
-        if (item.kind === "mcp") {
+        if (item.kind === "mcp" && item.source === "codex") {
+          await removeCodexMcp(item.name);
+          setInfo(`Codex MCP '${item.name}' を削除しました`);
+        } else if (item.kind === "mcp") {
           await removeClaudeMcp(item.name);
           setInfo(`MCP '${item.name}' を削除しました`);
         } else if (item.kind === "plugin") {
@@ -492,6 +517,7 @@ export function AddonsSection({
               onError={setError}
             />
             <CustomMcpForm
+              source={activeTab.source}
               onAdded={(msg) => {
                 setInfo(msg);
                 void reload();
@@ -1062,9 +1088,11 @@ function CustomMarketplaceForm({
 }
 
 function CustomMcpForm({
+  source = "claude",
   onAdded,
   onError,
 }: {
+  source?: AddonSource;
   onAdded: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
@@ -1101,8 +1129,13 @@ function CustomMcpForm({
     }
     setBusy(true);
     try {
-      await addClaudeMcp(req);
-      onAdded(`MCP '${req.name}' を ~/.claude.json に追加しました`);
+      if (source === "codex") {
+        await addCodexMcp(req);
+        onAdded(`MCP '${req.name}' を ~/.codex/config.toml に追加しました`);
+      } else {
+        await addClaudeMcp(req);
+        onAdded(`MCP '${req.name}' を ~/.claude.json に追加しました`);
+      }
       setName("");
       setCommand("");
       setArgs("");

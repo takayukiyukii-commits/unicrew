@@ -1,6 +1,17 @@
 "use client";
 
-import { Plus, Trash2, Settings, FolderOpen, Loader2, Columns2, Puzzle } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Settings,
+  FolderOpen,
+  Loader2,
+  Columns2,
+  Puzzle,
+  Search,
+  X,
+} from "lucide-react";
+import { useState, useMemo } from "react";
 import type { Thread } from "@/lib/types";
 import { getCharacter } from "@/lib/characters";
 import { CharacterAvatar } from "./CharacterAvatar";
@@ -38,7 +49,17 @@ export function Sidebar({
   mainView = "chat",
   onOpenAddons,
 }: Props) {
-  const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
+  /** アイデア11: 全スレッド横断検索（最小実装：In-Memoryでタイトル＋メッセージ全文grep） */
+  const [searchQuery, setSearchQuery] = useState("");
+  const sorted = useMemo(() => {
+    const all = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter((t) => {
+      if (t.title.toLowerCase().includes(q)) return true;
+      return t.messages.some((m) => m.content.toLowerCase().includes(q));
+    });
+  }, [threads, searchQuery]);
   return (
     <aside className="w-64 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col">
       <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
@@ -58,12 +79,37 @@ export function Sidebar({
         新しい会話
       </button>
 
+      {/* アイデア11: 全スレッド横断検索バー */}
+      <div className="mx-3 mt-2 relative">
+        <Search
+          size={11}
+          className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none"
+        />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="全スレッド検索…"
+          className="w-full pl-7 pr-7 py-1.5 text-[12px] border border-[var(--color-border)] rounded-md bg-white outline-none focus:border-[var(--color-accent)]"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
+            aria-label="検索クリア"
+          >
+            <X size={11} />
+          </button>
+        )}
+      </div>
+
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5 unicrew-scroll">
         {sorted.length === 0 && (
           <div className="px-3 py-6 text-xs text-[var(--color-muted)] text-center">
-            会話はまだありません。
-            <br />
-            「新しい会話」から始めましょう。
+            {searchQuery
+              ? "該当するスレッドはありません。"
+              : "会話はまだありません。\n「新しい会話」から始めましょう。"}
           </div>
         )}
         {sorted.map((t) => {

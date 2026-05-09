@@ -51,10 +51,38 @@ export interface Message {
   createdAt: number;
   /** どのプロバイダの応答か。user メッセージや単独モードでは未定義。 */
   provider?: Provider;
+  /**
+   * N-way並列で同じproviderが複数いる場合（Claude×Claude×Codex 等）に
+   * どのスロットの応答かを識別するためのID。`Thread.participants[].id` を指す。
+   * 旧2way構造のスレッドでは未定義（provider で十分判別可能）。
+   */
+  participantSlotId?: string;
+  /** 議論モードでの役割。未指定はparticipant扱い。moderatorは中立審判（Phase 2）。 */
+  participantRole?: ParticipantRole;
   /** 会議モードの何ラウンド目か。0 = 最初の応答、1+ = 議論ラウンド */
   conferenceRound?: number;
   /** トークン消費・所要時間のスナップショット。assistant のみ。 */
   stats?: MessageStats;
+}
+
+export type ParticipantRole = "participant" | "moderator";
+
+/**
+ * N-way並列の参加者スロット。
+ *
+ * 1スレッドに複数置ける（最大4まで現UI想定）。同じプロバイダを複数置いても良い
+ * （例: Claude×Claude×Codex で PM/エンジニア/批評家の3体）。
+ */
+export interface ParticipantSlot {
+  /** スロット識別子。session_id の suffix に使うため英数のみ推奨。 */
+  id: string;
+  provider: Provider;
+  characterId: string;
+  /**
+   * "participant"（既定）= 議論に参加する通常メンバー
+   * "moderator"        = 中立審判。議論を読み合意度・残論点・推奨アクションをJSONで返す
+   */
+  role?: ParticipantRole;
 }
 
 export interface Character {
@@ -85,11 +113,26 @@ export interface Thread {
    */
   characterId: string;
   /**
-   * 並列モード時のプロバイダ別キャラ。
+   * 並列モード時のプロバイダ別キャラ（旧2way専用）。
    * 設定されていれば Claude / Codex で別人格になる（CDO×CMO 議論など）。
    * 未設定なら `characterId` を両方に使う（後方互換）。
+   *
+   * Phase 1 以降は `participants` が優先される（N-way対応）。
    */
   splitCharacterIds?: { claude: string; codex: string };
+  /**
+   * N-way並列の参加者リスト。
+   * 設定されていれば `splitCharacterIds` よりこちらが優先される。
+   * 2人以上で「並列モード」、3人以上で「3-way / N-way」扱い。
+   * 同じプロバイダを複数並べても良い（Claude×Claude×Codex 等）。
+   */
+  participants?: ParticipantSlot[];
+  /**
+   * 議論モード（conferenceMode）での総合評価役。
+   * 設定されていれば各ラウンド終了時に participants の発言を読み、合意度スコア・残論点・
+   * 推奨アクションをJSONで返す。Phase 2機能。
+   */
+  moderator?: ParticipantSlot;
   model: ModelId;
   workspace: string | null;
   messages: Message[];
@@ -105,11 +148,28 @@ export interface Thread {
 
 export type AuthMode = "subscription" | "apikey";
 
-export type Provider = "claude" | "codex";
+/**
+ * "gemini" は将来の gemini-cli 連携用に予約。
+ * 現状では providers/build_provider が None を返すため、選んでも起動できない。
+ */
+export type Provider = "claude" | "codex" | "gemini";
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
   codex: "Codex",
+  gemini: "Gemini",
+};
+
+export const PROVIDER_COLORS: Record<Provider, string> = {
+  claude: "#dd6b20",
+  codex: "#10a37f",
+  gemini: "#4285f4",
+};
+
+export const PROVIDER_BADGES: Record<Provider, string> = {
+  claude: "🟠",
+  codex: "🟢",
+  gemini: "🔵",
 };
 
 export interface AppSettings {
@@ -143,4 +203,56 @@ export interface PendingPermission {
   requestId: string;
   toolName: string;
   input: Record<string, unknown>;
+}
+
+/**
+ * AIチームスナップ（Phase 3）。
+ *
+ * 複数キャラ（人格＋AI割当）を「チーム」として保存・呼び出し・共有するための型。
+ * 後で キャラ／チーム販売の収益化レイヤーに繋げる前提。
+ */
+export interface AiTeam {
+  id: string;
+  name: string;
+  description: string;
+  /** 表示用の絵文字（チームを一目で見分けるため） */
+  emoji: string;
+  /** 既定の議論モード（false = 並列だけ、true = 議論ラウンドあり） */
+  defaultConference: boolean;
+  /** 最大ラウンド数（defaultConference=true の時に使う） */
+  defaultMaxRounds: number;
+  /** 参加者構成 */
+  participants: ParticipantSlot[];
+  /** 中立審判（任意） */
+  moderator?: ParticipantSlot;
+  /** モデル既定（個別キャラ側の defaultModel が優先される） */
+  defaultModel: ModelId;
+  /** 組み込みテンプレート or ユーザー保存 */
+  isTemplate: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * タスクキュー（Phase 4）。
+ *
+ * 「これとこれを順次やって」と複数指示を放り込んでおくと、上から順に1件ずつ消化する。
+ * Claude Code の TodoWrite と相性良。ttyd リモコン併用で寝てる間にバッチ実行。
+ */
+export type TaskStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface QueuedTask {
+  id: string;
+  /** 紐づくスレッドID。完了時はそのスレッドにメッセージとして送られる。 */
+  threadId: string;
+  /** 送信内容（ユーザーメッセージとしてそのまま送る）。 */
+  prompt: string;
+  /** 任意のラベル（一覧に表示するため）。未指定なら prompt の先頭40字。 */
+  label?: string;
+  status: TaskStatus;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  /** 失敗時のエラーメッセージ。 */
+  error?: string;
 }

@@ -40,17 +40,19 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "あなた専属のAIチームを、5分で。",
-    "longDescription": "UNICREW は Claude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップアプリです。複数 AI を同時に並べて議論させたり、キャラクター別の役割で頼み分けたりできます。",
+    "shortDescription": "AIを動かすことに特化したマルチAIデスクトップ",
+    "longDescription": "UNICREW は AIを動かすことに特化したデスクトップアプリ。Anthropic / OpenAI 公式 CLI（claude / codex）を subprocess として束ねるピュアCLIランチャーで、複数AIを同時に並べて議論させたり、キャラクター別の役割で頼み分けたりできます。サブスクリプション（Pro/Max / ChatGPT Plus）でそのまま動きます。",
     "copyright": "© 2026 ZUBOLAND / uniLinks",
     "publisher": "ZUBOLAND",
-    "resources": [
-      "../sidecar/agent.mjs",
-      "../sidecar/package.json"
-    ],
     "windows": {
       "wix": {
         "language": "ja-JP"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh",
+        "displayLanguageSelector": false,
+        "languages": ["Japanese", "English"]
       }
     }
   }

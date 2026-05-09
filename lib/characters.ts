@@ -7,8 +7,41 @@ import type { Character, ModelId, Provider, Thread } from "./types";
  * 組み込みテンプレート。これらは「いきなり使える状態」ではなく、
  * 設定画面から「このテンプレートを元に新しいキャラを作る」起点として使う。
  * 直接編集／削除されることはない（isTemplate: true）。
+ *
+ * 先頭2件（tmpl-claude-normal / tmpl-codex-normal）は「素の Claude / Codex」用。
+ * 役割づけや人格付けを一切しないニュートラル設定。デフォルトは Claude ノーマル。
  */
 export const TEMPLATE_CHARACTERS: Character[] = [
+  {
+    id: "tmpl-claude-normal",
+    name: "ノーマル（Claude）",
+    roleTag: "素のClaude Code",
+    emoji: "🟠",
+    avatarPath: null,
+    accentColor: "#dd6b20",
+    description:
+      "素の Claude Code（Anthropic公式CLI）の挙動。役割・人格付けなし。プログラミング全般・調査・要約・自然な対話まで万能。何のキャラを使えばいいか迷ったらこれ。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "claude",
+    isTemplate: true,
+  },
+  {
+    id: "tmpl-codex-normal",
+    name: "ノーマル（Codex）",
+    roleTag: "素のCodex CLI",
+    emoji: "🟢",
+    avatarPath: null,
+    accentColor: "#10a37f",
+    description:
+      "素の Codex CLI（OpenAI公式）の挙動。役割・人格付けなし。コード生成・リファクタ・実装の第二意見が得意。Claudeと並列にすると相互レビューになる。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "codex",
+    isTemplate: true,
+  },
   {
     id: "tmpl-auto",
     name: "おまかせ",
@@ -236,9 +269,16 @@ export function getCharacter(id: string): Character | undefined {
  * スレッド + プロバイダから「そのカラムで使うキャラ ID」を解決する。
  * - splitMode で `splitCharacterIds` が設定されていればそれを優先
  * - そうでなければ `thread.characterId`（後方互換）
+ *
+ * 注: N-way並列（thread.participants）の場合は `effectiveParticipants` を使うこと。
+ * このAPIは旧2way（claude/codex）専用フォールバック。
  */
 export function characterIdFor(thread: Thread, provider: Provider): string {
-  if (thread.splitMode && thread.splitCharacterIds) {
+  if (
+    thread.splitMode &&
+    thread.splitCharacterIds &&
+    (provider === "claude" || provider === "codex")
+  ) {
     return thread.splitCharacterIds[provider] ?? thread.characterId;
   }
   return thread.characterId;
@@ -310,5 +350,6 @@ export function defaultCharacterId(): string {
   return TEMPLATE_CHARACTERS[0].id;
 }
 
-// 後方互換：DEFAULT_CHARACTER_ID は関数ベース推奨だが既存コードに使われている
-export const DEFAULT_CHARACTER_ID = "tmpl-secretary";
+// 後方互換：DEFAULT_CHARACTER_ID は関数ベース推奨だが既存コードに使われている。
+// ノーマル（Claude） を全体既定キャラに。役割・人格を被せず素のClaudeで開始する。
+export const DEFAULT_CHARACTER_ID = "tmpl-claude-normal";

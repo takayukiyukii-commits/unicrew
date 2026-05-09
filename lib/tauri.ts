@@ -286,10 +286,18 @@ export async function listenCodexInstallProgress(
   return () => unlistens.forEach((u) => u());
 }
 
-// ---------- Agent SDK bridge ----------
+// ---------- Agent CLI Conductor bridge ----------
+//
+// Rust 側の providers/ レイヤと話すブリッジ。SDK ではなく公式 claude / codex CLI を
+// subprocess として spawn し、stream-json を NormalizedEvent に変換した結果を
+// agent:event イベントで購読する。
 
 export type AuthMode = "subscription" | "apikey";
-export type Provider = "claude" | "codex";
+/**
+ * "gemini" は将来の gemini-cli 連携用に予約。
+ * 現状では Rust 側 build_provider が None を返すため起動はエラーになる。
+ */
+export type Provider = "claude" | "codex" | "gemini";
 
 export interface AgentStartParams {
   sessionId: string;
@@ -453,6 +461,33 @@ export async function listCodexSkills(): Promise<AddonItem[]> {
   return invoke<AddonItem[]>("list_codex_skills");
 }
 
+export async function listCodexMcp(): Promise<AddonItem[]> {
+  if (!isTauri()) return [];
+  const invoke = await loadInvoke();
+  return invoke<AddonItem[]>("list_codex_mcp");
+}
+
+export async function addCodexMcp(req: McpAddRequest): Promise<string> {
+  if (!isTauri()) throw new Error("Codex MCP 追加は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("add_codex_mcp", { req });
+}
+
+export async function removeCodexMcp(name: string): Promise<string> {
+  if (!isTauri()) throw new Error("Codex MCP 削除は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("remove_codex_mcp", { name });
+}
+
+export async function toggleCodexMcp(
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  if (!isTauri()) return;
+  const invoke = await loadInvoke();
+  await invoke("toggle_codex_mcp", { name, enabled });
+}
+
 /**
  * ~/.claude/plugins/marketplaces/ 配下の **全プラグイン** を返す。
  * marketplace.json があれば richer メタデータ（category/author/tags）込で。
@@ -522,6 +557,32 @@ export interface McpAddRequest {
   args?: string[] | null;
   url?: string | null;
   env?: Record<string, string> | null;
+  /** http/sse 用の HTTP ヘッダ。UNI製品MCP一括接続で Bearer 認証に使う。 */
+  headers?: Record<string, string> | null;
+}
+
+/**
+ * graphify ナレッジグラフを指定ワークスペースで更新する（アイデア6）。
+ * AI が write/edit したらフロントが debounce して呼んでくる。
+ */
+export async function graphifyUpdate(workspace: string): Promise<string> {
+  if (!isTauri()) throw new Error("graphify 更新は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("graphify_update", { workspace });
+}
+
+/**
+ * PC の LAN IP（IPv4）を返す（スマホ連携モーダル用）。
+ * 取得失敗時は null を返してフォールバック表示にさせる。
+ */
+export async function getLanIp(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const invoke = await loadInvoke();
+    return await invoke<string>("get_lan_ip");
+  } catch {
+    return null;
+  }
 }
 
 export async function addClaudeMcp(req: McpAddRequest): Promise<void> {

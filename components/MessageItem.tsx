@@ -3,7 +3,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Play } from "lucide-react";
+import { Check, Copy, LifeBuoy, Play } from "lucide-react";
 import type { Character, Message, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
@@ -14,6 +14,18 @@ interface Props {
   message: Message;
   character: Character | undefined;
   onExecute?: (command: string, lang: string) => void;
+  /**
+   * アイデア10: エラー文言検知時に表示する「AIに助けてもらう」ボタンの押下ハンドラ。
+   * エラー本文を渡し、page.tsx 側で対処プロンプトに整形して送り直す。
+   */
+  onSosForError?: (errorText: string) => void;
+}
+
+const ERROR_PATTERNS = ["**エラー**", "**起動エラー**"];
+
+function looksLikeError(content: string): boolean {
+  const t = content.trim();
+  return ERROR_PATTERNS.some((p) => t.startsWith(p));
 }
 
 const EXECUTABLE_LANGS = new Set([
@@ -28,8 +40,14 @@ const EXECUTABLE_LANGS = new Set([
   "terminal",
 ]);
 
-export function MessageItem({ message, character, onExecute }: Props) {
+export function MessageItem({
+  message,
+  character,
+  onExecute,
+  onSosForError,
+}: Props) {
   const isUser = message.role === "user";
+  const showSos = !isUser && onSosForError && looksLikeError(message.content);
   const renderers = {
     code: (props: {
       inline?: boolean;
@@ -102,6 +120,17 @@ export function MessageItem({ message, character, onExecute }: Props) {
             </ReactMarkdown>
           )}
         </div>
+        {showSos && (
+          <button
+            type="button"
+            onClick={() => onSosForError?.(message.content)}
+            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-100 border border-amber-300 text-amber-900 text-[11.5px] font-medium hover:bg-amber-200 transition"
+            title="このエラーをAIに診断・修復してもらう"
+          >
+            <LifeBuoy size={12} />
+            このエラーをAIに助けてもらう
+          </button>
+        )}
         {!isUser && message.stats && <StatsLine stats={message.stats} />}
       </div>
     </div>

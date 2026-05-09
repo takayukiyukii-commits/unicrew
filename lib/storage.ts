@@ -68,7 +68,7 @@ export function appendMessage(thread: Thread, message: Message): Thread {
 const DEFAULTS: AppSettings = {
   defaultCharacterId: DEFAULT_CHARACTER_ID,
   authMode: "subscription",
-  showActivity: true,
+  showActivity: false,
   advancedMode: false,
   beginnerMode: true,
 };
@@ -78,7 +78,16 @@ export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AppSettings>) };
+    const merged = {
+      ...DEFAULTS,
+      ...(JSON.parse(raw) as Partial<AppSettings>),
+    };
+    // 旧デフォルト（秘書）のまま明示変更されていないユーザーは新デフォルト（ノーマル Claude）に揃える。
+    // 明示的に tmpl-secretary を選んだ人もここで上書きされるが、再選択できるので影響は許容範囲。
+    if (merged.defaultCharacterId === "tmpl-secretary") {
+      merged.defaultCharacterId = DEFAULT_CHARACTER_ID;
+    }
+    return merged;
   } catch {
     return DEFAULTS;
   }

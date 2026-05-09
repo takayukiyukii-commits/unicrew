@@ -4,9 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tokio::sync::Mutex;
+
+pub mod providers;
+
+use providers::types::{AuthMode, NormalizedEvent, SpawnOpts};
+use providers::{build_provider, SessionHandle};
 
 const KEYRING_SERVICE: &str = "unicrew";
 const KEYRING_USER: &str = "anthropic-api-key";
@@ -492,6 +497,10 @@ pub struct McpAddRequest {
     pub args: Option<Vec<String>>,
     pub url: Option<String>,
     pub env: Option<HashMap<String, String>>,
+    /// http/sse タイプ用の HTTP ヘッダ（Bearer 認証等）。Claude Code が
+    /// `headers` キーを公式サポートするため、UNI製品の認証に必須。
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
 }
 
 /// ~/.claude.json の `mcpServers` に新規 MCP サーバーを追加（同名は上書き）。
@@ -546,6 +555,13 @@ fn add_claude_mcp(req: McpAddRequest) -> Result<(), String> {
         }
         entry.insert("env".into(), serde_json::Value::Object(env_obj));
     }
+    if let Some(headers) = req.headers {
+        let mut h = serde_json::Map::new();
+        for (k, val) in headers {
+            h.insert(k, serde_json::Value::String(val));
+        }
+        entry.insert("headers".into(), serde_json::Value::Object(h));
+    }
     servers.insert(req.name, serde_json::Value::Object(entry));
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json 書き込み失敗: {}", e))?;
@@ -573,6 +589,187 @@ fn remove_claude_mcp(name: String) -> Result<(), String> {
     }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json 書き込み失敗: {}", e))?;
+    Ok(())
+}
+
+// ---------- Codex MCP 1-click ----------
+//
+// Codex CLI の `codex mcp add/remove/list` サブコマンドを spawn する。
+// Claude 側と違い、Codex は config.toml ベースで管理されるため、
+// CLI 経由で操作するのが正規ルート（直接 toml を書き換えるよりも安全）。
+
+/// `~/.codex/config.toml` の `[mcp_servers]` セクションを AddonItem 配列として返す。
+#[tauri::command]
+fn list_codex_mcp() -> Result<Vec<AddonItem>, String> {
+    let cfg = match read_codex_config() {
+        Some(c) => c,
+        None => return Ok(Vec::new()),
+    };
+    let mut out: Vec<AddonItem> = Vec::new();
+    if let Some(servers) = cfg.get("mcp_servers").and_then(|p| p.as_table()) {
+        for (name, val) in servers {
+            // Codex の MCP は基本「設定があれば有効」なので enabled=true 既定。
+            // UNICREW 側で擬似的にトグルしたい場合は別途 "_unicrew_disabled = true" を立てる。
+            let unicrew_disabled = val
+                .get("_unicrew_disabled")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false);
+            let kind = if val.get("url").is_some() { "http" } else { "stdio" };
+            let description = val
+                .get("description")
+                .and_then(|x| x.as_str())
+                .map(String::from)
+                .or_else(|| Some(format!("{} MCP server", kind)));
+            out.push(AddonItem {
+                id: name.clone(),
+                name: name.clone(),
+                namespace: None,
+                version: None,
+                enabled: !unicrew_disabled,
+                scope: "user".into(),
+                description,
+                kind: "mcp".into(),
+                source: "codex".into(),
+                path: None,
+                category: None,
+                author: None,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// `codex mcp add` を spawn して MCP サーバを登録。
+/// stdio: `codex mcp add <NAME> [--env KEY=VAL ...] -- <COMMAND> [ARGS...]`
+/// http : `codex mcp add <NAME> --url <URL>`
+#[tauri::command]
+async fn add_codex_mcp(req: McpAddRequest) -> Result<String, String> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err("MCP 名が空です".into());
+    }
+
+    let mut cmd = build_silent_command("codex");
+    cmd.arg("mcp").arg("add").arg(name);
+
+    match req.kind.as_str() {
+        "stdio" => {
+            let command = req
+                .command
+                .ok_or_else(|| "stdio タイプには command が必要です".to_string())?;
+            // env 変数
+            if let Some(env_map) = &req.env {
+                for (k, v) in env_map {
+                    cmd.arg("--env").arg(format!("{}={}", k, v));
+                }
+            }
+            cmd.arg("--");
+            cmd.arg(&command);
+            if let Some(args) = req.args {
+                for a in args {
+                    cmd.arg(a);
+                }
+            }
+        }
+        "sse" | "http" => {
+            let url = req
+                .url
+                .ok_or_else(|| "http/sse タイプには url が必要です".to_string())?;
+            cmd.arg("--url").arg(url);
+        }
+        _ => return Err(format!("未対応の MCP タイプ: {}", req.kind)),
+    }
+
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("codex CLI 起動に失敗: {}", e))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "codex mcp add 失敗（終了コード {:?}）: {}",
+            out.status.code(),
+            stderr.trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(stdout)
+}
+
+/// `codex mcp remove <NAME>` を spawn して MCP サーバを削除。
+#[tauri::command]
+async fn remove_codex_mcp(name: String) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("MCP 名が空です".into());
+    }
+    let mut cmd = build_silent_command("codex");
+    cmd.arg("mcp").arg("remove").arg(name);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("codex CLI 起動に失敗: {}", e))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "codex mcp remove 失敗（終了コード {:?}）: {}",
+            out.status.code(),
+            stderr.trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(stdout)
+}
+
+/// Codex MCP サーバの有効/無効を擬似的にトグル。
+///
+/// Codex CLI には標準の有効/無効切替コマンドが無いため、`~/.codex/config.toml`
+/// の該当セクションに `_unicrew_disabled = true/false` を立てる UNICREW 独自運用。
+/// 実際に無効化したい場合は `remove_codex_mcp` で削除を推奨。これは UI 表示用。
+#[tauri::command]
+fn toggle_codex_mcp(name: String, enabled: bool) -> Result<(), String> {
+    let home = home_dir()?;
+    let path = home.join(".codex").join("config.toml");
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        format!("~/.codex/config.toml が読み込めません: {}", e)
+    })?;
+    let mut doc: toml::Value = text
+        .parse()
+        .map_err(|e| format!("config.toml パース失敗: {}", e))?;
+
+    let servers = doc
+        .as_table_mut()
+        .and_then(|t| t.get_mut("mcp_servers"))
+        .and_then(|s| s.as_table_mut())
+        .ok_or_else(|| "mcp_servers セクションがありません".to_string())?;
+
+    let server = servers
+        .get_mut(&name)
+        .and_then(|s| s.as_table_mut())
+        .ok_or_else(|| format!("MCP サーバ '{}' が見つかりません", name))?;
+
+    if enabled {
+        server.remove("_unicrew_disabled");
+    } else {
+        server.insert(
+            "_unicrew_disabled".into(),
+            toml::Value::Boolean(true),
+        );
+    }
+
+    let serialized = toml::to_string_pretty(&doc)
+        .map_err(|e| format!("config.toml シリアライズ失敗: {}", e))?;
+    std::fs::write(&path, serialized).map_err(|e| {
+        format!("~/.codex/config.toml 書き込み失敗: {}", e)
+    })?;
     Ok(())
 }
 
@@ -877,6 +1074,58 @@ fn list_claude_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
 ///   2. なければ `https://github.com/<user>.png?size=128` を取りに行く
 ///   3. 取れなかった場合は `Ok(None)` を返し、UI 側でフォールバック表示
 ///
+/// PC の LAN IP（IPv4）を返す。スマホ連携モーダルが「スマホからアクセスするアドレス」候補として表示する。
+///
+/// UDP ソケットを 8.8.8.8:80 に connect だけして、ルーティングテーブル経由で
+/// 「外向き通信に使われるローカル IP」を取り出す。実パケットは送らない。
+/// Wi-Fi 接続時はそのインターフェースの 192.168.x.x / 10.x.x.x が返る。
+#[tauri::command]
+fn get_lan_ip() -> Result<String, String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    socket
+        .connect("8.8.8.8:80")
+        .map_err(|e| format!("LAN IP 取得失敗（外向きルートなし）: {}", e))?;
+    let addr = socket
+        .local_addr()
+        .map_err(|e| format!("local_addr 失敗: {}", e))?;
+    Ok(addr.ip().to_string())
+}
+
+/// graphify ナレッジグラフを指定ワークスペースで更新する（Tauri コマンド）。
+///
+/// AI が write/edit したらフロントエンドが debounce して呼んでくる想定。
+/// `graphify update . --force` を当該ワークスペースで実行する。
+/// graphify CLI が PATH に無ければエラー文字列を返す（UI 側でトーストに出す）。
+///
+/// AST-only 処理でトークン消費0、5〜30秒で完了する設計（graphify-rolloutメモ参照）。
+#[tauri::command]
+async fn graphify_update(workspace: String) -> Result<String, String> {
+    if workspace.trim().is_empty() {
+        return Err("workspace が空です".into());
+    }
+    let path = std::path::PathBuf::from(&workspace);
+    if !path.exists() {
+        return Err(format!("workspace が存在しません: {}", workspace));
+    }
+    let mut cmd = build_silent_command("graphify");
+    cmd.arg("update").arg(".").arg("--force").current_dir(&path);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let output = cmd.output().await.map_err(|e| {
+        format!(
+            "graphify CLI を起動できませんでした（pipx install graphifyy で導入してください）: {}",
+            e
+        )
+    })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("graphify update 失敗: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().last().unwrap_or("").to_string())
+}
+
 /// ネットワーク失敗時はログに出すだけで Err を投げない（UX を阻害しない）。
 #[tauri::command]
 async fn fetch_github_avatar(user: String) -> Result<Option<String>, String> {
@@ -1269,7 +1518,7 @@ fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-fn build_silent_command(program: &str) -> Command {
+pub fn build_silent_command(program: &str) -> Command {
     #[cfg(target_os = "windows")]
     {
         if let Some(resolved) = resolve_on_path(program) {
@@ -1429,8 +1678,37 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let _ = app;
-        Err("Linux では `npm install -g @anthropic-ai/claude-code` を手動で実行してください。".into())
+        // Linux: npm 経由でユーザースコープにインストール。
+        // `sudo` を使わずに済むよう NPM_CONFIG_PREFIX=$HOME/.npm-global を設定。
+        // PATH に `~/.npm-global/bin` が無いとログイン後でも CLI が見えない可能性が
+        // あるため、失敗時は SettingsModal の InstallFailedFallback で手動コマンドが出る。
+        let mut cmd = build_silent_command("sh");
+        cmd.args([
+            "-c",
+            // 1. ~/.npm-global を作る
+            // 2. NPM_CONFIG_PREFIX を一時的に上書きして user-global に install
+            "mkdir -p \"$HOME/.npm-global\" && \
+             NPM_CONFIG_PREFIX=\"$HOME/.npm-global\" \
+             npm install -g @anthropic-ai/claude-code",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+        let stdout = child.stdout.take().ok_or("no stdout")?;
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut reader = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                let _ = app_clone.emit("claude_install:line", line);
+            }
+        });
+        let app_done = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let exit = child.wait().await;
+            let success = matches!(&exit, Ok(s) if s.success());
+            let _ = app_done.emit("claude_install:done", success);
+        });
+        Ok(())
     }
 }
 
@@ -1587,17 +1865,17 @@ async fn start_codex_login(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// ---------- Agent SDK Sidecar ----------
+// ---------- Agent (Pure CLI Conductor) ----------
+//
+// 旧版（unipilot）は Node sidecar 経由で `claude-agent-sdk` / `codex-sdk` を呼び出していた。
+// 新版（unicrew 配布版）は Anthropic / OpenAI 公式 CLI を直接 subprocess として spawn し、
+// stream-json で会話する Pure CLI Conductor 方式に統一。
+//
+// 詳細は DESIGN.md / AGENTS.md を参照。SDK は import しない（ToS 適合のため）。
 
 #[derive(Default)]
 struct AgentState {
-    sessions: Mutex<HashMap<String, AgentSession>>,
-}
-
-struct AgentSession {
-    stdin: ChildStdin,
-    child: Child,
-    _stdout_handle: tauri::async_runtime::JoinHandle<()>,
+    sessions: Mutex<HashMap<String, Box<dyn SessionHandle>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1606,7 +1884,7 @@ struct AgentStartRequest {
     workspace: Option<String>,
     system_prompt: String,
     model: String,
-    /// "subscription" (claude.ai OAuth) or "apikey"
+    /// "subscription" (CLI が持つ OAuth) or "apikey"
     auth_mode: String,
     /// Required only when auth_mode == "apikey"
     api_key: Option<String>,
@@ -1630,158 +1908,47 @@ struct AgentStopRequest {
     session_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "kind")]
-enum SidecarOut {
-    #[serde(rename = "ready")]
-    Ready,
-    #[serde(rename = "assistant_text")]
-    AssistantText {
-        session_id: String,
-        text: String,
-    },
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        session_id: String,
-        tool_use_id: String,
-        tool_name: String,
-        tool_input: serde_json::Value,
-    },
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        session_id: String,
-        tool_use_id: String,
-        is_error: bool,
-        content: serde_json::Value,
-    },
-    #[serde(rename = "permission_request")]
-    PermissionRequest {
-        session_id: String,
-        request_id: String,
-        tool_name: String,
-        input: serde_json::Value,
-    },
-    #[serde(rename = "result")]
-    Result {
-        session_id: String,
-        subtype: String,
-        cost_usd: Option<f64>,
-        usage: Option<serde_json::Value>,
-    },
-    #[serde(rename = "error")]
-    Error {
-        session_id: String,
-        message: String,
-    },
-}
-
 #[tauri::command]
 async fn agent_start(
     app: AppHandle,
     state: State<'_, AgentState>,
     req: AgentStartRequest,
 ) -> Result<(), String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?;
-    let sidecar_filename = match req.provider.as_str() {
-        "codex" => "codex-agent.mjs",
-        _ => "agent.mjs",
-    };
-    let sidecar_path = resource_dir.join("sidecar").join(sidecar_filename);
+    let provider = build_provider(&req.provider)
+        .ok_or_else(|| format!("unknown provider: {}", req.provider))?;
 
-    // Fall back to repo-relative path during dev
-    let final_path = if sidecar_path.exists() {
-        sidecar_path
-    } else {
-        let dev_path = std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join("..")
-            .join("sidecar")
-            .join(sidecar_filename);
-        if dev_path.exists() {
-            dev_path
-        } else {
-            return Err(format!(
-                "sidecar not found ({} provider). tried: {} and {}",
-                req.provider,
-                sidecar_path.display(),
-                dev_path.display()
-            ));
-        }
+    let opts = SpawnOpts {
+        session_id: req.session_id.clone(),
+        workspace: req.workspace,
+        system_prompt: req.system_prompt,
+        model: req.model,
+        auth_mode: AuthMode::from_str(&req.auth_mode),
+        api_key: req.api_key,
     };
 
-    // node.exe は通常 PATH に出るが、nvm-windows 等でシム経由のことがあるため
-    // build_silent_command 経由で確実に解決する。
-    let mut cmd = build_silent_command("node");
-    cmd.arg(final_path);
-    if req.auth_mode == "apikey" {
-        if let Some(key) = req.api_key.as_ref() {
-            cmd.env("ANTHROPIC_API_KEY", key);
-        }
-    } else {
-        // subscription mode: SDK は Claude Code の OAuth トークンを使う
-        cmd.env_remove("ANTHROPIC_API_KEY");
-        cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
-    }
-    cmd.env("UNICREW_AUTH_MODE", &req.auth_mode);
-    if let Some(ws) = &req.workspace {
-        cmd.env("UNICREW_WORKSPACE", ws);
-    }
-    cmd.env("UNICREW_MODEL", &req.model);
-    cmd.env("UNICREW_SYSTEM_PROMPT", &req.system_prompt);
-    cmd.env("UNICREW_SESSION_ID", &req.session_id);
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+    // event channel: provider → ここ → React に emit
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<NormalizedEvent>();
 
-    let mut child = cmd.spawn().map_err(|e| {
-        format!(
-            "failed to spawn node sidecar (is Node.js installed and on PATH?): {}",
-            e
-        )
-    })?;
-    let stdin = child.stdin.take().ok_or("no stdin")?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
-    let stderr = child.stderr.take().ok_or("no stderr")?;
-
-    let session_id = req.session_id.clone();
     let app_clone = app.clone();
-    let stdout_handle = tauri::async_runtime::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            // Each line is a JSON SidecarOut event
-            if line.trim().is_empty() {
-                continue;
-            }
-            let _ = app_clone.emit("agent:event", &line);
-        }
-    });
-
-    // Capture stderr to a separate channel for debugging
-    let app_err = app.clone();
-    let session_err = session_id.clone();
     tauri::async_runtime::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = app_err.emit(
-                "agent:stderr",
-                serde_json::json!({"session_id": session_err, "line": line}),
-            );
+        while let Some(ev) = rx.recv().await {
+            // 旧 SidecarOut と同じ JSON 形式で emit（React 側を変えなくて済む）
+            if let Ok(s) = serde_json::to_string(&ev) {
+                let _ = app_clone.emit("agent:event", &s);
+            }
         }
     });
 
-    let session = AgentSession {
-        stdin,
-        child,
-        _stdout_handle: stdout_handle,
-    };
+    let handle = provider
+        .spawn_session(opts, tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
     state
         .sessions
         .lock()
         .await
-        .insert(req.session_id.clone(), session);
+        .insert(req.session_id, handle);
     Ok(())
 }
 
@@ -1794,20 +1961,8 @@ async fn agent_send(
     let session = sessions
         .get_mut(&req.session_id)
         .ok_or_else(|| format!("session not found: {}", req.session_id))?;
-    let payload = serde_json::json!({
-        "kind": "user_message",
-        "text": req.text,
-    });
-    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    line.push('\n');
     session
-        .stdin
-        .write_all(line.as_bytes())
-        .await
-        .map_err(|e| e.to_string())?;
-    session
-        .stdin
-        .flush()
+        .send_user_message(&req.text)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -1824,21 +1979,8 @@ async fn agent_permission_response(
     let session = sessions
         .get_mut(&session_id)
         .ok_or_else(|| format!("session not found: {}", session_id))?;
-    let payload = serde_json::json!({
-        "kind": "permission_response",
-        "request_id": request_id,
-        "decision": decision,
-    });
-    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    line.push('\n');
     session
-        .stdin
-        .write_all(line.as_bytes())
-        .await
-        .map_err(|e| e.to_string())?;
-    session
-        .stdin
-        .flush()
+        .send_permission_response(&request_id, &decision)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -1850,20 +1992,10 @@ async fn agent_stop(
     req: AgentStopRequest,
 ) -> Result<(), String> {
     let mut sessions = state.sessions.lock().await;
-    if let Some(mut session) = sessions.remove(&req.session_id) {
-        // 1) graceful: stdin に "stop" を流して sidecar 自身に終了させる
-        let payload = serde_json::json!({"kind": "stop"});
-        if let Ok(mut line) = serde_json::to_string(&payload) {
-            line.push('\n');
-            let _ = session.stdin.write_all(line.as_bytes()).await;
-            let _ = session.stdin.flush().await;
-        }
-        // 2) hard kill: ツール実行で詰まってる場合 stdin を読まないので、
-        //    プロセスを直接 SIGKILL/TerminateProcess する。
-        let _ = session.child.start_kill();
-        // 3) wait はバックグラウンドへ。ここでブロックすると UI が固まる。
+    if let Some(mut handle) = sessions.remove(&req.session_id) {
+        // ブロックすると UI が固まるのでバックグラウンドで kill＋wait
         tauri::async_runtime::spawn(async move {
-            let _ = session.child.wait().await;
+            let _ = handle.stop().await;
         });
     }
     Ok(())
@@ -1957,7 +2089,13 @@ pub fn run() {
             add_claude_marketplace,
             list_claude_marketplace_catalog,
             list_codex_marketplace_catalog,
+            list_codex_mcp,
+            add_codex_mcp,
+            remove_codex_mcp,
+            toggle_codex_mcp,
             fetch_github_avatar,
+            graphify_update,
+            get_lan_ip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

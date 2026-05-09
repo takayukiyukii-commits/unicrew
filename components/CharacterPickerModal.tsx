@@ -205,29 +205,29 @@ export function CharacterPickerModal({
             onClick={() => {
               if (splitMode) {
                 // 並列モード: 両方ともおまかせで起動（一発でスタート）
-                onPickPair("tmpl-auto", "tmpl-auto");
+                onPickPair("tmpl-claude-normal", "tmpl-codex-normal");
               } else {
-                handleSelect("tmpl-auto");
+                handleSelect("tmpl-claude-normal");
               }
             }}
             className="w-full flex items-center gap-2 rounded-lg border border-[var(--color-accent)]/40 bg-gradient-to-r from-sky-50 to-indigo-50 px-3 py-2.5 hover:border-[var(--color-accent)] hover:shadow-sm transition group text-left"
           >
-            <span className="text-lg shrink-0">✨</span>
+            <span className="text-lg shrink-0">🤖</span>
             <span className="flex-1 min-w-0">
               <span className="block text-[12.5px] font-semibold text-[var(--color-text)]">
                 {splitMode
-                  ? "両方おまかせで開始"
-                  : "このまま開始（おまかせキャラ）"}
+                  ? "ノーマル Claude × Codex で開始"
+                  : "このまま開始（ノーマル Claude）"}
                 <span className="ml-1.5 text-[10px] font-normal text-[var(--color-muted)]">
                   {splitMode
-                    ? "(Claude / Codex どちらも自動切替)"
-                    : "(人格を選ばない)"}
+                    ? "(役割なし・素のClaude/Codex)"
+                    : "(役割づけなし・素のClaude)"}
                 </span>
               </span>
               <span className="block text-[11px] text-[var(--color-muted)] mt-0.5 leading-snug">
-                質問内容を見て、技術／マーケ／営業／PdM／財務／秘書／CEO 視点に自動切替で答えます。
+                素の Claude Code / Codex CLI の挙動。プログラミング・調査・要約・自然な対話まで万能。
                 {splitMode &&
-                  " 特定キャラを当てたい場合は下から2つ選んでください。"}
+                  " 役割づけしたキャラを当てたい場合は下から2つ選んでください。"}
               </span>
             </span>
             <span className="text-[var(--color-accent)] shrink-0 group-hover:translate-x-0.5 transition">

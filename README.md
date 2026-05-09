@@ -1,58 +1,73 @@
 # UNICREW
 
-> Claudeを誰でも、5分で。
-> ローカルファイルを開いて、会話しながら開発・編集ができるClaudeデスクトップアプリ。
+> AIを動かすことに特化した、マルチAIデスクトップ。
+> Claude / Codex / 将来のGemini を、ターミナルなしで束ねる。
+
+## 何をする？
+
+UNICREW は **AI を動かすことだけに特化** したデスクトップアプリです。
+コードエディタはVSCodeに任せて、AI セッションの起動・並列・切替・可視化を担当します。
+
+- Claude Pro/Max / ChatGPT Plus・Pro のサブスクリプションで動く（追加課金なし）
+- Claude × Codex を **並列モード** で同時実行、**議論モード** で互いに評価し合わせる
+- キャラクター人格12種で role/口調を切替
+- ツール使用ログをチャットに自然に挿入する Activity Panel
+
+## 設計の核：Pure CLI Conductor
+
+UNICREW は Anthropic / OpenAI の **公式 CLI を subprocess として spawn する以外の経路を持ちません**。
+SDK（`claude-agent-sdk` / `codex-sdk`）は import しません。
+
+これは Anthropic ToS（2026-04-04 施行）の条文:
+
+> "Using OAuth tokens obtained through Claude Free, Pro, or Max accounts in any other product, tool, or service — including the Agent SDK — is not permitted."
+
+> "For local Claude Code CLI usage on your own computer, nothing changes — it's Anthropic's official product built for scripted and automated use, and the Consumer ToS exempts it from the prohibition on automated access."
+
+に完全準拠するための設計判断です。VSCode の統合ターミナルから `claude` を呼ぶのと同じ法的立ち位置で動作します。
+
+詳細は [DESIGN.md](./DESIGN.md) と [AGENTS.md](./AGENTS.md) を参照。
 
 ## アーキテクチャ
 
 ```
-┌────────────────────────────────────────────────────┐
-│  Tauri 2 ウィンドウ                                │
-│  ┌────────────────────────────────────────────┐    │
-│  │  Next.js 16 + React 19（renderer / SPA）   │    │
-│  │  - 3ペインUI（スレッド／チャット／キャラ） │    │
-│  └─────────────┬──────────────────────────────┘    │
-│                │ invoke / event                     │
-│  ┌─────────────▼──────────────────────────────┐    │
-│  │  Rust main プロセス                        │    │
-│  │  - OS Keychain（APIキー保管）              │    │
-│  │  - Claude Code 検出 / ログイン起動         │    │
-│  │  - Node sidecar の spawn と stdin/stdout   │    │
-│  └─────────────┬──────────────────────────────┘    │
-│                │ stdio JSON-lines                   │
-│  ┌─────────────▼──────────────────────────────┐    │
-│  │  Node sidecar (sidecar/agent.mjs)          │    │
-│  │  - @anthropic-ai/claude-agent-sdk          │    │
-│  │  - Claude Code 相当のtool use loop         │    │
-│  │  - canUseTool で UI 経由の許可UX           │    │
-│  └────────────────────────────────────────────┘    │
-└────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ Tauri 2.x ウィンドウ                                    │
+│  ┌──────────────────────────────────────────────┐     │
+│  │ Next.js + React UI（チャット / 並列 / 議論）  │     │
+│  └────────────────────┬─────────────────────────┘     │
+│                       │ invoke / event                   │
+│  ┌────────────────────▼─────────────────────────┐     │
+│  │ Rust providers/                                │     │
+│  │  ├ trait CliProvider                           │     │
+│  │  ├ claude.rs（claude CLI subprocess）          │     │
+│  │  ├ codex.rs（codex CLI subprocess）            │     │
+│  │  └ stream_parser.rs                            │     │
+│  └────────────────────┬─────────────────────────┘     │
+│                       │ stdin / stdout                   │
+│  ┌────────────────────▼─────────────────────────┐     │
+│  │ 公式 CLI subprocess                            │     │
+│  │  claude -p --output-format stream-json …      │     │
+│  │  codex exec --json …                          │     │
+│  └───────────────────────────────────────────────┘     │
+└────────────────────────────────────────────────────────┘
 ```
-
-## 認証モード
-
-| モード | 概要 | 想定ユーザー |
-|---|---|---|
-| **Claude Pro/Max でログイン**（推奨） | Claude Code CLI の OAuth で claude.ai にログイン → 既存サブスクリプションで動作 | 一般ユーザー（追加課金なし） |
-| **API キーで使う** | Anthropic API キーを OS Keychain に保管 → 従量課金 | 組織アカウント・チーム |
-
-サブスクリプションモードでは Sidecar に `ANTHROPIC_API_KEY` を渡さないため、SDK は Claude Code CLI の OAuth トークンを自動で使います。
 
 ## 必要環境
 
 - **Node.js 18+**
 - **Rust（rustup） 1.77+**
 - **Visual Studio 2022 Build Tools**（Windows・C++ workload 必須）
-- **Claude Code (CLI)**：サブスクリプションモード用。`winget install Anthropic.ClaudeCode` または `npm install -g @anthropic-ai/claude-code`
+- **Claude Code CLI**：`winget install --id Anthropic.ClaudeCode` または UNICREW 内のインストールボタン
+- **Codex CLI**（任意）：`npm install -g @openai/codex` または UNICREW 内のインストールボタン
 
 ## 起動
 
 ```powershell
 # 初回のみ
 npm install
-cd sidecar; npm install; cd ..
 
-# デスクトップアプリ起動
+# 開発起動
 npm run tauri:dev
 ```
 
@@ -68,86 +83,80 @@ npm run tauri:build
 - Windows: `src-tauri/target/release/bundle/msi/UNICREW_*.msi`
 - macOS: `src-tauri/target/release/bundle/dmg/UNICREW_*.dmg`
 
-コード署名（EV証明書 / Apple Developer ID）は別途設定。
+コード署名は ZUBOLAND法人登記後に EV証明書 / Apple Developer ID で実装予定。
 
 ## ディレクトリ構成
 
 ```
-unipilot/
-├── app/                      # Next.js (renderer)
+unicrew/
+├── app/                       # Next.js (renderer)
 │   ├── layout.tsx
-│   ├── page.tsx              # メインシェル
+│   ├── page.tsx               # メインシェル
 │   └── globals.css
 ├── components/
-│   ├── Sidebar.tsx           # スレッド一覧
-│   ├── ChatPane.tsx          # チャット本体
-│   ├── MessageItem.tsx       # メッセージ1件
-│   ├── ToolUseBubble.tsx     # ツール実行表示
-│   ├── PermissionPromptModal.tsx  # 許可確認
-│   ├── RightPane.tsx         # キャラ＋モデル
-│   ├── SettingsModal.tsx     # 認証設定
-│   ├── CharacterPickerModal.tsx
-│   └── WorkspaceTree.tsx     # ファイルツリー（Phase 2）
+│   ├── Sidebar.tsx            # スレッド一覧
+│   ├── ChatPane.tsx           # チャット本体
+│   ├── MessageItem.tsx
+│   ├── ToolUseBubble.tsx      # ツール実行表示
+│   ├── ActivityPanel.tsx      # 折り畳みアクティビティログ
+│   ├── RightPane.tsx          # キャラ＋モデル
+│   ├── SettingsModal.tsx
+│   ├── WelcomeLanding.tsx
+│   └── ...
 ├── lib/
-│   ├── types.ts              # Block/Thread/Character/AuthMode
-│   ├── characters.ts         # プリセット6体
-│   ├── storage.ts            # localStorage CRUD（→ Tauri Store移行予定）
-│   └── tauri.ts              # Tauri invoke / event 橋渡し
-├── sidecar/
-│   ├── agent.mjs             # Claude Agent SDK loop
-│   └── package.json          # SDK依存
+│   ├── types.ts
+│   ├── characters.ts          # プリセット8体
+│   ├── personalities.ts       # 人格12種
+│   ├── storage.ts             # localStorage / Tauri Store
+│   └── tauri.ts               # invoke / event 橋渡し
 ├── src-tauri/
 │   ├── src/
 │   │   ├── main.rs
-│   │   └── lib.rs            # Tauri commands & sidecar管理
+│   │   ├── lib.rs             # Tauri commands
+│   │   └── providers/         # CLI subprocess 抽象（Pure CLI Conductor）
+│   │       ├── mod.rs
+│   │       ├── types.rs
+│   │       ├── stream_parser.rs
+│   │       ├── claude.rs
+│   │       └── codex.rs
 │   ├── capabilities/default.json
-│   ├── icons/                # 暫定アイコン (scripts/generate_icons.py)
+│   ├── icons/
 │   ├── Cargo.toml
 │   └── tauri.conf.json
-└── scripts/generate_icons.py
+└── public/brand/              # UNICREW 独自ブランド資産
 ```
 
 ## 使い方フロー
 
-1. **設定** → 認証方法を選ぶ（推奨：Claude Pro/Max）
+1. **設定** → CLI のインストール状態を確認
 2. （初回）Claude Code が未インストールならインストールボタン → ログインボタン
-3. **新しい会話** → キャラクター選択 → ワークスペースフォルダ選択
-4. メッセージ送信 → エージェントがツールを使うとき**許可ダイアログ**が出る
-5. 許可 → ファイル編集／コマンド実行が走り、結果が表示される
+3. **最初の会話を始める** → キャラクター（オプション）→ ワークスペース（自動）
+4. メッセージ送信 → CLI が tool 使うときは `--permission-mode acceptEdits` で自動承認
 
-## キャラクター（プリセット6体）
+## キャラクター（プリセット8体）
 
 | ID | 名前 | 役割 | デフォルトモデル |
 |---|---|---|---|
-| preset-cdo | CDO 桐生 | 技術責任者 | Opus 4.7 |
-| preset-cmo | CMO 早瀬 | マーケ責任者 | Sonnet 4.6 |
-| preset-cso | CSO 影山 | 営業責任者 | Sonnet 4.6 |
-| preset-cpo | CPO 御影 | プロダクト責任者 | Opus 4.7 |
-| preset-cfo | CFO 水原 | 財務責任者 | Sonnet 4.6 |
-| preset-secretary | 秘書 ミナ | アシスタント | Haiku 4.5 |
-
-カスタムキャラクター作成は次フェーズ。
-
-## ロードマップ
-
-| 時期 | マイルストーン |
-|---|---|
-| 2026-05-15 | MVP α（マルチスレッド + Agent SDK + キャラ6体 + 許可UX） |
-| 2026-05-31 | カスタムキャラ作成 + アバター生成 + Setup Wizard |
-| 2026-06-15 | MCP/スキル 1クリック追加UI |
-| 2026-06-30 | Closed β（uniLinks受講生100名） |
-| 2026-07-31 | 一般公開（Free + Pro） |
+| tmpl-auto | おまかせ | 自動切替 | sonnet |
+| tmpl-ceo | CEO | 統括役 | opus |
+| preset-cdo | CDO | 技術責任者 | opus |
+| preset-cmo | CMO | マーケ | sonnet |
+| preset-cso | CSO | 営業 | sonnet |
+| preset-cpo | CPO | プロダクト | opus |
+| preset-cfo | CFO | 財務 | sonnet |
+| preset-secretary | 秘書 | アシスタント | haiku |
 
 ## トラブルシューティング
 
 - **Rust ビルド時の link.exe エラー** → Visual Studio Build Tools (C++ workload) が必要
 - **「next dev server is already running」** → `Get-NetTCPConnection -LocalPort 1420` で確認、`Stop-Process -Id <PID> -Force`
-- **Sidecar が落ちる** → Node.js が PATH に通っているか確認。Tauri は `node` コマンドで spawn する
-- **認証エラー** → 設定 → Claude Code 接続状態 → ログイン
+- **Claude CLI が見つからない** → `winget install --id Anthropic.ClaudeCode --accept-source-agreements --accept-package-agreements` または UNICREW 内のインストールボタン
+- **認証エラー** → 設定 → 接続状態 → ログイン
 
-## 注意事項
+## 法的注意事項
 
-- このリポジトリは OneDrive 外（`C:/Users/takay/repos/unipilot`）
-- APIキーは OS Keychain（Windows: Credential Manager）に保管
-- スキル・MCP・Skills は Claude Agent SDK の `settingSources: ["user", "project"]` で読み込まれる
-- UNIシリーズ統一：白基調ライトテーマ
+- **UNICREW は Anthropic, PBC および OpenAI, Inc. とは無関係の独立したクライアントアプリです。**
+- Claude / Anthropic は Anthropic, PBC の商標です。
+- ChatGPT / Codex / GPT は OpenAI, Inc. の商標です。
+- UNICREW は公式 CLI を subprocess として呼び出すランチャーであり、Anthropic / OpenAI の OAuth トークンを直接読み書きしません。
+- ロゴ画像は UNICREW 独自のもののみ使用。Anthropic / OpenAI のロゴ画像は使用していません。
