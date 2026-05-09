@@ -27,3 +27,7 @@ Thumbs.db
 npm-debug.log*
 
 .vercel
+
+# Tauri build artifacts
+.next-tauri/
+/out/
