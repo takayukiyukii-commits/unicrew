@@ -1,0 +1,38 @@
+UNICREW
+Copyright 2026 ZUBOLAND / uniLinks
+
+This product is licensed under the Apache License, Version 2.0
+(see LICENSE for the full text).
+
+------------------------------------------------------------------------------
+Third-party software notices
+------------------------------------------------------------------------------
+
+This product includes software developed by third parties. The following
+notices are provided in compliance with each third-party license.
+
+Statically linked into the UNICREW binary:
+
+  - agent-client-protocol (Apache-2.0)
+    Copyright 2025 Zed Industries, Inc. and contributors.
+    See THIRD_PARTY_LICENSES/agent-client-protocol/NOTICE.md
+
+The following external CLIs are invoked as subprocesses (not bundled or
+redistributed by UNICREW). Their licenses govern only the binaries the
+end user installs themselves:
+
+  - Claude Code              (Anthropic, PBC)
+  - Codex CLI                (OpenAI, Inc.)
+  - Gemini CLI               (Google LLC)
+  - Goose                    (Block, Inc.,            Apache-2.0)
+  - OpenCode                 (sst,                    MIT)
+  - Codex-ACP                (Zed Industries, Inc.,   Apache-2.0)
+  - Kiro CLI                 (AWS / kirodotdev)
+  - Kimi Code CLI            (Moonshot AI,            Apache-2.0)
+  - Qwen Code                (Alibaba QwenLM,         Apache-2.0)
+  - Ollama                   (Ollama,                 MIT)
+
+UNICREW is an independent client application and is not affiliated with,
+endorsed by, or sponsored by any of the above projects or their owners.
+Each product name, model name, and trademark is the property of its
+respective owner.
