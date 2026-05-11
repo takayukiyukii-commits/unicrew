@@ -1,6 +1,6 @@
 [package]
 name = "unicrew"
-version = "0.1.0"
+version = "0.2.0"
 description = "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。"
 authors = ["uniLinks / ZUBOLAND"]
 edition = "2021"
