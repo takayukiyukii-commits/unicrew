@@ -65,6 +65,30 @@ pub fn map_session_update(
     }
 }
 
+/// ACP プロバイダ用の turn 完了通知。
+///
+/// stream-json プロバイダ（Claude/Codex/Qwen 等）は CLI が `{"type":"result"}` を
+/// 出力するので `stream_parser::parse_result` で `NormalizedEvent::Result` が発火する。
+/// 一方 ACP プロバイダは SessionUpdate に turn 完了マーカーを持たないため、
+/// 各プロバイダの `session.read_to_string().await` 完了時にここを呼んで
+/// `NormalizedEvent::Result` を emit する。これを忘れると UI の「応答中」スピナーが
+/// 永久に止まらない（finalizeDraft が呼ばれないため）。
+///
+/// `subtype` は "success" / "error" / "interrupted" 等、表示には使わないが
+/// 既存の Claude stream-json の Result.subtype と shape を合わせる。
+pub fn emit_turn_complete(
+    session_id: &str,
+    subtype: &str,
+    event_sender: &tokio::sync::mpsc::UnboundedSender<NormalizedEvent>,
+) {
+    let _ = event_sender.send(NormalizedEvent::Result {
+        session_id: session_id.to_string(),
+        subtype: subtype.to_string(),
+        cost_usd: None,
+        usage: None,
+    });
+}
+
 /// ACP プロバイダ間で共有する許可要求ブローカー。
 ///
 /// 動作:

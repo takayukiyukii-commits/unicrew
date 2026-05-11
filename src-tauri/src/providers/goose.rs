@@ -104,9 +104,11 @@ impl CliProvider for GooseProvider {
         let session_id_for_loop = session_id.clone();
         let session_id_for_notif = session_id.clone();
         let session_id_for_perm = session_id.clone();
+        let session_id_for_turn = session_id.clone();
         let event_sender_for_loop = event_sender.clone();
         let event_sender_for_notif = event_sender.clone();
         let event_sender_for_perm = event_sender.clone();
+        let event_sender_for_turn = event_sender.clone();
 
         let broker = acp_transport::PermissionBroker::new();
         let broker_for_perm = broker.clone();
@@ -183,6 +185,11 @@ impl CliProvider for GooseProvider {
                                         eprintln!(
                                             "[unicrew/goose] send_prompt error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
                                     // 1 ターン完了を待つ。
@@ -191,8 +198,21 @@ impl CliProvider for GooseProvider {
                                         eprintln!(
                                             "[unicrew/goose] read_to_string error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
+                                    // turn 完了 → UI の「応答中」を止めるため Result イベントを emit。
+                                    // ACP プロトコルは SessionUpdate に turn 終端マーカーを持たないため、
+                                    // ここで明示的に流さないと finalizeDraft が呼ばれない。
+                                    acp_transport::emit_turn_complete(
+                                        &session_id_for_turn,
+                                        "success",
+                                        &event_sender_for_turn,
+                                    );
                                 }
                                 Ok(())
                             })

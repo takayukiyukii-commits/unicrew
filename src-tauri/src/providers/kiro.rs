@@ -85,9 +85,11 @@ impl CliProvider for KiroProvider {
         let session_id_for_loop = session_id.clone();
         let session_id_for_notif = session_id.clone();
         let session_id_for_perm = session_id.clone();
+        let session_id_for_turn = session_id.clone();
         let event_sender_for_loop = event_sender.clone();
         let event_sender_for_notif = event_sender.clone();
         let event_sender_for_perm = event_sender.clone();
+        let event_sender_for_turn = event_sender.clone();
 
         // 注: kiro は `--trust-all-tools` 起動なので permission 要求はそもそも来ないが、
         // 他 ACP プロバイダと同じ shape で broker を組んで将来の trust 制御に備える。
@@ -154,14 +156,29 @@ impl CliProvider for KiroProvider {
                                         eprintln!(
                                             "[unicrew/kiro] send_prompt error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
                                     if let Err(e) = session.read_to_string().await {
                                         eprintln!(
                                             "[unicrew/kiro] read_to_string error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
+                                    acp_transport::emit_turn_complete(
+                                        &session_id_for_turn,
+                                        "success",
+                                        &event_sender_for_turn,
+                                    );
                                 }
                                 Ok(())
                             })

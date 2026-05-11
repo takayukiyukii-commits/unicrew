@@ -103,9 +103,11 @@ impl CliProvider for CodexAcpProvider {
         let session_id_for_loop = session_id.clone();
         let session_id_for_notif = session_id.clone();
         let session_id_for_perm = session_id.clone();
+        let session_id_for_turn = session_id.clone();
         let event_sender_for_loop = event_sender.clone();
         let event_sender_for_notif = event_sender.clone();
         let event_sender_for_perm = event_sender.clone();
+        let event_sender_for_turn = event_sender.clone();
 
         let broker = acp_transport::PermissionBroker::new();
         let broker_for_perm = broker.clone();
@@ -170,14 +172,29 @@ impl CliProvider for CodexAcpProvider {
                                         eprintln!(
                                             "[unicrew/codex-acp] send_prompt error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
                                     if let Err(e) = session.read_to_string().await {
                                         eprintln!(
                                             "[unicrew/codex-acp] read_to_string error: {e:?}"
                                         );
+                                        acp_transport::emit_turn_complete(
+                                            &session_id_for_turn,
+                                            "error",
+                                            &event_sender_for_turn,
+                                        );
                                         break;
                                     }
+                                    acp_transport::emit_turn_complete(
+                                        &session_id_for_turn,
+                                        "success",
+                                        &event_sender_for_turn,
+                                    );
                                 }
                                 Ok(())
                             })
