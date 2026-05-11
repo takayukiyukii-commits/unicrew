@@ -40,6 +40,8 @@ export const PROVIDER_CATEGORY: Record<Provider, ProviderCategory> = {
   // qwen は Alibaba DashScope BYOK + Apache-2.0 OSS。3大ファミリーに属さないので open_local 扱い
   // （将来 alibaba_family / oss_family を増やす可能性あり）。
   qwen: "open_local",
+  // kimi は Moonshot AI、ACP ネイティブサポート（kimi acp）。OAuth login で認証完結。
+  kimi: "open_local",
 };
 
 export const CATEGORY_ORDER: ProviderCategory[] = [

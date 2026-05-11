@@ -116,6 +116,19 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
     level: "advanced",
   },
   {
+    id: "preset-acp-east-west",
+    name: "東西 ACP 議論（米中 OSS）",
+    description:
+      "西側 ACP の OpenCode（sst）と東側 ACP の Kimi（Moonshot AI）に Goose を加えた3エージェント。地域・学習データの違いが議論の幅を広げる。Kimi は事前 OAuth login 必須。",
+    participants: [
+      { id: "p1", provider: "opencode", characterId: "tmpl-opencode-normal" },
+      { id: "p2", provider: "kimi", characterId: "tmpl-kimi-normal" },
+      { id: "p3", provider: "goose", characterId: "tmpl-claude-normal" },
+    ],
+    requiredProviders: ["opencode", "kimi", "goose"],
+    level: "advanced",
+  },
+  {
     id: "preset-kiro-vs-codex",
     name: "クラウド対決（AWS × OpenAI）",
     description:

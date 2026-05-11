@@ -140,6 +140,7 @@ export function SettingsModal({
     "codex-acp": { status: null, stage: "idle", line: "" },
     kiro: { status: null, stage: "idle", line: "" },
     qwen: { status: null, stage: "idle", line: "" },
+    kimi: { status: null, stage: "idle", line: "" },
   };
   const [acpStates, setAcpStates] =
     useState<Record<AcpCliProvider, AcpCliState>>(initialAcpState);
@@ -159,7 +160,7 @@ export function SettingsModal({
     setRefreshing(true);
     try {
       // status / version を全部並列取得。version は npm view を叩くので少し遅いが、待ってから表示。
-      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro, qwen] =
+      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro, qwen, kimi] =
         await Promise.all([
           claudeStatus(),
           codexStatus(),
@@ -171,6 +172,7 @@ export function SettingsModal({
           acpCliStatus("codex-acp"),
           acpCliStatus("kiro"),
           acpCliStatus("qwen"),
+          acpCliStatus("kimi"),
         ]);
       setStatus(c);
       setCxStatus(x);
@@ -183,6 +185,7 @@ export function SettingsModal({
         "codex-acp": { ...prev["codex-acp"], status: codexAcp },
         kiro: { ...prev.kiro, status: kiro },
         qwen: { ...prev.qwen, status: qwen },
+        kimi: { ...prev.kimi, status: kimi },
       }));
     } finally {
       setRefreshing(false);
@@ -998,6 +1001,14 @@ export function SettingsModal({
                   "Alibaba QwenLM 製 OSS（Apache-2.0、Claude Code fork）。npm 経由でインストール、実行時に環境変数 DASHSCOPE_API_KEY（Alibaba Cloud Model Studio）が必要。",
                 installHelpUrl: "https://github.com/QwenLM/qwen-code",
                 kind: "auto",
+              },
+              {
+                provider: "kimi",
+                label: "Kimi Code CLI",
+                description:
+                  "Moonshot AI 製。ACP ネイティブサポート（kimi acp）。Python 3.12+ と uv が必要なため手動配置：公式インストールスクリプト（code.kimi.com）か `uv tool install kimi-cli`。認証は CLI 側で `/login` を実行（OAuth）。",
+                installHelpUrl: "https://github.com/moonshotai/kimi-cli",
+                kind: "manual",
               },
             ];
             const connected = acpRows.filter(

@@ -2222,6 +2222,8 @@ fn acp_cli_command_name(provider: &str) -> Option<&'static str> {
         "kiro" => Some("kiro-cli"),
         // Qwen Code（Sprint 3）。ACP ではないが、CLI install/status 検出は同じ仕組みに乗せる。
         "qwen" => Some("qwen"),
+        // Kimi Code（Sprint 3）。ACP 対応（kimi acp）。Python+uv ベースで自動 install 非対応 → manual 枠。
+        "kimi" => Some("kimi"),
         _ => None,
     }
 }
@@ -2352,6 +2354,10 @@ fn resolve_acp_install_command(provider: &str) -> Result<(String, Vec<String>), 
                 ],
             ))
         }
+        "kimi" => Err(
+            "Kimi Code CLI の自動インストールは未対応です。公式手順 https://code.kimi.com/ または `uv tool install kimi-cli` を使ってください（Python 3.12+ / uv 必須）。"
+                .to_string(),
+        ),
         other => Err(format!("unknown acp cli: {}", other)),
     }
 }

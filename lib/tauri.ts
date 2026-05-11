@@ -333,7 +333,8 @@ export type AcpCliProvider =
   | "ollama"
   | "codex-acp"
   | "kiro"
-  | "qwen";
+  | "qwen"
+  | "kimi";
 
 /**
  * installAcpCli が動く provider だけの subset。

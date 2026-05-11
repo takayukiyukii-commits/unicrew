@@ -13,10 +13,11 @@
 //!  - codex-acp → `codex-acp` binary（zed-industries 製、Apache-2.0、OPENAI_API_KEY BYOK 経路、Sprint 2）
 //!  - kiro      → `kiro-cli acp --trust-all-tools`（AWS Bedrock backed、Sprint 2）
 //!  - qwen      → `qwen` CLI（QwenLM/Alibaba、Apache-2.0、Claude Code fork、DASHSCOPE_API_KEY BYOK、Sprint 3）
+//!  - kimi      → `kimi acp`（Moonshot AI、Python+uv 配布、OAuth login で認証、Sprint 3）
 //!
 //! 将来追加候補:
 //!  - copilot   → `copilot` CLI（GitHub）
-//!  - kimi     （独自 stream-json 経路、`kimi acp` 対応有無で L2/L3 判定）
+//!  - antigravity（Google `agy`、ヘッドレス stream-json 対応未確認のため見送り中）
 
 pub mod acp_transport;
 pub mod claude;
@@ -24,6 +25,7 @@ pub mod codex;
 pub mod codex_acp;
 pub mod gemini;
 pub mod goose;
+pub mod kimi;
 pub mod kiro;
 pub mod opencode;
 pub mod qwen;
@@ -79,6 +81,7 @@ pub fn build_provider(id: &str) -> Option<Arc<dyn CliProvider>> {
         "codex-acp" => Some(Arc::new(codex_acp::CodexAcpProvider::new())),
         "kiro" => Some(Arc::new(kiro::KiroProvider::new())),
         "qwen" => Some(Arc::new(qwen::QwenProvider::new())),
+        "kimi" => Some(Arc::new(kimi::KimiProvider::new())),
         _ => None,
     }
 }

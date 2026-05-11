@@ -214,7 +214,8 @@ export type Provider =
   | "opencode"
   | "codex-acp"
   | "kiro"
-  | "qwen";
+  | "qwen"
+  | "kimi";
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
@@ -225,6 +226,7 @@ export const PROVIDER_LABELS: Record<Provider, string> = {
   "codex-acp": "Codex-ACP",
   kiro: "Kiro",
   qwen: "Qwen",
+  kimi: "Kimi",
 };
 
 export const PROVIDER_COLORS: Record<Provider, string> = {
@@ -236,6 +238,7 @@ export const PROVIDER_COLORS: Record<Provider, string> = {
   "codex-acp": "#10a37f",
   kiro: "#7c3aed",
   qwen: "#a855f7",
+  kimi: "#06b6d4",
 };
 
 /**

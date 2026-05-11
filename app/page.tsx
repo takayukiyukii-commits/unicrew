@@ -1683,7 +1683,8 @@ export default function Page() {
         p.provider === "opencode" ||
         p.provider === "codex-acp" ||
         p.provider === "kiro" ||
-        p.provider === "qwen"
+        p.provider === "qwen" ||
+        p.provider === "kimi"
       ) {
         acpProvidersInPreset.push(p.provider);
       }

@@ -78,6 +78,22 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     isTemplate: true,
   },
   {
+    id: "tmpl-kimi-normal",
+    name: "Kimi（normal）",
+    roleTag: "Kimi Code（長文・自律）",
+    emoji: "🟣",
+    iconName: undefined,
+    avatarPath: null,
+    accentColor: "#06b6d4",
+    description:
+      "Moonshot AI の Kimi Code CLI を ACP 経由で動かす。OAuth login で認証完結（UNICREW 側にキー管理不要）。長文・自律実行に強み。manual install（Python+uv ベース）。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "kimi",
+    isTemplate: true,
+  },
+  {
     id: "tmpl-auto",
     name: "おまかせ",
     roleTag: "自動アサイン",
