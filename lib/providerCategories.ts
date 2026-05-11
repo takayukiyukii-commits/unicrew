@@ -37,6 +37,9 @@ export const PROVIDER_CATEGORY: Record<Provider, ProviderCategory> = {
   "codex-acp": "openai_family",
   // kiro は AWS Bedrock backed。3大ファミリーに属さないので open_local 扱い（将来 aws_family を増やす可能性あり）。
   kiro: "open_local",
+  // qwen は Alibaba DashScope BYOK + Apache-2.0 OSS。3大ファミリーに属さないので open_local 扱い
+  // （将来 alibaba_family / oss_family を増やす可能性あり）。
+  qwen: "open_local",
 };
 
 export const CATEGORY_ORDER: ProviderCategory[] = [

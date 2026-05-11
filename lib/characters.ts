@@ -62,6 +62,22 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     isTemplate: true,
   },
   {
+    id: "tmpl-qwen-normal",
+    name: "Qwen（normal）",
+    roleTag: "Qwen Code（コスト・OSS派）",
+    emoji: "🟣",
+    iconName: undefined,
+    avatarPath: null,
+    accentColor: "#a855f7",
+    description:
+      "Alibaba QwenLM の OSS エージェント（Apache-2.0、Claude Code fork）。DashScope の DASHSCOPE_API_KEY が必要。議論モードで Anthropic/OpenAI/Google から独立した中立第三者役を担う。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "qwen",
+    isTemplate: true,
+  },
+  {
     id: "tmpl-auto",
     name: "おまかせ",
     roleTag: "自動アサイン",

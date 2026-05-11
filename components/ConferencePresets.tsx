@@ -9,8 +9,9 @@
  * - 「カスタム選択」は <details> の奥に隠す
  *
  * 現状（2026-05-11）: Goose / OpenCode / codex-acp / Kiro は ACP 経由で実装済。
- * Ollama backed の完全無料モード（preset-fully-free）のみ `comingSoon: true` で
- * 引き続き準備中表示。
+ * Sprint 3 で Qwen Code（独自 stream-json 経路、claude.rs ベース）を追加し
+ * 「4極議論」プリセットを開放、Free モードの一気通貫経路（FreeModeWizard）
+ * 完成に伴い `preset-fully-free` の comingSoon フラグを外して解禁。
  */
 
 import { useState } from "react";
@@ -51,6 +52,20 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
     ],
     requiredProviders: ["claude", "codex", "gemini"],
     level: "starter",
+  },
+  {
+    id: "preset-four-poles",
+    name: "4極議論（西側3社 × Qwen）",
+    description:
+      "Claude / Codex / Gemini に加え、Apache-2.0 OSS の Qwen Code（Alibaba）を第4極として投入。学習データの偏りが分散して議論が深くなる。Qwen は DASHSCOPE_API_KEY が必要。",
+    participants: [
+      { id: "p1", provider: "claude", characterId: "tmpl-claude-normal" },
+      { id: "p2", provider: "codex", characterId: "tmpl-codex-normal" },
+      { id: "p3", provider: "gemini", characterId: "tmpl-claude-normal" },
+      { id: "p4", provider: "qwen", characterId: "tmpl-qwen-normal" },
+    ],
+    requiredProviders: ["claude", "codex", "gemini", "qwen"],
+    level: "intermediate",
   },
   {
     id: "preset-code-duel",
@@ -115,16 +130,16 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-fully-free",
-    name: "完全無料議論（Coming soon）",
-    description: "OpenCode + ローカル Ollama × 3 人格。API 課金 0 円で AI 議論できる究極モード。",
+    name: "完全無料議論",
+    description:
+      "OpenCode + ローカル Ollama × 3 人格 + Goose。API 課金 0 円で AI 議論できる究極モード。FreeMode Wizard でセットアップ済の環境で動く。",
     participants: [
-      { id: "p1", provider: "opencode", characterId: "tmpl-claude-normal" },
-      { id: "p2", provider: "opencode", characterId: "tmpl-claude-normal" },
+      { id: "p1", provider: "opencode", characterId: "tmpl-opencode-normal" },
+      { id: "p2", provider: "opencode", characterId: "tmpl-opencode-normal" },
       { id: "p3", provider: "goose", characterId: "tmpl-claude-normal" },
     ],
     requiredProviders: ["opencode", "goose"],
     level: "advanced",
-    comingSoon: true,
   },
 ];
 

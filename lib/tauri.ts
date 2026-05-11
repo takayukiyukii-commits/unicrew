@@ -332,7 +332,8 @@ export type AcpCliProvider =
   | "opencode"
   | "ollama"
   | "codex-acp"
-  | "kiro";
+  | "kiro"
+  | "qwen";
 
 /**
  * installAcpCli が動く provider だけの subset。
@@ -340,10 +341,15 @@ export type AcpCliProvider =
  * - opencode  : 全 OS で `npm install -g opencode-ai`
  * - codex-acp : 全 OS で `npm install -g @zed-industries/codex-acp`（実行時 OPENAI_API_KEY 必須）
  * - ollama    : Windows のみ `winget install Ollama.Ollama`、macOS/Linux は手動
+ * - qwen      : 全 OS で `npm install -g @qwen-code/qwen-code`（実行時 DASHSCOPE_API_KEY 必須、Sprint 3）
  * - goose は winget 公式パッケージが無いため auto 除外（manual 扱い、2026-05-11）
  * - kiro は AWS Builder ID 必須のため auto 除外（manual 扱い）
  */
-export type AcpCliAutoInstallProvider = "opencode" | "codex-acp" | "ollama";
+export type AcpCliAutoInstallProvider =
+  | "opencode"
+  | "codex-acp"
+  | "ollama"
+  | "qwen";
 
 export interface AcpCliStatus {
   provider: AcpCliProvider;

@@ -2220,6 +2220,8 @@ fn acp_cli_command_name(provider: &str) -> Option<&'static str> {
         // detection 専用（install_acp_cli は manual install のみ）
         "codex-acp" => Some("codex-acp"),
         "kiro" => Some("kiro-cli"),
+        // Qwen Code（Sprint 3）。ACP ではないが、CLI install/status 検出は同じ仕組みに乗せる。
+        "qwen" => Some("qwen"),
         _ => None,
     }
 }
@@ -2338,6 +2340,18 @@ fn resolve_acp_install_command(provider: &str) -> Result<(String, Vec<String>), 
             "kiro-cli の自動インストールは未対応です。公式手順 https://kiro.dev/ を参照してください（AWS Builder ID 必須）。"
                 .to_string(),
         ),
+        "qwen" => {
+            // QwenLM/qwen-code は npm パッケージ（Apache-2.0）。`qwen` バイナリが PATH に出る。
+            // 実行時に DASHSCOPE_API_KEY env が必要。
+            Ok((
+                "npm".to_string(),
+                vec![
+                    "install".to_string(),
+                    "-g".to_string(),
+                    "@qwen-code/qwen-code".to_string(),
+                ],
+            ))
+        }
         other => Err(format!("unknown acp cli: {}", other)),
     }
 }

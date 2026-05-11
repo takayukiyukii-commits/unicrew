@@ -1673,15 +1673,17 @@ export default function Page() {
       }
     }
 
-    // L3 ACP プロバイダのインストール確認。未インストールが1つでもあれば
+    // L2/L3 ローカル/OSS プロバイダのインストール確認。未インストールが1つでもあれば
     // OSS accordion を展開した状態の設定画面へ誘導する。
+    // Qwen は ACP ではないが、CLI install/status を同じ仕組みに乗せているので同列で扱う。
     const acpProvidersInPreset: AcpCliProvider[] = [];
     for (const p of preset.participants) {
       if (
         p.provider === "goose" ||
         p.provider === "opencode" ||
         p.provider === "codex-acp" ||
-        p.provider === "kiro"
+        p.provider === "kiro" ||
+        p.provider === "qwen"
       ) {
         acpProvidersInPreset.push(p.provider);
       }

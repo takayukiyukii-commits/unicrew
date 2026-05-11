@@ -12,10 +12,11 @@
 //!  - opencode  → `opencode acp` subprocess（同上、MIT、Sprint 2 で追加）
 //!  - codex-acp → `codex-acp` binary（zed-industries 製、Apache-2.0、OPENAI_API_KEY BYOK 経路、Sprint 2）
 //!  - kiro      → `kiro-cli acp --trust-all-tools`（AWS Bedrock backed、Sprint 2）
+//!  - qwen      → `qwen` CLI（QwenLM/Alibaba、Apache-2.0、Claude Code fork、DASHSCOPE_API_KEY BYOK、Sprint 3）
 //!
 //! 将来追加候補:
 //!  - copilot   → `copilot` CLI（GitHub）
-//!  - qwen / kimi（独自 stream-json 経路）
+//!  - kimi     （独自 stream-json 経路、`kimi acp` 対応有無で L2/L3 判定）
 
 pub mod acp_transport;
 pub mod claude;
@@ -25,6 +26,7 @@ pub mod gemini;
 pub mod goose;
 pub mod kiro;
 pub mod opencode;
+pub mod qwen;
 pub mod stream_parser;
 pub mod types;
 
@@ -76,6 +78,7 @@ pub fn build_provider(id: &str) -> Option<Arc<dyn CliProvider>> {
         "opencode" => Some(Arc::new(opencode::OpenCodeProvider::new())),
         "codex-acp" => Some(Arc::new(codex_acp::CodexAcpProvider::new())),
         "kiro" => Some(Arc::new(kiro::KiroProvider::new())),
+        "qwen" => Some(Arc::new(qwen::QwenProvider::new())),
         _ => None,
     }
 }

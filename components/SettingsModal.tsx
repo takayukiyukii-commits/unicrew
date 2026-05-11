@@ -125,9 +125,9 @@ export function SettingsModal({
   const [gmStatus, setGmStatus] = useState<GeminiStatus | null>(null);
   const [gmInstallStage, setGmInstallStage] = useState<InstallStage>("idle");
   const [gmInstallLine, setGmInstallLine] = useState("");
-  // ACP / ローカル LLM 系（Goose / OpenCode / Ollama / codex-acp / kiro）の status + install 進捗。
-  // - 自動インストール対応の 3 種（goose/opencode/ollama）は stage/line も使う
-  // - 手動インストール限定の 2 種（codex-acp/kiro）は status のみ参照
+  // ACP / ローカル LLM 系（Goose / OpenCode / Ollama / codex-acp / kiro / qwen）の status + install 進捗。
+  // - 自動インストール対応の 4 種（opencode/ollama/codex-acp/qwen）は stage/line も使う
+  // - 手動インストール限定の 2 種（goose/kiro）は status のみ参照
   type AcpCliState = {
     status: AcpCliStatus | null;
     stage: InstallStage;
@@ -139,6 +139,7 @@ export function SettingsModal({
     ollama: { status: null, stage: "idle", line: "" },
     "codex-acp": { status: null, stage: "idle", line: "" },
     kiro: { status: null, stage: "idle", line: "" },
+    qwen: { status: null, stage: "idle", line: "" },
   };
   const [acpStates, setAcpStates] =
     useState<Record<AcpCliProvider, AcpCliState>>(initialAcpState);
@@ -158,7 +159,7 @@ export function SettingsModal({
     setRefreshing(true);
     try {
       // status / version を全部並列取得。version は npm view を叩くので少し遅いが、待ってから表示。
-      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro] =
+      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro, qwen] =
         await Promise.all([
           claudeStatus(),
           codexStatus(),
@@ -169,6 +170,7 @@ export function SettingsModal({
           acpCliStatus("ollama"),
           acpCliStatus("codex-acp"),
           acpCliStatus("kiro"),
+          acpCliStatus("qwen"),
         ]);
       setStatus(c);
       setCxStatus(x);
@@ -180,6 +182,7 @@ export function SettingsModal({
         ollama: { ...prev.ollama, status: ollama },
         "codex-acp": { ...prev["codex-acp"], status: codexAcp },
         kiro: { ...prev.kiro, status: kiro },
+        qwen: { ...prev.qwen, status: qwen },
       }));
     } finally {
       setRefreshing(false);
@@ -987,6 +990,14 @@ export function SettingsModal({
                   "AWS 製。AWS Bedrock backed。AWS Builder ID と認証情報が必要（前提が複雑なため、配置や認証に詰まったら AI に丸投げ可）。",
                 installHelpUrl: "https://kiro.dev/",
                 kind: "manual",
+              },
+              {
+                provider: "qwen",
+                label: "Qwen Code",
+                description:
+                  "Alibaba QwenLM 製 OSS（Apache-2.0、Claude Code fork）。npm 経由でインストール、実行時に環境変数 DASHSCOPE_API_KEY（Alibaba Cloud Model Studio）が必要。",
+                installHelpUrl: "https://github.com/QwenLM/qwen-code",
+                kind: "auto",
               },
             ];
             const connected = acpRows.filter(
