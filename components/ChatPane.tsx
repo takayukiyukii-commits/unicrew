@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Bot,
   Send,
   Square,
   FolderOpen,
@@ -10,23 +11,35 @@ import {
   Columns2,
   X,
   MessageCircle,
+  Sparkles,
 } from "lucide-react";
+
+/**
+ * 「新スレッド推奨」バナーを出すメッセージ件数の閾値。
+ * Claude Code では turn 30 を超えると context window 圧迫が顕著になる経験則から 30 を採用。
+ */
+const LONG_CHAT_THRESHOLD = 30;
 import type {
   Block,
   Message,
   ParticipantSlot,
+  PermissionMode,
   Provider,
   Thread,
 } from "@/lib/types";
-import { PROVIDER_BADGES, PROVIDER_COLORS, PROVIDER_LABELS } from "@/lib/types";
+import {
+  PERMISSION_MODE_LABELS,
+  PROVIDER_COLORS,
+  PROVIDER_LABELS,
+} from "@/lib/types";
+import { CategoryDot } from "@/lib/providerVisuals";
 import { getCharacter } from "@/lib/characters";
+import { getPersonality } from "@/lib/personalities";
 import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
-import { ActivityPanel } from "./ActivityPanel";
-import { useShowActivity } from "./ActivityContext";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import type { SlashCommandDef } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
@@ -71,6 +84,20 @@ interface Props {
    * 主ペインだけに渡し、split側には出さない（重複表示防止）。
    */
   feedbackSlot?: React.ReactNode;
+  /** true なら「他ペインの会話も渡して送信」モードがONになっている。 */
+  peekActive?: boolean;
+  /** 他ペイン参照モードを toggle する。null/未指定の時はチップを表示しない（並列ペインが無い等）。 */
+  onTogglePeek?: () => void;
+  /**
+   * Shift+Tab でパーミッションモードをトグルするコールバック。
+   * バッジクリックでも呼ばれる。未指定なら表示はするがクリック不可。
+   */
+  onTogglePermissionMode?: () => void;
+  /**
+   * メッセージ数が閾値（既定 30）を超えたら表示する「新スレッド推奨バナー」のクリックハンドラ。
+   * 長い会話を畳んで token 消費を抑える導線。未指定ならバナー自体を出さない。
+   */
+  onSuggestNewThread?: () => void;
 }
 
 export function ChatPane({
@@ -86,16 +113,25 @@ export function ChatPane({
   onExecuteCommand,
   onSosForError,
   feedbackSlot,
+  peekActive = false,
+  onTogglePeek,
+  onTogglePermissionMode,
+  onSuggestNewThread,
 }: Props) {
-  const showActivity = useShowActivity();
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  // 「新スレッド推奨」バナーを当該スレッドで一度閉じたかどうか（per thread, セッション単位）。
+  const [longChatDismissedFor, setLongChatDismissedFor] = useState<string | null>(null);
 
   // 参加者リスト（N-way対応）。単独モードでも1要素配列が返る。
   const slots: ParticipantSlot[] = thread ? effectiveParticipants(thread) : [];
   const isParallel = slots.length >= 2;
   const character = thread ? getCharacter(thread.characterId) : undefined;
+  // 単独モード時のヘッダ表示用：人格（CEO/丁寧 等）が一目で分かるように
+  const personality = !isParallel && character
+    ? getPersonality(character.personalityId ?? "")
+    : null;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -159,7 +195,11 @@ export function ChatPane({
         className={`flex-1 flex items-center justify-center text-center p-8 ${paneBorderClass}`}
       >
         <div>
-          <div className="text-5xl mb-4">🤖</div>
+          <div className="flex justify-center mb-4">
+            <div className="w-14 h-14 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-center">
+              <Bot size={28} strokeWidth={1.5} className="text-[var(--color-muted)]" />
+            </div>
+          </div>
           <h2 className="text-xl font-bold mb-2">UNICREW へようこそ</h2>
           <p className="text-sm text-[var(--color-muted)] max-w-md">
             左の「新しい会話」から始めましょう。
@@ -180,12 +220,45 @@ export function ChatPane({
         <span className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
           {thread.title}
         </span>
-        {character && (
-          <span className="text-[11px] text-[var(--color-muted)] truncate">
-            {character.name}
+        {!isParallel && character && (
+          <span className="flex items-center gap-1 text-[11px] text-[var(--color-muted)] truncate">
+            <span className="truncate">
+              {character.name}
+              <span aria-hidden="true">（</span>
+              <CategoryDot provider={character.provider} size={7} className="mr-0.5" />
+              <span>{PROVIDER_LABELS[character.provider]}</span>
+              <span aria-hidden="true">）</span>
+            </span>
+            {personality && (
+              <>
+                <span className="text-[var(--color-border)]">／</span>
+                <span>{personality.label}</span>
+              </>
+            )}
           </span>
         )}
         <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          {onTogglePeek && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePeek();
+              }}
+              className={`px-2 py-1 rounded text-[10.5px] font-medium transition border ${
+                peekActive
+                  ? "bg-[var(--color-accent-soft)] border-[var(--color-accent)] text-[var(--color-accent)]"
+                  : "bg-white border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+              }`}
+              title={
+                peekActive
+                  ? "他ペインの直近会話を [参考情報] として AI に渡しています。クリックでOFF"
+                  : "他ペインの直近会話を AI に見せて送信する（クリックでON）"
+              }
+              aria-pressed={peekActive}
+            >
+              {peekActive ? "他ペイン参照中" : "他ペイン参照"}
+            </button>
+          )}
           {onSplit && (
             <button
               onClick={onSplit}
@@ -222,15 +295,19 @@ export function ChatPane({
             <span className="flex items-center gap-1 ml-auto px-1.5 py-0.5 bg-[var(--color-accent-soft)] text-[var(--color-accent)] rounded font-medium">
               <Split size={11} />
               並列モード（{slots.length}-way：
-              {slots
-                .map((s) => `${PROVIDER_BADGES[s.provider]} ${PROVIDER_LABELS[s.provider]}`)
-                .join(" × ")}
+              {slots.map((s, idx) => (
+                <span key={s.id} className="inline-flex items-center gap-1">
+                  {idx > 0 && <span className="mx-1 text-[var(--color-muted)]">×</span>}
+                  <CategoryDot provider={s.provider} size={7} />
+                  <span>{PROVIDER_LABELS[s.provider]}</span>
+                </span>
+              ))}
               ）
             </span>
           )}
           {thread.conferenceMode && (
             <span className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-medium border border-amber-200">
-              💬 会議モード（最大{thread.conferenceMaxRounds}ラウンド）
+              会議モード（最大{thread.conferenceMaxRounds}ラウンド）
             </span>
           )}
         </div>
@@ -242,7 +319,9 @@ export function ChatPane({
       >
         {thread.messages.length === 0 && !isStreaming && (
           <div className="px-8 py-16 text-center text-[var(--color-muted)] text-sm">
-            <div className="text-3xl mb-3">{character?.emoji ?? "💬"}</div>
+            <div className="flex justify-center mb-3">
+              <CharacterAvatar character={character} size={56} />
+            </div>
             <div className="font-medium text-[var(--color-text)] mb-1">
               {character?.name ?? "Claude"} と話せます
             </div>
@@ -256,6 +335,7 @@ export function ChatPane({
             slots={slots}
             drafts={threadDrafts}
             conferenceMode={thread.conferenceMode}
+            isStreaming={isStreaming}
             onExecuteCommand={onExecuteCommand}
           />
         ) : (
@@ -272,17 +352,6 @@ export function ChatPane({
         )}
         {feedbackSlot}
       </div>
-
-      {showActivity && (
-        <div className="shrink-0">
-          <ActivityPanel
-            messages={thread.messages}
-            draftBlocks={Object.values(threadDrafts).flatMap((d) =>
-              d ? d.blocks : [],
-            )}
-          />
-        </div>
-      )}
 
       {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示。N-way対応。 */}
       {(() => {
@@ -306,7 +375,7 @@ export function ChatPane({
           <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-amber-50/60 flex items-center gap-2 text-[12px]">
             <MessageCircle size={13} className="text-amber-600 shrink-0" />
             <span className="text-amber-900">
-              議論が中途半端のまま終わっています。もう1ラウンド続けますか？
+              議論をもう1ラウンド続けますか？
             </span>
             <button
               onClick={onContinueConference}
@@ -318,7 +387,46 @@ export function ChatPane({
         );
       })()}
 
+      {/* 長い会話で token 消費が膨らむ前に新スレッドを切る案内。
+          閾値（LONG_CHAT_THRESHOLD）以上 & per-thread で未 dismiss の時だけ表示。 */}
+      {thread &&
+        onSuggestNewThread &&
+        thread.messages.length >= LONG_CHAT_THRESHOLD &&
+        longChatDismissedFor !== thread.id && (
+          <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-sky-50/70 flex items-center gap-2 text-[12px]">
+            <Sparkles size={13} className="text-sky-600 shrink-0" />
+            <span className="text-sky-900 leading-snug">
+              会話が <span className="font-mono font-semibold">
+                {thread.messages.length}
+              </span>{" "}
+              ターンになりました。トークン消費を抑えるために、新しいスレッドを開いて続きを進めるのがおすすめです。
+            </span>
+            <button
+              onClick={onSuggestNewThread}
+              className="ml-auto px-3 py-1.5 rounded-md bg-sky-600 text-white text-[11.5px] font-medium hover:opacity-90 shrink-0"
+            >
+              新しいスレッドを開く
+            </button>
+            <button
+              onClick={() => setLongChatDismissedFor(thread.id)}
+              title="このスレッドでは表示しない"
+              className="shrink-0 p-1 rounded text-sky-700 hover:bg-sky-100"
+              aria-label="閉じる"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
       <div className="shrink-0 border-t border-[var(--color-border)] p-4 bg-white">
+        {thread && (
+          <div className="max-w-4xl mx-auto mb-2 flex items-center justify-end">
+            <PermissionModeBadge
+              mode={thread.permissionMode ?? "acceptEdits"}
+              onToggle={onTogglePermissionMode}
+            />
+          </div>
+        )}
         <div className="max-w-4xl mx-auto flex items-end gap-2 rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 focus-within:border-[var(--color-accent)] transition">
           <textarea
             ref={textareaRef}
@@ -374,6 +482,49 @@ export function ChatPane({
         </div>
       </div>
     </main>
+  );
+}
+
+// ----- パーミッションモードバッジ（Shift+Tab トグル） -----
+
+function PermissionModeBadge({
+  mode,
+  onToggle,
+}: {
+  mode: PermissionMode;
+  onToggle?: () => void;
+}) {
+  const isPlan = mode === "plan";
+  // Plan モードは「読み取り専用で動作中」の注意喚起として色を強める。
+  const tone = isPlan
+    ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+    : "border-[var(--color-border)] bg-white text-[var(--color-muted)] hover:bg-gray-50";
+  const label = PERMISSION_MODE_LABELS[mode];
+  const Component = onToggle ? "button" : "div";
+  return (
+    <Component
+      onClick={onToggle}
+      type={onToggle ? "button" : undefined}
+      title={
+        isPlan
+          ? "プランモード：AI は読み取り・分析のみ。Shift+Tab で自動編集に戻す"
+          : "自動編集モード：AI のファイル編集と実行を自動許可。Shift+Tab でプランモードに切替"
+      }
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition ${tone} ${
+        onToggle ? "cursor-pointer" : "cursor-default"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          isPlan ? "bg-amber-500" : "bg-emerald-500"
+        }`}
+        aria-hidden
+      />
+      <span>{label}</span>
+      <span className="hidden md:inline text-[10px] opacity-70 font-mono">
+        Shift+Tab
+      </span>
+    </Component>
   );
 }
 
@@ -478,12 +629,14 @@ function NwayView({
   slots,
   drafts,
   conferenceMode,
+  isStreaming,
   onExecuteCommand,
 }: {
   messages: Message[];
   slots: ParticipantSlot[];
   drafts: Record<string, ActiveDraftLite | null>;
   conferenceMode: boolean;
+  isStreaming: boolean;
   onExecuteCommand?: (command: string, lang: string) => void;
 }) {
   const groups = groupMessagesForNway(messages, slots);
@@ -493,6 +646,23 @@ function NwayView({
 
   // moderator (中立審判) の発言は通常列ではなく、ラウンド下部に独立して表示する。
   const moderatorSlotId = slots.find((s) => s.role === "moderator")?.id;
+
+  // 議論モードで「直前のラウンドが全スロット埋まった ＆ まだストリーム中」のとき、
+  // 次ラウンドの応答が来るまでの空白時間が UI 上「フリーズしてる？」に見える。
+  // 次ラウンド用の空行（スピナー入り）を1行先出しして、進行中であることを伝える。
+  const lastCompletedRound =
+    lastGroup?.kind === "rounds"
+      ? lastGroup.rounds[lastGroup.rounds.length - 1] ?? null
+      : null;
+  const lastRoundAllFilled =
+    lastCompletedRound != null &&
+    slotsForView.length > 0 &&
+    slotsForView.every((s) => lastCompletedRound.bySlot.has(s.id));
+  const showPendingNextRound =
+    conferenceMode &&
+    isStreaming &&
+    lastCompletedRound != null &&
+    lastRoundAllFilled;
 
   return (
     <>
@@ -513,6 +683,10 @@ function NwayView({
             {g.rounds.map((r, ri) => {
               const isLastRound =
                 isLastGroup && ri === g.rounds.length - 1;
+              // 次ラウンドの空行を出す場合、drafts はその行に渡したいので
+              // 直前ラウンドの行には流さない（行を跨いで draft が混在するのを防ぐ）。
+              const draftsForRow =
+                isLastRound && !showPendingNextRound ? drafts : {};
               return (
                 <NwayResponsesRow
                   key={`r-${gi}-${ri}`}
@@ -520,14 +694,27 @@ function NwayView({
                   round={r.round}
                   showRoundLabel={conferenceMode}
                   bySlot={r.bySlot}
-                  drafts={isLastRound ? drafts : {}}
+                  drafts={draftsForRow}
                   moderatorSlotId={moderatorSlotId}
+                  isStreaming={isLastRound && isStreaming}
                 />
               );
             })}
           </div>
         );
       })}
+      {showPendingNextRound && (
+        <NwayResponsesRow
+          slots={slotsForView}
+          round={lastCompletedRound!.round + 1}
+          showRoundLabel={conferenceMode}
+          bySlot={new Map()}
+          drafts={drafts}
+          moderatorSlotId={moderatorSlotId}
+          isStreaming={true}
+          pendingNextRound={true}
+        />
+      )}
       {hasDrafts && (!lastGroup || lastGroup.kind === "user") && (
         <NwayResponsesRow
           slots={slotsForView}
@@ -536,6 +723,7 @@ function NwayView({
           bySlot={new Map()}
           drafts={drafts}
           moderatorSlotId={moderatorSlotId}
+          isStreaming={isStreaming}
         />
       )}
     </>
@@ -559,6 +747,8 @@ function NwayResponsesRow({
   bySlot,
   drafts,
   moderatorSlotId,
+  isStreaming = false,
+  pendingNextRound = false,
 }: {
   slots: ParticipantSlot[];
   round: number;
@@ -566,6 +756,10 @@ function NwayResponsesRow({
   bySlot: Map<string, Message>;
   drafts: Record<string, ActiveDraftLite | null>;
   moderatorSlotId?: string;
+  /** この行が「現在ストリーミング中」のラウンドか。空のスロットにスピナーを出すか判断する。 */
+  isStreaming?: boolean;
+  /** この行が「次ラウンド先出し」の空行か。ヘッダにスピナー＋"応答待ち" を表示する。 */
+  pendingNextRound?: boolean;
 }) {
   const cols = Math.min(Math.max(slots.length, 1), 6);
   const moderatorMsg = moderatorSlotId
@@ -577,23 +771,40 @@ function NwayResponsesRow({
   return (
     <div className="border-b border-[var(--color-border)]">
       {showRoundLabel && (
-        <div className="px-4 py-1 text-[10.5px] uppercase tracking-wide text-[var(--color-muted)] bg-[var(--color-surface)]/40 border-b border-[var(--color-border)]">
-          {round === 0
-            ? "ラウンド 1：初回回答"
-            : `ラウンド ${round + 1}：相互レビュー`}
+        <div className="px-4 py-1 text-[10.5px] uppercase tracking-wide text-[var(--color-muted)] bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] flex items-center gap-1.5">
+          <span>
+            {round === 0
+              ? "ラウンド 1：初回回答"
+              : `ラウンド ${round + 1}：相互レビュー`}
+          </span>
+          {pendingNextRound && (
+            <span className="flex items-center gap-1 text-[var(--color-accent)] normal-case tracking-normal">
+              <Loader2 size={11} className="animate-spin" aria-hidden="true" />
+              <span>応答待ち…</span>
+            </span>
+          )}
         </div>
       )}
       <div className={`grid ${GRID_COLS_BY_N[cols] ?? "grid-cols-2"} gap-0`}>
-        {slots.map((slot, i) => (
-          <SlotColumn
-            key={slot.id}
-            slot={slot}
-            character={getCharacter(slot.characterId)}
-            message={bySlot.get(slot.id) ?? null}
-            draft={drafts[slot.id] ?? null}
-            leftBorder={i > 0}
-          />
-        ))}
+        {slots.map((slot, i) => {
+          const slotMessage = bySlot.get(slot.id) ?? null;
+          const slotDraft = drafts[slot.id] ?? null;
+          // この行の「ストリーミング中だが、まだこのスロットには message も draft も来ていない」
+          // という空白状態のときに、スピナー入りプレースホルダを出す。
+          const slotPending =
+            isStreaming && slotMessage == null && slotDraft == null;
+          return (
+            <SlotColumn
+              key={slot.id}
+              slot={slot}
+              character={getCharacter(slot.characterId)}
+              message={slotMessage}
+              draft={slotDraft}
+              leftBorder={i > 0}
+              isPending={slotPending}
+            />
+          );
+        })}
       </div>
       {(moderatorMsg || moderatorDraft) && (
         <ModeratorPanel message={moderatorMsg ?? null} draft={moderatorDraft} />
@@ -608,38 +819,46 @@ function SlotColumn({
   message,
   draft,
   leftBorder = false,
+  isPending = false,
 }: {
   slot: ParticipantSlot;
   character: ReturnType<typeof getCharacter>;
   message: Message | null;
   draft: ActiveDraftLite | null;
   leftBorder?: boolean;
+  /** message/draft とも null だが、このラウンドはストリーミング中で「待機中」のとき true */
+  isPending?: boolean;
 }) {
   const color = PROVIDER_COLORS[slot.provider];
-  const badge = PROVIDER_BADGES[slot.provider];
   const label = PROVIDER_LABELS[slot.provider];
   return (
     <div
       className={`min-w-0 ${leftBorder ? "border-l border-[var(--color-border)]" : ""}`}
     >
-      <div className="px-3 py-1.5 flex items-center gap-2 text-[11px] font-medium bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] sticky top-0">
-        <span style={{ color }} className="shrink-0">
-          {badge}
-        </span>
-        <span style={{ color }} className="shrink-0">
-          {label}
-        </span>
-        {character && (
+      <div className="px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-medium bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] sticky top-0">
+        {character ? (
           <>
-            <span className="text-[var(--color-muted)] shrink-0">/</span>
             <CharacterAvatar character={character} size={16} />
             <span
               className="truncate text-[var(--color-text)] font-semibold"
-              title={`${character.name}（${character.roleTag ?? ""}）`}
+              title={`${character.name}（${label}）${character.roleTag ? "・" + character.roleTag : ""}`}
             >
               {character.name}
+              <span className="text-[var(--color-muted)] font-normal">
+                （
+              </span>
+              <CategoryDot provider={slot.provider} size={7} className="mr-0.5" />
+              <span style={{ color }}>{label}</span>
+              <span className="text-[var(--color-muted)] font-normal">
+                ）
+              </span>
             </span>
           </>
+        ) : (
+          <span style={{ color }} className="shrink-0 inline-flex items-center gap-1">
+            <CategoryDot provider={slot.provider} size={7} />
+            <span>{label}</span>
+          </span>
         )}
         {draft && <StreamingStatus draft={draft} variant="row" />}
       </div>
@@ -648,6 +867,15 @@ function SlotColumn({
           <ColumnContent blocks={message.blocks ?? []} fallback={message.content} />
         ) : draft ? (
           <ColumnContent blocks={draft.blocks} fallback="…" />
+        ) : isPending ? (
+          <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
+            <Loader2
+              size={12}
+              className="animate-spin text-[var(--color-accent)] shrink-0"
+              aria-hidden="true"
+            />
+            <span>{character?.name ?? "—"} の応答を待っています…</span>
+          </div>
         ) : (
           <div className="text-[12px] text-[var(--color-muted)] italic">
             {character?.name ?? "—"} はまだ応答していません
@@ -759,13 +987,13 @@ function MinutesView({ minutes }: { minutes: ModeratorMinutes }) {
   return (
     <div className="mt-2 pt-2 border-t border-amber-200/70 space-y-2">
       {minutes.decisions && minutes.decisions.length > 0 && (
-        <MinutesSection title="✅ 決定事項" items={minutes.decisions} />
+        <MinutesSection title="決定事項" items={minutes.decisions} />
       )}
       {minutes.tasks && minutes.tasks.length > 0 && (
-        <MinutesSection title="📋 タスク" items={minutes.tasks} />
+        <MinutesSection title="タスク" items={minutes.tasks} />
       )}
       {minutes.parking && minutes.parking.length > 0 && (
-        <MinutesSection title="🅿️ 保留事項" items={minutes.parking} />
+        <MinutesSection title="保留事項" items={minutes.parking} />
       )}
     </div>
   );

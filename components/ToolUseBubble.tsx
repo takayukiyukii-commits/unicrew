@@ -181,14 +181,15 @@ function TodoListBubble({ block }: { block: ToolUseBlock }) {
 function TodoMark({ status }: { status: TodoItem["status"] }) {
   if (status === "completed") {
     return (
-      <span className="shrink-0 mt-[2px] text-emerald-600 font-mono">✔</span>
+      <Check size={12} className="shrink-0 mt-[2px] text-emerald-600" aria-hidden="true" />
     );
   }
   if (status === "in_progress") {
     return (
-      <span className="shrink-0 mt-[2px] text-[var(--color-accent)] font-mono">
-        ◼
-      </span>
+      <span
+        className="shrink-0 mt-[3px] inline-block w-2.5 h-2.5 bg-[var(--color-accent)] rounded-sm"
+        aria-hidden="true"
+      />
     );
   }
   return (

@@ -92,6 +92,12 @@ export async function readTextFile(path: string): Promise<string> {
   return invoke<string>("read_text_file", { path });
 }
 
+export async function writeTextFile(path: string, contents: string): Promise<void> {
+  if (!isTauri()) throw new Error("writeTextFile は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  await invoke("write_text_file", { path, contents });
+}
+
 // ---------- Claude Code (CLI) status & login ----------
 
 export interface ClaudeStatus {
@@ -258,6 +264,248 @@ export async function installCodex(): Promise<void> {
   await invoke("install_codex");
 }
 
+export interface GeminiStatus {
+  installed: boolean;
+  logged_in: boolean;
+  version: string | null;
+  has_api_key_env: boolean;
+  hint: string;
+}
+
+export async function geminiStatus(): Promise<GeminiStatus> {
+  if (!isTauri()) {
+    return {
+      installed: false,
+      logged_in: false,
+      version: null,
+      has_api_key_env: false,
+      hint: "（ブラウザ開発モードでは取得できません）",
+    };
+  }
+  const invoke = await loadInvoke();
+  return invoke<GeminiStatus>("gemini_status");
+}
+
+export async function installGemini(): Promise<void> {
+  if (!isTauri()) {
+    alert("インストール操作は Tauri アプリ起動時のみ利用できます。");
+    return;
+  }
+  const invoke = await loadInvoke();
+  await invoke("install_gemini");
+}
+
+/**
+ * `npm install -g @google/gemini-cli` の進捗（stdout/stderr 行）を listen。
+ * onDone は exit code success のとき true。
+ */
+export async function listenGeminiInstallProgress(handlers: {
+  onLine?: (line: string) => void;
+  onDone?: (success: boolean) => void;
+}): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const ev = await loadEvent();
+  const unlistens = await Promise.all([
+    ev.listen<string>("gemini_install:line", (e) =>
+      handlers.onLine?.(e.payload),
+    ),
+    ev.listen<boolean>("gemini_install:done", (e) =>
+      handlers.onDone?.(e.payload),
+    ),
+  ]);
+  return () => {
+    unlistens.forEach((u) => u());
+  };
+}
+
+// ---------- ACP / OSS CLI (Goose / OpenCode / Ollama) ----------
+
+/**
+ * L3 ACP / ローカル LLM 系の status 検出対応プロバイダ。
+ *
+ * - goose / opencode / ollama: 自動インストール対応（installAcpCli 実行可）
+ * - codex-acp / kiro: status 検出のみ対応。installAcpCli は reject される
+ *   （npm 配布が現状無く、AWS Builder ID 等の前提があるため手動インストール限定）
+ */
+export type AcpCliProvider =
+  | "goose"
+  | "opencode"
+  | "ollama"
+  | "codex-acp"
+  | "kiro";
+
+/**
+ * installAcpCli が動く provider だけの subset。
+ *
+ * - opencode  : 全 OS で `npm install -g opencode-ai`
+ * - codex-acp : 全 OS で `npm install -g @zed-industries/codex-acp`（実行時 OPENAI_API_KEY 必須）
+ * - ollama    : Windows のみ `winget install Ollama.Ollama`、macOS/Linux は手動
+ * - goose は winget 公式パッケージが無いため auto 除外（manual 扱い、2026-05-11）
+ * - kiro は AWS Builder ID 必須のため auto 除外（manual 扱い）
+ */
+export type AcpCliAutoInstallProvider = "opencode" | "codex-acp" | "ollama";
+
+export interface AcpCliStatus {
+  provider: AcpCliProvider;
+  installed: boolean;
+  version: string | null;
+}
+
+/**
+ * `<bin> --version` で installed/version を検出する。
+ * ブラウザ dev では `installed: false` を返す。
+ */
+export async function acpCliStatus(
+  provider: AcpCliProvider,
+): Promise<AcpCliStatus> {
+  if (!isTauri()) {
+    return { provider, installed: false, version: null };
+  }
+  const invoke = await loadInvoke();
+  return invoke<AcpCliStatus>("acp_cli_status", { provider });
+}
+
+/**
+ * 指定 provider をインストール。進捗は `listenAcpInstallProgress` で受け取る。
+ * - 自動対応 (`AcpCliAutoInstallProvider`) 以外を渡すと Rust 側で reject される
+ * - OS 非対応の組合せも Promise reject される（UI 側で外部リンク誘導に切替）
+ */
+export async function installAcpCli(
+  provider: AcpCliAutoInstallProvider,
+): Promise<void> {
+  if (!isTauri()) {
+    alert("インストール操作は Tauri アプリ起動時のみ利用できます。");
+    return;
+  }
+  const invoke = await loadInvoke();
+  await invoke("install_acp_cli", { provider });
+}
+
+export interface AcpInstallLineEvent {
+  provider: AcpCliProvider;
+  line: string;
+}
+
+export interface AcpInstallDoneEvent {
+  provider: AcpCliProvider;
+  success: boolean;
+}
+
+/**
+ * ACP CLI インストール進捗を listen。複数 provider 同時実行に対応するため
+ * payload に provider 名が含まれる。UI 側で provider が一致するイベントだけ
+ * 拾うこと。
+ */
+export async function listenAcpInstallProgress(handlers: {
+  onLine?: (ev: AcpInstallLineEvent) => void;
+  onDone?: (ev: AcpInstallDoneEvent) => void;
+}): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const ev = await loadEvent();
+  const unlistens = await Promise.all([
+    ev.listen<AcpInstallLineEvent>("acp_install:line", (e) =>
+      handlers.onLine?.(e.payload),
+    ),
+    ev.listen<AcpInstallDoneEvent>("acp_install:done", (e) =>
+      handlers.onDone?.(e.payload),
+    ),
+  ]);
+  return () => unlistens.forEach((u) => u());
+}
+
+// ---------- Ollama model pull ----------
+
+export interface OllamaPullLineEvent {
+  model: string;
+  line: string;
+}
+
+export interface OllamaPullDoneEvent {
+  model: string;
+  success: boolean;
+}
+
+/**
+ * `ollama pull <model>` を起動して指定モデルをダウンロードする。
+ * 進捗は `listenOllamaPullProgress` で受ける。
+ * Ollama 本体未インストールの場合は Promise reject。
+ */
+export async function ollamaPull(model: string): Promise<void> {
+  if (!isTauri()) {
+    alert("Ollama のモデル取得は Tauri アプリ起動時のみ利用できます。");
+    return;
+  }
+  const invoke = await loadInvoke();
+  await invoke("ollama_pull", { model });
+}
+
+/**
+ * `ollama pull` 進捗を listen。複数モデル同時取得に備え payload に model 名を含む。
+ */
+export async function listenOllamaPullProgress(handlers: {
+  onLine?: (ev: OllamaPullLineEvent) => void;
+  onDone?: (ev: OllamaPullDoneEvent) => void;
+}): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const ev = await loadEvent();
+  const unlistens = await Promise.all([
+    ev.listen<OllamaPullLineEvent>("ollama_pull:line", (e) =>
+      handlers.onLine?.(e.payload),
+    ),
+    ev.listen<OllamaPullDoneEvent>("ollama_pull:done", (e) =>
+      handlers.onDone?.(e.payload),
+    ),
+  ]);
+  return () => unlistens.forEach((u) => u());
+}
+
+export interface CliVersionInfo {
+  name: string;
+  package: string;
+  current: string | null;
+  latest: string | null;
+  update_available: boolean;
+}
+
+export interface CliVersions {
+  claude: CliVersionInfo;
+  codex: CliVersionInfo;
+}
+
+/**
+ * インストール済 CLI バージョンと npm 最新バージョンを取得。
+ * Settings の「最新版チェック」用。
+ */
+export async function cliVersions(): Promise<CliVersions | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return await invoke<CliVersions>("cli_versions");
+}
+
+/**
+ * 指定 provider の CLI を `npm install -g <pkg>@latest` で更新する。
+ * 進捗は `cli_update:line` イベントで stream される（必要なら listen で拾う）。
+ */
+export async function updateCli(provider: "claude" | "codex"): Promise<void> {
+  if (!isTauri()) {
+    alert("更新操作は Tauri アプリ起動時のみ利用できます。");
+    return;
+  }
+  const invoke = await loadInvoke();
+  await invoke("update_cli", { provider });
+}
+
+export async function listenCliUpdate(
+  cb: (line: string) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const ev = await loadEvent();
+  const un = await ev.listen<string>("cli_update:line", (e) => cb(e.payload));
+  return () => {
+    un();
+  };
+}
+
 export async function listenCodexLoginProgress(
   h: LoginProgressHandlers,
 ): Promise<() => void> {
@@ -293,11 +541,14 @@ export async function listenCodexInstallProgress(
 // agent:event イベントで購読する。
 
 export type AuthMode = "subscription" | "apikey";
-/**
- * "gemini" は将来の gemini-cli 連携用に予約。
- * 現状では Rust 側 build_provider が None を返すため起動はエラーになる。
- */
-export type Provider = "claude" | "codex" | "gemini";
+
+// Provider 型は lib/types.ts の正本を使う。
+// 旧コード（2026-05-10 以前）はここに重複定義していたが、Sprint 1 の
+// "goose" 追加で型不整合が発生したため統一した。新プロバイダ追加時は
+// lib/types.ts の Provider と lib/providerCategories.ts の PROVIDER_CATEGORY
+// だけ更新すれば全コンポーネントに伝播する。
+import type { Provider } from "./types";
+export type { Provider };
 
 export interface AgentStartParams {
   sessionId: string;
@@ -307,6 +558,18 @@ export interface AgentStartParams {
   authMode: AuthMode;
   apiKey?: string | null;
   provider?: Provider;
+  /**
+   * 既存 CLI セッションを再開するための CLI 側 session_id。
+   * Claude: `--resume <sid>` / Codex: `exec resume <sid>` に渡される。
+   * thread.claudeSessionId / thread.codexSessionId から拾って渡す想定。
+   * 値が無効・期限切れだった場合 CLI 側がエラーを返すので、上位で再起動を判断する。
+   */
+  resumeCliSessionId?: string | null;
+  /**
+   * Shift+Tab で切替されるパーミッションモード。
+   * "acceptEdits"（既定）= 自動編集 / "plan" = 読み取り・分析のみ。
+   */
+  permissionMode?: "acceptEdits" | "plan";
 }
 
 export async function agentStart(params: AgentStartParams): Promise<void> {
@@ -321,6 +584,8 @@ export async function agentStart(params: AgentStartParams): Promise<void> {
       auth_mode: params.authMode,
       api_key: params.authMode === "apikey" ? params.apiKey ?? null : null,
       provider: params.provider ?? "claude",
+      resume_cli_session_id: params.resumeCliSessionId ?? null,
+      permission_mode: params.permissionMode ?? "acceptEdits",
     },
   });
 }
@@ -355,6 +620,16 @@ export async function agentPermissionResponse(
 
 export type AgentEvent =
   | { kind: "ready" }
+  | {
+      /**
+       * CLI（Claude / Codex）が割り当てた本物のセッションID。
+       * フロント側で thread.claudeSessionId / thread.codexSessionId に保存し、
+       * 将来 `--resume` / `exec resume` で再起動後の継続会話に使う。
+       */
+      kind: "cli_session_id";
+      session_id: string;
+      cli_session_id: string;
+    }
   | { kind: "assistant_text"; session_id: string; text: string }
   | {
       kind: "tool_use";

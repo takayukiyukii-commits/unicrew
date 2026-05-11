@@ -35,11 +35,11 @@ export const RATING_OPTIONS: {
   emoji: string;
   label: string;
 }[] = [
-  { id: "very_bad", emoji: "😞", label: "残念" },
-  { id: "bad", emoji: "😐", label: "いまいち" },
-  { id: "neutral", emoji: "🙂", label: "ふつう" },
-  { id: "good", emoji: "😄", label: "気に入ってる" },
-  { id: "great", emoji: "🤩", label: "最高" },
+  { id: "very_bad", emoji: "", label: "残念" },
+  { id: "bad", emoji: "", label: "いまいち" },
+  { id: "neutral", emoji: "", label: "ふつう" },
+  { id: "good", emoji: "", label: "気に入ってる" },
+  { id: "great", emoji: "", label: "最高" },
 ];
 
 export interface FeedbackPayload {

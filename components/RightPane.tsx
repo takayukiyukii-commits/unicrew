@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import {
   ChevronDown,
-  FolderOpen,
-  FolderCog,
   UserPlus,
   X,
   Gavel,
   Save,
+  BookMarked,
 } from "lucide-react";
 import type {
   Thread,
@@ -17,7 +16,9 @@ import type {
   ParticipantSlot,
   Provider,
 } from "@/lib/types";
-import { MODEL_LABELS, PROVIDER_BADGES, PROVIDER_LABELS } from "@/lib/types";
+import { MODEL_LABELS, PROVIDER_LABELS } from "@/lib/types";
+import { CategoryDot } from "@/lib/providerVisuals";
+import { colorOf } from "@/lib/providerCategories";
 import {
   TEMPLATE_CHARACTERS,
   characterFor,
@@ -30,12 +31,24 @@ import { CharacterAvatar } from "./CharacterAvatar";
 
 interface Props {
   thread: Thread | null;
+  /**
+   * true の場合、編集対象のスレッドが「並列ペインの一つ（主ペインではない）」であることを示す。
+   * RightPane 上部に「このペインを編集中」のバナーを出して、ユーザーに編集対象を明示する。
+   */
+  isFocusedFromSplit?: boolean;
   onChangeCharacter: (characterId: string) => void;
+  /**
+   * 単独モード：現キャラを動かす AI（provider）を切替える。テンプレならクローン+保存、
+   * ユーザーキャラなら直接書換（実装側で対応）。
+   */
+  onChangeCharacterProvider?: (provider: Provider) => void;
   /**
    * 並列モード時に slot 別にキャラを切替する。
    * 旧2way時は slotId が "claude"/"codex" になる（Provider と一致）。
    */
   onChangeSplitCharacter?: (slotId: string, characterId: string) => void;
+  /** 並列モード時に slot 別の AI（provider）を切替する。CEO×Codex のような組合せに対応。 */
+  onChangeSlotProvider?: (slotId: string, provider: Provider) => void;
   /** N-way参加者を追加する。 */
   onAddParticipant?: (slot: Omit<ParticipantSlot, "id">) => void;
   /** N-way参加者を削除する。 */
@@ -45,19 +58,26 @@ interface Props {
   /** 現在の participants 構成を JSON エクスポートする（クリップボード）。 */
   onExportTeamJson?: () => void;
   onChangeModel: (model: ModelId) => void;
-  onChangeWorkspace: () => void;
+  /**
+   * このスレッドで AI に覚えておいてほしいこと（Memory.md 方式）の編集ハンドラ。
+   * 値は string、空文字でクリア。
+   */
+  onChangePersistentMemory?: (memo: string) => void;
 }
 
 export function RightPane({
   thread,
+  isFocusedFromSplit = false,
   onChangeCharacter,
+  onChangeCharacterProvider,
   onChangeSplitCharacter,
+  onChangeSlotProvider,
   onAddParticipant,
   onRemoveParticipant,
   onSaveAsTeam,
   onExportTeamJson,
   onChangeModel,
-  onChangeWorkspace,
+  onChangePersistentMemory,
 }: Props) {
   const character = thread ? getCharacter(thread.characterId) : undefined;
   const personality = character ? getPersonality(character.personalityId ?? "") : null;
@@ -82,6 +102,17 @@ export function RightPane({
         </div>
       ) : (
         <div className="p-5 space-y-5">
+          {isFocusedFromSplit && (
+            <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] px-3 py-2 text-[11.5px] text-[var(--color-accent)] leading-snug">
+              <span className="font-semibold">並列ペイン編集中</span>
+              <span className="text-[var(--color-muted)]">
+                ：「{thread.title || "（無題）"}」
+              </span>
+              <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5">
+                以下の変更はクリック中のペインだけに反映されます。別のペインを編集したい時はそのペインをクリック。
+              </div>
+            </div>
+          )}
           {/* 単独モード: 1人ぶん大きく表示 */}
           {!isParallel && character && (
             <div className="text-center">
@@ -96,7 +127,6 @@ export function RightPane({
               </div>
               {personality && (
                 <div className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-[var(--color-muted)] bg-[var(--color-surface)] border border-[var(--color-border)] px-1.5 py-0.5 rounded-full">
-                  <span>{personality.emoji}</span>
                   <span>{personality.label}</span>
                 </div>
               )}
@@ -108,8 +138,8 @@ export function RightPane({
 
           {/* 単独モードのキャラ切替 */}
           {!isParallel && (
-            <div>
-              <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide">
                 キャラクター
               </label>
               <CharacterSelect
@@ -117,6 +147,13 @@ export function RightPane({
                 onChange={onChangeCharacter}
                 userChars={userChars}
               />
+              {character && onChangeCharacterProvider && (
+                <ProviderToggle
+                  current={character.provider}
+                  onChange={onChangeCharacterProvider}
+                  hint="このキャラを動かす AI を切替（テンプレはクローンして保存）"
+                />
+              )}
             </div>
           )}
 
@@ -143,6 +180,11 @@ export function RightPane({
                     onChangeCharacter={
                       onChangeSplitCharacter
                         ? (id) => onChangeSplitCharacter(slot.id, id)
+                        : undefined
+                    }
+                    onChangeProvider={
+                      onChangeSlotProvider && slot.role !== "moderator"
+                        ? (p) => onChangeSlotProvider(slot.id, p)
                         : undefined
                     }
                     onRemove={
@@ -216,29 +258,17 @@ export function RightPane({
             </div>
           </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-              ワークスペース
-            </label>
-            <div className="border border-[var(--color-border)] rounded-md bg-white p-2 text-[12px]">
-              <div className="flex items-center gap-1.5 mb-1.5 text-[var(--color-muted)]">
-                <FolderOpen size={12} />
-                <span className="truncate font-mono" title={thread.workspace ?? undefined}>
-                  {thread.workspace?.split(/[/\\]/).pop() ?? "未設定"}
-                </span>
-              </div>
-              <button
-                onClick={onChangeWorkspace}
-                className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-surface)] text-[11.5px] text-[var(--color-text)]"
-              >
-                <FolderCog size={12} />
-                フォルダを変更
-              </button>
-            </div>
-            <div className="text-[10.5px] text-[var(--color-muted)] mt-1 leading-relaxed">
-              ファイル編集やコマンドは、このフォルダの中で行われます。
-            </div>
-          </div>
+          {onChangePersistentMemory && (
+            <PersistentMemorySection
+              value={thread.persistentMemory ?? ""}
+              onChange={onChangePersistentMemory}
+            />
+          )}
+
+          {/*
+           * ワークスペース変更 UI は左の「エクスプローラー」列に集約済み。
+           * 右サイドバーから二重に編集できると、Explorer 側に変更が反映されない混乱を生むため削除。
+           */}
 
           <div className="pt-3 border-t border-[var(--color-border)] text-[11px] text-[var(--color-muted)] leading-relaxed">
             <div className="font-semibold mb-1 text-[var(--color-text)]">
@@ -279,7 +309,7 @@ function CharacterSelect({
           <optgroup label="マイキャラクター">
             {userChars.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.emoji} {c.name || "（名前未設定）"}
+                {c.name || "（名前未設定）"}
                 {c.roleTag ? `（${c.roleTag}）` : ""}
               </option>
             ))}
@@ -288,7 +318,7 @@ function CharacterSelect({
         <optgroup label="テンプレート">
           {TEMPLATE_CHARACTERS.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.emoji} {c.name}（{c.roleTag}）
+              {c.name}（{c.roleTag}）
             </option>
           ))}
         </optgroup>
@@ -313,21 +343,20 @@ function ParticipantCard({
   character,
   userChars,
   onChangeCharacter,
+  onChangeProvider,
   onRemove,
 }: {
   slot: ParticipantSlot;
   character: Character | undefined;
   userChars: Character[];
   onChangeCharacter?: (characterId: string) => void;
+  onChangeProvider?: (provider: Provider) => void;
   onRemove?: () => void;
 }) {
   const isModerator = slot.role === "moderator";
-  const colorByProvider: Record<Provider, string> = {
-    claude: "#dd6b20",
-    codex: "#10a37f",
-    gemini: "#4285f4",
-  };
-  const accent = colorByProvider[slot.provider];
+  // プロバイダ色は lib/providerCategories の CATEGORY_COLORS に集約済み（4 色）。
+  // 個別色テーブルを再定義しない。新プロバイダ追加時に毎回ここを直すと UI 崩壊する。
+  const accent = colorOf(slot.provider);
   return (
     <div
       className={`border rounded-md p-2 ${
@@ -340,9 +369,8 @@ function ParticipantCard({
         {isModerator ? (
           <Gavel size={12} className="text-amber-700 shrink-0" />
         ) : (
-          <span className="text-[12px] shrink-0" style={{ color: accent }}>
-            {PROVIDER_BADGES[slot.provider]}
-          </span>
+          <CategoryDot provider={slot.provider} size={9} />
+
         )}
         <span
           className="text-[10.5px] font-semibold uppercase tracking-wide shrink-0"
@@ -379,6 +407,71 @@ function ParticipantCard({
           userChars={userChars}
         />
       )}
+      {onChangeProvider && (
+        <div className="mt-1.5">
+          <ProviderToggle
+            current={slot.provider}
+            onChange={onChangeProvider}
+            hint="このスロットを動かす AI を切替"
+            compact
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * AI（provider）切替用の小さなセグメントコントロール。
+ * Claude / Codex / Gemini を色玉付きピルで並べる。
+ */
+function ProviderToggle({
+  current,
+  onChange,
+  hint,
+  compact = false,
+}: {
+  current: Provider;
+  onChange: (p: Provider) => void;
+  hint?: string;
+  compact?: boolean;
+}) {
+  const providers: Provider[] = ["claude", "codex", "gemini"];
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1 flex-wrap">
+        <span
+          className={`text-[10.5px] uppercase tracking-wide text-[var(--color-muted)] font-semibold ${
+            compact ? "" : "mr-1"
+          }`}
+        >
+          AI
+        </span>
+        {providers.map((p) => {
+          const selected = current === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onChange(p)}
+              className={`px-2 py-0.5 rounded text-[10.5px] border transition inline-flex items-center gap-1 ${
+                selected
+                  ? "bg-[var(--color-accent-soft)] border-[var(--color-accent)] text-[var(--color-text)] font-semibold"
+                  : "bg-white border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+              }`}
+              aria-pressed={selected}
+            >
+              <CategoryDot provider={p} size={8} />
+              <span>{PROVIDER_LABELS[p]}</span>
+            </button>
+          );
+        })}
+      </div>
+      {!compact && hint && (
+        <div className="text-[10px] text-[var(--color-muted)] leading-snug">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -397,7 +490,6 @@ function SaveAsTeamButton({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [emoji, setEmoji] = useState("✨");
 
   return (
     <div className="border border-dashed border-emerald-200 rounded-md mt-1">
@@ -411,23 +503,13 @@ function SaveAsTeamButton({
       </button>
       {open && (
         <div className="px-2 py-2 space-y-1.5 border-t border-emerald-200 bg-emerald-50/40">
-          <div className="flex gap-1.5">
-            <input
-              type="text"
-              value={emoji}
-              onChange={(e) => setEmoji(e.target.value || "✨")}
-              maxLength={2}
-              className="w-10 text-center border border-[var(--color-border)] rounded-md px-1 py-1 text-[14px] bg-white"
-              title="絵文字"
-            />
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="チーム名（例：UNI企画レビュー会）"
-              className="flex-1 border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
-            />
-          </div>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="チーム名（例：UNI企画レビュー会）"
+            className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
+          />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -442,7 +524,6 @@ function SaveAsTeamButton({
                 setOpen(false);
                 setName("");
                 setDescription("");
-                setEmoji("✨");
               }}
               className="flex-1 px-2 py-1 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-muted)] hover:bg-white"
             >
@@ -452,15 +533,15 @@ function SaveAsTeamButton({
               type="button"
               onClick={() => {
                 if (!name.trim()) return;
+                // emoji フィールドは絵文字レス方針のため空文字で保存（描画側は無視）。
                 onSave({
                   name: name.trim(),
                   description: description.trim(),
-                  emoji: emoji.trim() || "✨",
+                  emoji: "",
                 });
                 setOpen(false);
                 setName("");
                 setDescription("");
-                setEmoji("✨");
               }}
               disabled={!name.trim()}
               className="flex-1 px-2 py-1 rounded text-[11px] text-white font-medium bg-emerald-600 disabled:opacity-40"
@@ -572,6 +653,99 @@ function AddParticipantMenu({
               追加
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * このスレッドで AI に覚えておいてほしいこと（Memory.md 方式）。
+ *
+ * - 自由記述。空欄でクリア。
+ * - 各送信時、system_prompt の先頭に「## ユーザーが覚えてほしいこと」として注入される
+ *   （注入は app/page.tsx 側で行う）
+ * - 親 thread が切り替わったら表示も同期する。
+ */
+function PersistentMemorySection({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (memo: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [open, setOpen] = useState(value.length > 0);
+  useEffect(() => {
+    setDraft(value);
+    setOpen(value.length > 0);
+  }, [value]);
+
+  const dirty = draft !== value;
+  const charCount = draft.length;
+  const tooLong = charCount > 4000;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide hover:text-[var(--color-text)]"
+      >
+        <span className="flex items-center gap-1.5">
+          <BookMarked size={11} />
+          覚えてほしいこと
+          {value.length > 0 && (
+            <span className="ml-1 normal-case font-normal text-[10px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] px-1 py-0.5 rounded">
+              ON
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          size={11}
+          className={`transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="space-y-1.5">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={4}
+            placeholder={
+              "例:\n- ユーザー名は結城\n- TypeScript 4 space インデント\n- 完了報告は箇条書き 3 行以内"
+            }
+            className="w-full resize-y border border-[var(--color-border)] rounded-md px-2 py-1.5 text-[12px] bg-white outline-none focus:border-[var(--color-accent)] font-mono leading-relaxed min-h-[80px]"
+          />
+          <div className="flex items-center gap-2 text-[10.5px] text-[var(--color-muted)]">
+            <span className={tooLong ? "text-red-500 font-medium" : ""}>
+              {charCount} / 4000
+            </span>
+            <span className="ml-auto">
+              {dirty ? "未保存" : "保存済"}
+            </span>
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDraft(value)}
+              disabled={!dirty}
+              className="flex-1 px-2 py-1 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-muted)] hover:bg-white disabled:opacity-40"
+            >
+              元に戻す
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(draft)}
+              disabled={!dirty || tooLong}
+              className="flex-1 px-2 py-1 rounded text-[11px] text-white font-medium bg-[var(--color-accent)] disabled:opacity-40"
+            >
+              保存
+            </button>
+          </div>
+          <p className="text-[10px] leading-relaxed text-[var(--color-muted)]">
+            毎回の送信時に AI へ前置きとして渡されます。再起動後も保持。
+          </p>
         </div>
       )}
     </div>

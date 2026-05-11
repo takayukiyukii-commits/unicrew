@@ -118,9 +118,18 @@ export function ActivityPanel({
       >
         <Terminal size={12} className="text-emerald-400" />
         <span className="font-semibold">ターミナル / アクティビティ</span>
-        <span className="text-slate-500">
-          {entries.length} 件 ・ ✓ {completedCount}
-          {runningCount > 0 && ` ・ ⏳ ${runningCount}`}
+        <span className="text-slate-500 flex items-center gap-1">
+          <span>{entries.length} 件</span>
+          <span aria-hidden="true">・</span>
+          <Check size={11} className="inline" aria-label="完了" />
+          <span>{completedCount}</span>
+          {runningCount > 0 && (
+            <>
+              <span aria-hidden="true">・</span>
+              <Loader2 size={11} className="inline animate-spin" aria-label="実行中" />
+              <span>{runningCount}</span>
+            </>
+          )}
         </span>
         <ChevronDown
           size={12}

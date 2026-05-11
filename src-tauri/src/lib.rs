@@ -9,8 +9,10 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 pub mod providers;
+pub mod trust;
+pub mod observability;
 
-use providers::types::{AuthMode, NormalizedEvent, SpawnOpts};
+use providers::types::{AuthMode, NormalizedEvent, PermissionMode, SpawnOpts};
 use providers::{build_provider, SessionHandle};
 
 const KEYRING_SERVICE: &str = "unicrew";
@@ -1419,6 +1421,161 @@ async fn default_workspace_path() -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+// ---------- CLI version comparison（claude / codex 共通） ----------
+
+#[derive(Debug, Serialize)]
+struct CliVersionInfo {
+    /// 表示用ラベル。"Claude Code" / "Codex" 等
+    name: String,
+    /// npm パッケージ名。`@anthropic-ai/claude-code` 等
+    package: String,
+    /// インストール済バージョン（未インストールなら None）
+    current: Option<String>,
+    /// npm registry 上の最新バージョン（取得失敗なら None）
+    latest: Option<String>,
+    /// current != latest かつ両方存在のとき true
+    update_available: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CliVersions {
+    claude: CliVersionInfo,
+    codex: CliVersionInfo,
+}
+
+/// `<pkg> --version` の生出力からセマンティック部分（"x.y.z"）だけ取り出す。
+/// claude: `1.x.y (Claude Code)` / codex: `codex-cli 0.130.0` どちらにも対応。
+fn extract_semver(raw: &str) -> Option<String> {
+    raw.split_whitespace()
+        .find(|tok| tok.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+        .map(|s| s.to_string())
+}
+
+async fn npm_view_latest(pkg: &str) -> Option<String> {
+    let mut cmd = build_silent_command("npm");
+    cmd.args(["view", pkg, "version"]);
+    let out = cmd.output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn build_version_info(
+    name: &str,
+    package: &str,
+    current: Option<String>,
+    latest: Option<String>,
+) -> CliVersionInfo {
+    let update_available = match (&current, &latest) {
+        (Some(c), Some(l)) => c != l,
+        _ => false,
+    };
+    CliVersionInfo {
+        name: name.to_string(),
+        package: package.to_string(),
+        current,
+        latest,
+        update_available,
+    }
+}
+
+/// claude / codex のインストール済バージョンと npm 最新バージョンを返す。
+/// CLI が古い時に Settings で警告＋更新ボタンを出すための情報源。
+#[tauri::command]
+async fn cli_versions() -> Result<CliVersions, String> {
+    // 4 つのコマンドを並列実行（npm view は外部HTTP）
+    let (claude_raw, codex_raw, claude_latest, codex_latest) = tokio::join!(
+        async {
+            build_silent_command("claude")
+                .arg("--version")
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        },
+        async {
+            build_silent_command("codex")
+                .arg("--version")
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        },
+        npm_view_latest("@anthropic-ai/claude-code"),
+        npm_view_latest("@openai/codex"),
+    );
+
+    let claude_current = claude_raw.as_deref().and_then(extract_semver);
+    let codex_current = codex_raw.as_deref().and_then(extract_semver);
+
+    Ok(CliVersions {
+        claude: build_version_info(
+            "Claude Code",
+            "@anthropic-ai/claude-code",
+            claude_current,
+            claude_latest,
+        ),
+        codex: build_version_info(
+            "Codex",
+            "@openai/codex",
+            codex_current,
+            codex_latest,
+        ),
+    })
+}
+
+/// 指定 provider の CLI を `npm install -g <pkg>@latest` で更新する。
+/// 進捗は `cli_update:line` イベントで stream する。
+#[tauri::command]
+async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
+    let pkg = match provider.as_str() {
+        "claude" => "@anthropic-ai/claude-code",
+        "codex" => "@openai/codex",
+        other => return Err(format!("unknown provider: {}", other)),
+    };
+    let target = format!("{}@latest", pkg);
+    let mut cmd = build_silent_command("npm");
+    cmd.args(["install", "-g", &target])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("npm の起動に失敗しました: {}", e))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_clone.emit("cli_update:line", line);
+        }
+    });
+    let app_clone2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_clone2.emit("cli_update:line", line);
+        }
+    });
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!(
+            "npm install が失敗しました（exit={}）",
+            status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
 // ---------- Claude Code (CLI) status & login ----------
 
 #[derive(Debug, Serialize)]
@@ -1487,29 +1644,81 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Windows で `.cmd` / `.bat` / `.ps1` シムを PATH+PATHEXT で解決する。
 /// npm / codex / pnpm 等は `name.cmd` シムなので、Command::new("npm") では
 /// 見つからない（既定では .exe しか探さない）。
+///
+/// PATH に見つからなかった場合は、既知のインストール先（winget/Squirrel/MSIX 等が
+/// 利用する LOCALAPPDATA / ProgramFiles 配下の標準パス）をフォールバック探索する。
+/// これにより winget install 直後で UNICREW プロセスの PATH に新パスがまだ
+/// 伝播してない状況でも binary を発見できる。
 #[cfg(target_os = "windows")]
 fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
-    let path = std::env::var_os("PATH")?;
-    let pathext_raw = std::env::var("PATHEXT").unwrap_or_else(|_| {
-        ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".into()
-    });
-    let exts: Vec<String> = pathext_raw
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_lowercase())
-        .collect();
-    let already_has_ext = std::path::Path::new(name).extension().is_some();
-    for dir in std::env::split_paths(&path) {
-        if already_has_ext {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
+    if let Some(p) = std::env::var_os("PATH") {
+        let pathext_raw = std::env::var("PATHEXT").unwrap_or_else(|_| {
+            ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".into()
+        });
+        let exts: Vec<String> = pathext_raw
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase())
+            .collect();
+        let already_has_ext = std::path::Path::new(name).extension().is_some();
+        for dir in std::env::split_paths(&p) {
+            if already_has_ext {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            for ext in &exts {
+                let mut candidate: PathBuf = dir.clone();
+                candidate.push(format!("{}{}", name, ext));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
             }
         }
-        for ext in &exts {
-            let mut candidate: PathBuf = dir.clone();
-            candidate.push(format!("{}{}", name, ext));
+    }
+
+    // PATH で見つからない場合のフォールバック。winget 等で入れた直後、
+    // 既に走っているプロセス（UNICREW）の PATH キャッシュに新パスが反映されてない
+    // 状況をカバーする。OSS CLI 系の代表的なインストール場所を列挙して探す。
+    resolve_known_install_location(name)
+}
+
+/// 既知のインストール先で `<name>` バイナリを探す Windows 専用フォールバック。
+/// PATH に未反映でも winget/Squirrel/MSIX 経路のインストールを発見できるようにする。
+#[cfg(target_os = "windows")]
+fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
+    let local_appdata = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let program_files = std::env::var_os("ProgramFiles").map(std::path::PathBuf::from);
+    let program_files_x86 = std::env::var_os("ProgramFiles(x86)").map(std::path::PathBuf::from);
+    let user_profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+
+    // (root_prefix, relative_path_template, exe_name) のテーブル。
+    // `{name}` プレースホルダを引数で置換。プロバイダ追加時はここに 1 行足す。
+    let recipes: Vec<(Option<&std::path::PathBuf>, &str)> = vec![
+        // winget の Ollama.Ollama 既定
+        (local_appdata.as_ref(), "Programs/Ollama"),
+        // 一般的な ProgramFiles 配置
+        (program_files.as_ref(), "Ollama"),
+        (program_files_x86.as_ref(), "Ollama"),
+        // Goose の Block 公式 zip 展開先候補
+        (local_appdata.as_ref(), "Programs/Goose"),
+        (local_appdata.as_ref(), "Programs/Block.Goose"),
+        (user_profile.as_ref(), ".local/bin"),
+        // npm global の Squirrel スコープ（参考）。npm 自体は PATH 経路を使う想定
+        (local_appdata.as_ref(), "Programs/OpenCode"),
+    ];
+
+    for (root, subdir) in recipes {
+        let Some(root) = root else { continue };
+        let dir = root.join(subdir);
+        if !dir.is_dir() {
+            continue;
+        }
+        // .exe / 拡張子なし両方を試す
+        for candidate_name in [format!("{}.exe", name), name.to_string()] {
+            let candidate = dir.join(&candidate_name);
             if candidate.is_file() {
                 return Some(candidate);
             }
@@ -1865,6 +2074,427 @@ async fn start_codex_login(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- Gemini (CLI) status & install ----------
+
+#[derive(Debug, Serialize)]
+struct GeminiStatus {
+    installed: bool,
+    /// gemini-cli の OAuth ログイン or `GEMINI_API_KEY` env のいずれかで使える状態
+    logged_in: bool,
+    version: Option<String>,
+    /// API キー（`GEMINI_API_KEY` env）が現在セットされてるか。UIでは「APIキーモードで使える」と表示
+    has_api_key_env: bool,
+    hint: String,
+}
+
+#[tauri::command]
+async fn gemini_status() -> Result<GeminiStatus, String> {
+    let mut cmd = build_silent_command("gemini");
+    cmd.arg("--version");
+    let output = cmd.output().await;
+    let (installed, version) = match output {
+        Ok(o) if o.status.success() => {
+            let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            (true, Some(v))
+        }
+        _ => (false, None),
+    };
+
+    let logged_in = if installed {
+        // gemini-cli の OAuth は `~/.gemini/oauth_creds.json` 等に保存される
+        let home = std::env::var("USERPROFILE")
+            .ok()
+            .or_else(|| std::env::var("HOME").ok())
+            .map(std::path::PathBuf::from);
+        let candidates: Vec<std::path::PathBuf> = home
+            .iter()
+            .flat_map(|h| {
+                vec![
+                    h.join(".gemini").join("oauth_creds.json"),
+                    h.join(".gemini").join("credentials.json"),
+                    h.join(".config").join("gemini").join("oauth_creds.json"),
+                ]
+            })
+            .collect();
+        candidates.iter().any(|p| p.exists())
+    } else {
+        false
+    };
+
+    let has_api_key_env = std::env::var("GEMINI_API_KEY")
+        .ok()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+
+    let hint = if !installed {
+        "Gemini CLI が見つかりません。先にインストールしてください。".into()
+    } else if !logged_in && !has_api_key_env {
+        "Gemini CLI はインストール済み。OAuth ログインまたは API キー登録が必要です。".into()
+    } else {
+        "準備OK。Gemini が利用可能です。".into()
+    };
+
+    Ok(GeminiStatus {
+        installed,
+        logged_in,
+        version,
+        has_api_key_env,
+        hint,
+    })
+}
+
+#[tauri::command]
+async fn install_gemini(app: AppHandle) -> Result<(), String> {
+    // gemini-cli は npm 配布。`@google/gemini-cli`。
+    let mut cmd = build_silent_command("npm");
+    cmd.args(["install", "-g", "@google/gemini-cli"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("npm の起動に失敗しました: {}", e))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_clone.emit("gemini_install:line", line);
+        }
+    });
+    let app_clone2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_clone2.emit("gemini_install:line", line);
+        }
+    });
+    let app_done = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let exit = child.wait().await;
+        let success = matches!(&exit, Ok(s) if s.success());
+        let _ = app_done.emit("gemini_install:done", success);
+    });
+    Ok(())
+}
+
+// ---------- ACP / OSS CLI status & install ----------
+//
+// L3（業界標準 ACP）プロバイダ + ローカル LLM ランタイム（Ollama）の
+// installed/version 検出と自動インストール。1コマンドで provider 引数を切り替える
+// 統一API。既存の claude/codex/gemini 系個別コマンドと並列に動く。
+//
+// 対応プロバイダ:
+//   - "goose"    : Block 製 OSS、`goose --version` で検出、winget install Block.Goose
+//   - "opencode" : sst 製 OSS、`opencode --version` で検出、npm install -g opencode-ai
+//   - "ollama"   : ローカル LLM ランタイム、`ollama --version` で検出、winget install Ollama.Ollama
+//
+// 進捗イベント: 全 provider 共通で `acp_install:line` / `acp_install:done` を emit
+// （payload に provider 名を含むため UI 側で振り分け可能）。
+
+#[derive(Debug, Serialize)]
+struct AcpCliStatus {
+    provider: String,
+    installed: bool,
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AcpInstallLine {
+    provider: String,
+    line: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AcpInstallDone {
+    provider: String,
+    success: bool,
+}
+
+fn acp_cli_command_name(provider: &str) -> Option<&'static str> {
+    match provider {
+        "goose" => Some("goose"),
+        "opencode" => Some("opencode"),
+        "ollama" => Some("ollama"),
+        // detection 専用（install_acp_cli は manual install のみ）
+        "codex-acp" => Some("codex-acp"),
+        "kiro" => Some("kiro-cli"),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+async fn acp_cli_status(provider: String) -> Result<AcpCliStatus, String> {
+    let bin = acp_cli_command_name(&provider)
+        .ok_or_else(|| format!("unknown acp cli: {}", provider))?;
+
+    // Step 1: バイナリ存在確認。PATH 探索 + 既知 install location フォールバック。
+    // 見つかれば installed=true。`--version` 未対応バイナリ（codex-acp 等）もここで救う。
+    #[cfg(target_os = "windows")]
+    let exists = resolve_on_path(bin).is_some();
+    #[cfg(not(target_os = "windows"))]
+    let exists = {
+        // Unix: `which`/path 確認は std で完結。`Command::new(bin).spawn()` を試して
+        // NotFound 系 error なら installed=false、それ以外（exit !=0 でも）は installed=true。
+        let probe = build_silent_command(bin).arg("--version").output().await;
+        match probe {
+            Ok(_) => true,
+            Err(e) => !matches!(e.kind(), std::io::ErrorKind::NotFound),
+        }
+    };
+
+    if !exists {
+        return Ok(AcpCliStatus {
+            provider,
+            installed: false,
+            version: None,
+        });
+    }
+
+    // Step 2: バージョン取得は best-effort。--version 非対応のバイナリでも installed は維持。
+    let probe = build_silent_command(bin).arg("--version").output().await;
+    let version = match probe {
+        Ok(o) if o.status.success() => {
+            let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let v = if v.is_empty() {
+                String::from_utf8_lossy(&o.stderr).trim().to_string()
+            } else {
+                v
+            };
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        }
+        _ => None,
+    };
+
+    Ok(AcpCliStatus {
+        provider,
+        installed: true,
+        version,
+    })
+}
+
+/// インストールコマンドを (program, args) に解決する。
+///
+/// OS 非対応の組み合わせは `Err` を返し、UI 側で外部リンクへ誘導する。
+/// winget は Windows 10 1809+ で標準搭載、npm は UNICREW 自身が Node 必須なので OK。
+fn resolve_acp_install_command(provider: &str) -> Result<(String, Vec<String>), String> {
+    match provider {
+        "opencode" => {
+            // sst/opencode は npm パッケージ。Node が無い環境では npm 自体が失敗するが
+            // UNICREW は npm 前提（Claude/Codex CLI 自動 install と同じ前提）。
+            Ok((
+                "npm".to_string(),
+                vec![
+                    "install".to_string(),
+                    "-g".to_string(),
+                    "opencode-ai".to_string(),
+                ],
+            ))
+        }
+        "codex-acp" => {
+            // zed-industries/codex-acp は npm パッケージ。`codex-acp` バイナリが
+            // PATH に出る。実行時に OPENAI_API_KEY env が必要だが、install 自体は
+            // npm のみで完結する。
+            Ok((
+                "npm".to_string(),
+                vec![
+                    "install".to_string(),
+                    "-g".to_string(),
+                    "@zed-industries/codex-acp".to_string(),
+                ],
+            ))
+        }
+        "goose" => Err(
+            "Goose の自動インストールは未対応です（winget 公式パッケージ未提供、ZIP/PowerShell 手動配置が必要）。https://block.github.io/goose/docs/getting-started/installation から手動でインストールしてください。"
+                .to_string(),
+        ),
+        "ollama" => {
+            #[cfg(target_os = "windows")]
+            {
+                Ok((
+                    "winget".to_string(),
+                    vec![
+                        "install".to_string(),
+                        "--id".to_string(),
+                        "Ollama.Ollama".to_string(),
+                        "--silent".to_string(),
+                        "--accept-source-agreements".to_string(),
+                        "--accept-package-agreements".to_string(),
+                    ],
+                ))
+            }
+            #[cfg(not(target_os = "windows"))]
+            Err(
+                "macOS/Linux の Ollama 自動インストールは未対応です。https://ollama.com/download から手動でインストールしてください。"
+                    .to_string(),
+            )
+        }
+        "kiro" => Err(
+            "kiro-cli の自動インストールは未対応です。公式手順 https://kiro.dev/ を参照してください（AWS Builder ID 必須）。"
+                .to_string(),
+        ),
+        other => Err(format!("unknown acp cli: {}", other)),
+    }
+}
+
+// ---------- Ollama model pull ----------
+//
+// 完全自動 Free モード（FreeModeWizard）が呼ぶ primitive。
+// `ollama pull <model>` を spawn し、進捗を `ollama_pull:line` / `ollama_pull:done` で emit。
+//
+// Ollama 本体の install は `install_acp_cli("ollama")` で行う。順序は
+//   1) install_acp_cli("ollama")  → winget 完了
+//   2) ollama_pull("qwen2.5-coder:7b")  → 数GBダウンロード
+//   3) install_acp_cli("opencode")  → npm 一瞬
+//   4) agent_start(provider:"opencode", ...)
+// を Wizard 側で順次叩く。
+
+#[derive(Debug, Clone, Serialize)]
+struct OllamaPullLine {
+    model: String,
+    line: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OllamaPullDone {
+    model: String,
+    success: bool,
+}
+
+#[tauri::command]
+async fn ollama_pull(app: AppHandle, model: String) -> Result<(), String> {
+    // Ollama 本体が無いと NotFound で落ちる。Wizard 側で acp_cli_status("ollama")
+    // を必ず先にチェックしている前提だが、ここでもバイナリ存在は確認しておく。
+    if resolve_on_path("ollama").is_none() {
+        return Err(
+            "Ollama がインストールされていません。先にローカル/OSS 系で Ollama を導入してください。"
+                .to_string(),
+        );
+    }
+
+    let mut cmd = build_silent_command("ollama");
+    cmd.arg("pull")
+        .arg(&model)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("ollama pull の起動に失敗しました: {}", e))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    let app_stdout = app.clone();
+    let model_for_stdout = model.clone();
+    let h_out = tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_stdout.emit(
+                "ollama_pull:line",
+                OllamaPullLine {
+                    model: model_for_stdout.clone(),
+                    line,
+                },
+            );
+        }
+    });
+    let app_err = app.clone();
+    let model_for_stderr = model.clone();
+    let h_err = tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_err.emit(
+                "ollama_pull:line",
+                OllamaPullLine {
+                    model: model_for_stderr.clone(),
+                    line,
+                },
+            );
+        }
+    });
+    let app_done = app.clone();
+    let model_for_done = model.clone();
+    tauri::async_runtime::spawn(async move {
+        let exit = child.wait().await;
+        let _ = h_out.await;
+        let _ = h_err.await;
+        let success = matches!(&exit, Ok(s) if s.success());
+        let _ = app_done.emit(
+            "ollama_pull:done",
+            OllamaPullDone {
+                model: model_for_done,
+                success,
+            },
+        );
+    });
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_acp_cli(app: AppHandle, provider: String) -> Result<(), String> {
+    let (program, args) = resolve_acp_install_command(&provider)?;
+    let mut cmd = build_silent_command(&program);
+    cmd.args(args.iter().map(|s| s.as_str()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("{} の起動に失敗しました: {}", program, e))?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    let app_stdout = app.clone();
+    let provider_for_stdout = provider.clone();
+    let h_out = tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_stdout.emit(
+                "acp_install:line",
+                AcpInstallLine {
+                    provider: provider_for_stdout.clone(),
+                    line,
+                },
+            );
+        }
+    });
+    let app_err = app.clone();
+    let provider_for_stderr = provider.clone();
+    let h_err = tauri::async_runtime::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = app_err.emit(
+                "acp_install:line",
+                AcpInstallLine {
+                    provider: provider_for_stderr.clone(),
+                    line,
+                },
+            );
+        }
+    });
+    let app_done = app.clone();
+    let provider_for_done = provider.clone();
+    // child.wait() より先に stdout/stderr リーダーを drain させてから done を emit する。
+    // 順番を逆にすると npm/winget の末尾行（"added N packages" 等）が done の後に届く。
+    tauri::async_runtime::spawn(async move {
+        let exit = child.wait().await;
+        let _ = h_out.await;
+        let _ = h_err.await;
+        let success = matches!(&exit, Ok(s) if s.success());
+        let _ = app_done.emit(
+            "acp_install:done",
+            AcpInstallDone {
+                provider: provider_for_done,
+                success,
+            },
+        );
+    });
+    Ok(())
+}
+
 // ---------- Agent (Pure CLI Conductor) ----------
 //
 // 旧版（unipilot）は Node sidecar 経由で `claude-agent-sdk` / `codex-sdk` を呼び出していた。
@@ -1876,6 +2506,8 @@ async fn start_codex_login(app: AppHandle) -> Result<(), String> {
 #[derive(Default)]
 struct AgentState {
     sessions: Mutex<HashMap<String, Box<dyn SessionHandle>>>,
+    /// セッション ID → OTel span ハンドル。agent_start で追加し、agent_stop / drop で閉じる。
+    spans: Mutex<HashMap<String, observability::SessionSpan>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1891,10 +2523,21 @@ struct AgentStartRequest {
     /// "claude" (default) or "codex"
     #[serde(default = "default_provider")]
     provider: String,
+    /// 既存 CLI セッションを再開する場合の CLI 側 session_id（任意）。
+    /// Claude: `--resume <sid>` / Codex: `exec resume <sid>` に渡される。
+    #[serde(default)]
+    resume_cli_session_id: Option<String>,
+    /// "acceptEdits"（既定）または "plan"。Shift+Tab で切替されるパーミッションモード。
+    #[serde(default = "default_permission_mode")]
+    permission_mode: String,
 }
 
 fn default_provider() -> String {
     "claude".to_string()
+}
+
+fn default_permission_mode() -> String {
+    "acceptEdits".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1924,6 +2567,8 @@ async fn agent_start(
         model: req.model,
         auth_mode: AuthMode::from_str(&req.auth_mode),
         api_key: req.api_key,
+        resume_cli_session_id: req.resume_cli_session_id,
+        permission_mode: PermissionMode::from_str(&req.permission_mode),
     };
 
     // event channel: provider → ここ → React に emit
@@ -1939,16 +2584,33 @@ async fn agent_start(
         }
     });
 
-    let handle = provider
-        .spawn_session(opts, tx)
-        .await
-        .map_err(|e| e.to_string())?;
+    let provider_id: &'static str = match req.provider.as_str() {
+        "claude" => "claude",
+        "codex" => "codex",
+        "gemini" => "gemini",
+        "goose" => "goose",
+        "opencode" => "opencode",
+        "codex-acp" => "codex-acp",
+        "kiro" => "kiro",
+        _ => "unknown",
+    };
+    let span = observability::start_session_span(req.session_id.clone(), provider_id);
+
+    let handle = match provider.spawn_session(opts, tx).await {
+        Ok(h) => h,
+        Err(e) => {
+            let msg = e.to_string();
+            span.finish_err(&msg);
+            return Err(msg);
+        }
+    };
 
     state
         .sessions
         .lock()
         .await
-        .insert(req.session_id, handle);
+        .insert(req.session_id.clone(), handle);
+    state.spans.lock().await.insert(req.session_id, span);
     Ok(())
 }
 
@@ -1998,6 +2660,10 @@ async fn agent_stop(
             let _ = handle.stop().await;
         });
     }
+    drop(sessions);
+    if let Some(span) = state.spans.lock().await.remove(&req.session_id) {
+        span.finish_ok();
+    }
     Ok(())
 }
 
@@ -2006,6 +2672,13 @@ async fn agent_stop(
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, String> {
     tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    tokio::fs::write(&path, contents)
         .await
         .map_err(|e| e.to_string())
 }
@@ -2045,6 +2718,7 @@ struct DirEntry {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    observability::init(None);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -2067,12 +2741,25 @@ pub fn run() {
             codex_status,
             start_codex_login,
             install_codex,
+            gemini_status,
+            install_gemini,
+            acp_cli_status,
+            install_acp_cli,
+            ollama_pull,
+            cli_versions,
+            update_cli,
             agent_start,
             agent_send,
             agent_stop,
             agent_permission_response,
             read_text_file,
+            write_text_file,
             list_directory,
+            trust::is_workspace_trusted,
+            trust::trust_workspace,
+            trust::untrust_workspace,
+            trust::list_trusted_workspaces,
+            observability::observability_status,
             list_claude_plugins,
             list_claude_skills,
             list_claude_mcp,

@@ -10,6 +10,7 @@ import {
   Puzzle,
   Search,
   X,
+  FolderTree,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { Thread } from "@/lib/types";
@@ -22,8 +23,11 @@ export type MainView = "chat" | "addons";
 interface Props {
   threads: Thread[];
   activeThreadId: string | null;
-  /** 並列ペイン（右側）に開かれているスレッド ID。null なら単一ペイン。 */
-  splitThreadId?: string | null;
+  /**
+   * 並列ペインに開かれているスレッド ID の配列。空なら単一ペイン。
+   * 主ペインを含めて最大6ペイン（splitThreadIds は最大5まで）。
+   */
+  splitThreadIds?: readonly string[];
   /** 現在ストリーミング中のスレッド ID 集合（裏で動いてるスレッドにスピナーを出す）。 */
   streamingThreadIds?: ReadonlySet<string>;
   /** 通常クリック = 主ペインに開く。Ctrl/Cmd+クリック = 並列ペインに開く。 */
@@ -35,12 +39,26 @@ interface Props {
   mainView?: MainView;
   /** プラグイン/スキル/MCP のページに切替 */
   onOpenAddons?: () => void;
+  /** エクスプローラーパネルが開いているか */
+  explorerOpen?: boolean;
+  /** エクスプローラーパネルの開閉トグル */
+  onToggleExplorer?: () => void;
+  /**
+   * 折り畳み表示（アイコンのみの細列）。エクスプローラー併用時に画面幅を稼ぐため、
+   * 親側で `explorerOpen` と連動して true を渡す想定。
+   */
+  collapsed?: boolean;
+  /**
+   * 畳まれてる状態でユーザーが「やっぱり広げたい」と思ったときの解除トリガ。
+   * collapsed 時のヘッダ/空白領域クリックで発火する。エクスプローラーは閉じない。
+   */
+  onExpand?: () => void;
 }
 
 export function Sidebar({
   threads,
   activeThreadId,
-  splitThreadId = null,
+  splitThreadIds = [],
   streamingThreadIds,
   onSelect,
   onCreate,
@@ -48,6 +66,10 @@ export function Sidebar({
   onOpenSettings,
   mainView = "chat",
   onOpenAddons,
+  explorerOpen = false,
+  onToggleExplorer,
+  collapsed = false,
+  onExpand,
 }: Props) {
   /** アイデア11: 全スレッド横断検索（最小実装：In-Memoryでタイトル＋メッセージ全文grep） */
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,6 +82,121 @@ export function Sidebar({
       return t.messages.some((m) => m.content.toLowerCase().includes(q));
     });
   }, [threads, searchQuery]);
+  if (collapsed) {
+    return (
+      <aside className="w-12 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col">
+        <button
+          type="button"
+          onClick={() => onExpand?.()}
+          className="px-1 py-3 border-b border-[var(--color-border)] flex items-center justify-center w-full hover:bg-white/60 transition"
+          title="サイドバーを広げる（エクスプローラーは開いたまま）"
+          aria-label="サイドバーを広げる"
+        >
+          <span
+            className="text-[10px] px-1 py-0.5 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-bold pointer-events-none"
+          >
+            U
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onCreate}
+          className="mx-2 mt-3 flex items-center justify-center rounded-lg bg-[var(--color-accent)] text-white py-2 hover:opacity-90 transition"
+          title="新しい会話"
+          aria-label="新しい会話"
+        >
+          <Plus size={16} />
+        </button>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-1 py-2 space-y-1 unicrew-scroll">
+          {sorted.map((t) => {
+            const character = getCharacter(t.characterId);
+            const isActive = t.id === activeThreadId;
+            const isInSplit = splitThreadIds.includes(t.id);
+            const isStreaming = streamingThreadIds?.has(t.id) ?? false;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={(e) =>
+                  onSelect(t.id, { intoSplit: e.ctrlKey || e.metaKey })
+                }
+                className={clsx(
+                  "relative w-full flex items-center justify-center py-1.5 rounded-md border transition",
+                  isActive
+                    ? "bg-white border-[var(--color-border)] shadow-sm"
+                    : isInSplit
+                      ? "bg-white/80 border-[var(--color-accent)]/40"
+                      : "border-transparent hover:bg-white/60",
+                )}
+                title={`${t.title}${character?.name ? `（${character.name}）` : ""}`}
+              >
+                <CharacterAvatar character={character} size={24} />
+                {isStreaming && (
+                  <Loader2
+                    size={9}
+                    className="absolute -top-0.5 -right-0.5 text-[var(--color-accent)] animate-spin bg-white rounded-full"
+                  />
+                )}
+                {isInSplit && (
+                  <Columns2
+                    size={9}
+                    className="absolute -bottom-0.5 -right-0.5 text-[var(--color-accent)] bg-white rounded-full"
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-[var(--color-border)] p-1.5 space-y-1">
+          {onToggleExplorer && (
+            <button
+              type="button"
+              onClick={onToggleExplorer}
+              className={clsx(
+                "w-full flex items-center justify-center py-2 rounded-md transition",
+                explorerOpen
+                  ? "bg-white text-[var(--color-accent)] shadow-sm border border-[var(--color-border)]"
+                  : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+              )}
+              title="エクスプローラー（クリックで閉じる）"
+              aria-label="エクスプローラー"
+            >
+              <FolderTree size={15} />
+            </button>
+          )}
+          {onOpenAddons && (
+            <button
+              type="button"
+              onClick={onOpenAddons}
+              className={clsx(
+                "w-full flex items-center justify-center py-2 rounded-md transition",
+                mainView === "addons"
+                  ? "bg-white text-[var(--color-accent)] shadow-sm border border-[var(--color-border)]"
+                  : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+              )}
+              title="機能の追加"
+              aria-label="機能の追加"
+            >
+              <Puzzle size={15} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="w-full flex items-center justify-center py-2 rounded-md text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)] transition"
+            title="設定"
+            aria-label="設定"
+          >
+            <Settings size={15} />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-64 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col">
       <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
@@ -115,7 +252,7 @@ export function Sidebar({
         {sorted.map((t) => {
           const character = getCharacter(t.characterId);
           const isActive = t.id === activeThreadId;
-          const isInSplit = t.id === splitThreadId;
+          const isInSplit = splitThreadIds.includes(t.id);
           const isStreaming = streamingThreadIds?.has(t.id) ?? false;
           const wsName = t.workspace?.split(/[/\\]/).pop() ?? null;
           return (
@@ -187,6 +324,21 @@ export function Sidebar({
       </div>
 
       <div className="border-t border-[var(--color-border)] p-2 space-y-0.5">
+        {onToggleExplorer && (
+          <button
+            onClick={onToggleExplorer}
+            className={clsx(
+              "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition",
+              explorerOpen
+                ? "bg-white text-[var(--color-accent)] font-medium shadow-sm border border-[var(--color-border)]"
+                : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+            )}
+            title="ワークスペースのファイルツリーを開閉。クリックでエディタが新しいウィンドウで開きます"
+          >
+            <FolderTree size={15} />
+            エクスプローラー
+          </button>
+        )}
         {onOpenAddons && (
           <button
             onClick={onOpenAddons}

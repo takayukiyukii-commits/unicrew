@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { X, Upload, Trash2, ChevronDown, RotateCcw } from "lucide-react";
-import {
-  ACCENT_COLORS,
-  EMOJI_OPTIONS,
-  blankCharacter,
-} from "@/lib/characters";
+import { ACCENT_COLORS, blankCharacter } from "@/lib/characters";
 import { PERSONALITIES, getPersonality } from "@/lib/personalities";
 import { MODEL_LABELS, PROVIDER_LABELS } from "@/lib/types";
+import { CategoryDot } from "@/lib/providerVisuals";
+import { CATEGORY_DESCRIPTIONS, PROVIDER_CATEGORY } from "@/lib/providerCategories";
 import type { Character, ModelId, Provider } from "@/lib/types";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { deleteAvatar, pickAndSaveAvatar } from "@/lib/tauri";
@@ -152,23 +150,10 @@ export function CharacterEditModal({
           <section className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-                絵文字（画像が無い時のフォールバック）
+                アイコン（画像が無い時のフォールバック）
               </label>
-              <div className="flex flex-wrap gap-1.5 border border-[var(--color-border)] rounded-md p-2 max-h-28 overflow-y-auto bg-[var(--color-surface)]">
-                {EMOJI_OPTIONS.map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => setField("emoji", e)}
-                    className={clsx(
-                      "w-8 h-8 rounded text-lg flex items-center justify-center transition",
-                      c.emoji === e
-                        ? "bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]"
-                        : "hover:bg-white",
-                    )}
-                  >
-                    {e}
-                  </button>
-                ))}
+              <div className="text-[11.5px] text-[var(--color-muted)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md p-2 leading-relaxed">
+                テンプレートから複製した場合は組み込みアイコン（lucide ラインアート）が自動で割り当てられます。画像をアップロードした場合はそちらが優先されます。
               </div>
             </div>
             <div>
@@ -205,13 +190,12 @@ export function CharacterEditModal({
                   key={p.id}
                   onClick={() => setField("personalityId", p.id)}
                   className={clsx(
-                    "border rounded-md px-2 py-1.5 text-[11.5px] text-left transition flex items-center gap-1.5",
+                    "border rounded-md px-2 py-1.5 text-[11.5px] text-left transition",
                     c.personalityId === p.id
                       ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
                       : "border-[var(--color-border)] hover:bg-[var(--color-surface)]",
                   )}
                 >
-                  <span>{p.emoji}</span>
                   <span className="font-medium truncate">{p.label}</span>
                 </button>
               ))}
@@ -245,11 +229,12 @@ export function CharacterEditModal({
                       : "border-[var(--color-border)] hover:bg-[var(--color-surface)]",
                   )}
                 >
-                  {p === "claude" ? "🟠" : "🟢"} {PROVIDER_LABELS[p]}
+                  <span className="inline-flex items-center gap-1.5">
+                    <CategoryDot provider={p} size={9} />
+                    {PROVIDER_LABELS[p]}
+                  </span>
                   <span className="block text-[10.5px] text-[var(--color-muted)] mt-0.5">
-                    {p === "claude"
-                      ? "Anthropic Claude（Pro/Max）"
-                      : "OpenAI Codex（ChatGPT Plus/Pro）"}
+                    {CATEGORY_DESCRIPTIONS[PROVIDER_CATEGORY[p]]}
                   </span>
                 </button>
               ))}

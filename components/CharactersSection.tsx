@@ -111,7 +111,7 @@ export function CharactersSection({ onCharactersChanged }: Props) {
                     )}
                   </div>
                   <div className="text-[11px] text-[var(--color-muted)] truncate">
-                    {p ? `${p.emoji} ${p.label}` : "口調未設定"} ・{" "}
+                    {p ? p.label : "口調未設定"} ・{" "}
                     {c.description || "説明なし"}
                   </div>
                 </div>

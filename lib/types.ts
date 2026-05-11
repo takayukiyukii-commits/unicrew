@@ -90,6 +90,11 @@ export interface Character {
   name: string;
   roleTag: string;
   emoji: string;
+  /**
+   * lucide-react のアイコン名。指定されていればキャラ表示時 emoji より優先される。
+   * サイドバーやモーダルと同じ白黒ラインアートで統一したいキャラに付ける。
+   */
+  iconName?: string;
   /** ローカル画像の絶対パス。Tauri convertFileSrc で表示。null ならemoji表示。 */
   avatarPath: string | null;
   accentColor: string;
@@ -144,33 +149,97 @@ export interface Thread {
   conferenceMode: boolean;
   /** 最大ラウンド数（デフォルト 3） */
   conferenceMaxRounds: number;
+  /**
+   * このスレッドで AI に覚えておいてほしいこと（Memory.md 方式）。
+   *
+   * - 右サイドバーで自由記述
+   * - 各送信時、system_prompt の先頭に「## ユーザーが覚えてほしいこと」として注入される
+   * - 再起動後 CLI が文脈を忘れていても、ここに書いてあれば保持される
+   * - 空欄ならノーオペ
+   */
+  persistentMemory?: string;
+  /**
+   * Claude CLI の session ID。--resume <sid> で本物の継続セッションに繋ぐため永続化する。
+   * 取得元は stream-json 出力の最初の `system.init` イベント。
+   */
+  claudeSessionId?: string;
+  /**
+   * Codex CLI の session ID。`codex exec resume <sid>` で同上。
+   */
+  codexSessionId?: string;
+  /**
+   * パーミッションモード（Shift+Tab で切替）。
+   * - "acceptEdits"（既定）: AI のファイル編集・コマンド実行を自動許可（従来挙動）
+   * - "plan": 読み取り・分析のみ。Claude は --permission-mode plan、Codex は read-only sandbox
+   *
+   * 切替時は両 provider の subprocess を停止し、次回送信時に新モードで再 spawn する。
+   * 未設定（旧スレッド）は acceptEdits 扱い。
+   */
+  permissionMode?: PermissionMode;
 }
+
+export type PermissionMode = "acceptEdits" | "plan";
+
+export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
+  acceptEdits: "自動編集",
+  plan: "プランモード",
+};
 
 export type AuthMode = "subscription" | "apikey";
 
 /**
- * "gemini" は将来の gemini-cli 連携用に予約。
- * 現状では providers/build_provider が None を返すため、選んでも起動できない。
+ * UNICREW がサポートする AI プロバイダ。
+ *
+ * 公式 CLI 経由（L1）:
+ *   - claude  : Anthropic 公式 CLI（Pro/Max OAuth または ANTHROPIC_API_KEY）
+ *   - codex   : OpenAI 公式 CLI（ChatGPT Plus/Pro OAuth または OPENAI_API_KEY）
+ *   - gemini  : Google 公式 CLI（OAuth または GEMINI_API_KEY）
+ *
+ * 業界標準 ACP プロトコル経由（L3、2026-05-10 Sprint 1 追加 / 2026-05-11 Sprint 2 拡張）:
+ *   - goose      : Block 製 OSS、`goose acp` subprocess + agent-client-protocol crate
+ *   - opencode   : sst 製 OSS（MIT）、`opencode acp` subprocess
+ *   - codex-acp  : zed-industries 製 OSS（Apache-2.0）、`codex-acp` binary。OPENAI_API_KEY BYOK 経路
+ *   - kiro       : AWS Labs 製、`kiro-cli acp --trust-all-tools`。AWS credentials 必須（Bedrock 利用）
+ *
+ * 将来追加候補:
+ *   - qwen / kimi（独自 stream-json 経路）
+ *   - antigravity（agy CLI の仕様確認待ち）
+ *   - copilot（GitHub `copilot` CLI）
  */
-export type Provider = "claude" | "codex" | "gemini";
+export type Provider =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "goose"
+  | "opencode"
+  | "codex-acp"
+  | "kiro";
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
   codex: "Codex",
   gemini: "Gemini",
+  goose: "Goose",
+  opencode: "OpenCode",
+  "codex-acp": "Codex-ACP",
+  kiro: "Kiro",
 };
 
 export const PROVIDER_COLORS: Record<Provider, string> = {
   claude: "#dd6b20",
   codex: "#10a37f",
   gemini: "#4285f4",
+  goose: "#7c3aed",
+  opencode: "#7c3aed",
+  "codex-acp": "#10a37f",
+  kiro: "#7c3aed",
 };
 
-export const PROVIDER_BADGES: Record<Provider, string> = {
-  claude: "🟠",
-  codex: "🟢",
-  gemini: "🔵",
-};
+/**
+ * @deprecated `PROVIDER_BADGES` は廃止。代わりに `lib/providerVisuals` の
+ * `<CategoryDot provider={p} />` を使う。プロバイダ追加時に絵文字を増やすと
+ * UI が破綻するため、カテゴリ色（4種）に集約する設計に移行した（2026-05-10）。
+ */
 
 export interface AppSettings {
   defaultCharacterId: string;

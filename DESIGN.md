@@ -37,21 +37,45 @@ UNICREW は **公式 `claude` / `codex` CLI を subprocess として spawn す�
 │  │ Rust main: src-tauri/src/                     │     │
 │  │  ├ providers/                                 │     │
 │  │  │   ├ trait Provider                         │     │
-│  │  │   ├ claude.rs（claude CLI subprocess）     │     │
-│  │  │   ├ codex.rs（codex CLI subprocess）       │     │
-│  │  │   └ (future) gemini.rs / copilot.rs        │     │
+│  │  │   ├ claude.rs       (L1: claude CLI)      │     │
+│  │  │   ├ codex.rs        (L1: codex CLI)       │     │
+│  │  │   ├ gemini.rs       (L1: gemini CLI)      │     │
+│  │  │   ├ antigravity.rs  (L1: agy CLI)         │     │
+│  │  │   ├ opencode.rs     (L2: 自動install)     │     │
+│  │  │   ├ qwen.rs         (L2: 自動install)     │     │
+│  │  │   ├ kimi.rs         (L2: 自動install)     │     │
+│  │  │   └ goose_embed.rs  (L4: goose-sdk crate) │     │
 │  │  ├ stream_parser.rs                           │     │
-│  │  ├ install.rs（winget / brew 経由）           │     │
+│  │  ├ install.rs（winget / brew / npm 経由）    │     │
 │  │  └ keychain.rs（OS Keychain：APIキー任意）   │     │
-│  └────────────────────┬─────────────────────────┘     │
-│                       │ stdin / stdout                   │
-│  ┌────────────────────▼─────────────────────────┐     │
-│  │ 公式CLI subprocess（Anthropic / OpenAI 配布）│     │
-│  │  ├ claude -p --output-format stream-json …   │     │
-│  │  └ codex exec ...                             │     │
-│  └───────────────────────────────────────────────┘     │
+│  └────────┬───────────────────────────┬─────────┘     │
+│           │ stdin/stdout              │ direct call    │
+│  ┌────────▼─────────────────────┐  ┌─▼──────────────┐ │
+│  │ 公式CLI subprocess (L1/L2)    │  │ goose-sdk      │ │
+│  │  ├ claude -p ...              │  │ Rust crate内蔵 │ │
+│  │  ├ codex exec ...             │  │ (L4)           │ │
+│  │  ├ agy ...                    │  │ subprocess無し │ │
+│  │  ├ opencode run -f json ...   │  │ 直接 Event 生成│ │
+│  │  ├ qwen --output-format ...   │  └────────────────┘ │
+│  │  └ kimi ...                   │                     │
+│  └───────────────────────────────┘                     │
 └────────────────────────────────────────────────────────┘
 ```
+
+### 4層統合モデル（2026-05-10 採用）
+
+| 層 | 通信方式 | プロバイダ |
+|---|---|---|
+| L1 外部CLI | subprocess + stream-json | Claude / Codex / Gemini / Antigravity |
+| L2 自動install | subprocess + stream-json（初回のみ install 実行） | OpenCode / Qwen Code / Kimi |
+| L4 内蔵 | Rust crate 直接 link、subprocess なし | Goose（goose-sdk） |
+
+**L4 の特徴**:
+- subprocess 起動コストゼロ → 並列モードで100セッション同時起動可能
+- 型付き Rust API → パース失敗・エスケープバグの根絶
+- UNICREW 独自の permission gate / kill switch を agent loop の中に直接挟める
+- Cargo.toml で `goose-sdk = { git = "https://github.com/block/goose", tag = "v<X>" }` 固定
+- ライセンス: Apache-2.0、`THIRD_PARTY_LICENSES/goose/` に NOTICE 同梱必須
 
 **なくなったもの（unipilot から削除）**:
 - `sidecar/agent.mjs`（claude-agent-sdk 使用）
@@ -148,6 +172,120 @@ claude --print \
 ### キャラクター systemPrompt
 - 既存 `buildEffectiveSystemPrompt(characterPrompt, personalityId)` の出力を `--append-system-prompt` に渡すだけ
 - SDK の preset+append 形式は CLI が内部で同等の処理をしている（CLI=Anthropic公式なので preset が消えない）
+
+## 5b. ACP プロトコル経路（L3）— 業界標準採用
+
+**訂正**: 当初「L4 Goose 内蔵」を計画したが、調査の結果 `goose-sdk` は ACP client 実装であり、本物の embed は V8 同梱・MSRV 1.91.1 強制でコスト過大と判明。代わりに **業界標準 ACP（Agent Client Protocol、Zed 主導）** を採用し、複数の ACP 対応エージェントを1つの実装で束ねる。詳細経緯: `D:\company\CDO（技術責任者）\作業中\20260510_調査ノート_Goose_L4再評価_v2.md`
+
+### 共通 ACP transport（providers/acp_transport.rs）
+
+```rust
+// src-tauri/src/providers/acp_transport.rs (案)
+use agent_client_protocol::{Client, ByteStreams, ActiveSession};
+use tokio::process::Command;
+use tokio_util::compat::*;
+
+/// ACP プロトコル対応エージェントとの共通通信レイヤー。
+/// goose / opencode / codex-acp / kiro が同じパスで動く。
+pub struct AcpTransport {
+    pub bin: PathBuf,           // 実行バイナリパス（例: "goose", "opencode"）
+    pub acp_subcommand: String, // 例: "acp"
+}
+
+impl AcpTransport {
+    pub async fn spawn_session(&self, opts: SpawnOpts) -> Result<SessionHandle> {
+        let mut child = Command::new(&self.bin)
+            .arg(&self.acp_subcommand)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());
+
+        let client = Client::builder()
+            .transport(transport)
+            .on_notification(|n| { /* permission 等を UNICREW UI に転送 */ })
+            .build()?;
+
+        client.initialize().await?;
+        let session = client
+            .build_session_cwd(opts.workspace)?
+            .with_system_prompt(opts.system_prompt)
+            .with_allowed_tools(opts.allowed_tools)
+            .start()
+            .await?;
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(forward_acp_to_normalized(session, tx));
+        Ok(SessionHandle { rx, kill_tx: child_kill_tx })
+    }
+}
+
+fn map_acp_event(ev: agent_client_protocol::SessionMessage) -> NormalizedEvent {
+    // ACP の SessionMessage は JSON-RPC で型付き → switch するだけ
+    match ev {
+        SessionMessage::AssistantText { delta } => NormalizedEvent::AssistantText { delta },
+        SessionMessage::ToolUse { name, input, id } => NormalizedEvent::ToolUse { name, input, id },
+        SessionMessage::PermissionRequest { ... } => NormalizedEvent::PermissionRequest { ... },
+        // ...
+    }
+}
+```
+
+### 各 ACP プロバイダの最小実装
+
+```rust
+// providers/goose.rs
+pub struct GooseProvider { acp: AcpTransport }
+impl Provider for GooseProvider {
+    fn id(&self) -> &'static str { "goose" }
+    async fn spawn_session(&self, opts: SpawnOpts) -> Result<SessionHandle> {
+        self.acp.spawn_session(opts).await
+    }
+    // install() / check_login() は L2 と同じく winget 等
+}
+
+// providers/opencode.rs — ほぼ同じ
+// providers/codex_acp.rs — ほぼ同じ
+// providers/kiro.rs — ほぼ同じ
+```
+
+→ **新しい ACP 対応 agent は数十行で対応完了**
+
+### メリット
+
+| 観点 | 効果 |
+|---|---|
+| **業界標準採用** | Zed エディタと同じプロトコル、ベンダーロックイン無し |
+| **型付き JSON-RPC** | stdout 文字列パースのバグ温床ゼロ |
+| **permission gate** | プロトコル組込みで UNICREW の `permission_mode` と完全一致 |
+| **複数エージェント1パス** | Goose / OpenCode / Codex-acp / Kiro が同じ実装で動く |
+| **拡張性** | 新 ACP agent は provider ファイル1つ追加で対応 |
+
+### 注意点
+
+- `<agent> acp` の subprocess 起動は依然必要（"subprocess ゼロ" は当初の誤認）
+- `agent-client-protocol` crate v0.11.x は workspace MSRV が高め → UNICREW MSRV を 1.77 → 1.91.1 に引き上げ
+- 商用 ToS のあるエージェント（Claude/Codex/Gemini）は L1 のまま（独自 stream-json 経路継続）
+
+## 5c. UI 複雑化を避ける（プロバイダ拡張時の絶対原則）
+
+10+ プロバイダ追加時、UI が破綻しないための5原則を絶対遵守。詳細は AGENTS.md の「UI 複雑化を避ける5原則」節参照。要点:
+
+1. プロバイダを **モデルカテゴリ**（Claude系 / OpenAI系 / Google系 / OSS-ローカル系）でまとめ、個別表示しない
+2. WelcomeLanding は「無料モード」を1ボタンで上位提示、status 一覧は隠す
+3. SettingsModal は accordion 化、デフォルト全閉
+4. 議論モードは「プリセット」最優先、N人選択 UI は作らない
+5. 識別はカテゴリ色 + lucide アイコン + テキスト統一、絵文字禁止
+
+実装影響:
+- `lib/providerCategories.ts` 新設 — カテゴリ定義 + プロバイダ ↔ カテゴリ写像
+- `components/SettingsModal.tsx` を accordion 化（カテゴリ単位）
+- `components/WelcomeLanding.tsx` の status 行を「無料モード1ボタン + 詳細リンク」に再構成
+- `components/ConferencePresets.tsx` 新設 — プリセット選択 UI
+- `lib/providerVisuals.ts` で `PROVIDER_BADGES` を `CATEGORY_BADGES` (4種) に縮約
 
 ## 6. Codex 経路
 

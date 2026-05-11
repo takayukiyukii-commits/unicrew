@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Smartphone, Cloud, Wifi, AlertTriangle } from "lucide-react";
 import type {
   MobileStateSnapshot,
 } from "@/lib/mobile-bridge";
@@ -148,7 +149,7 @@ export default function MobilePage() {
           threadId: "active",
           text: text.trim(),
         });
-        setHint("✓ PC に送信しました。応答が来るまで少し待ってください。");
+        setHint("PC に送信しました。応答が来るまで少し待ってください。");
         setText("");
         return;
       }
@@ -169,7 +170,7 @@ export default function MobilePage() {
       if (!r.ok || !j.ok) {
         setError(j.error || `送信失敗: ${r.status}`);
       } else {
-        setHint("✓ PC に送信しました。応答が来るまで少し待ってください。");
+        setHint("PC に送信しました。応答が来るまで少し待ってください。");
         setText("");
       }
     } catch (e) {
@@ -190,10 +191,20 @@ export default function MobilePage() {
       }
     >
       <header className="shrink-0 border-b border-[var(--color-border)] bg-white px-3 py-2 flex items-center gap-2">
-        <span className="text-[18px]">📱</span>
+        <Smartphone size={18} className="text-[var(--color-accent)] shrink-0" aria-hidden="true" />
         <span className="font-bold text-[15px]">UNICREW Remote</span>
-        <span className="text-[9.5px] px-1.5 py-0.5 rounded font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-muted)]">
-          {mode === "cloud" ? "☁ クラウド経由" : "📡 同じ Wi-Fi"}
+        <span className="text-[9.5px] px-1.5 py-0.5 rounded font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-muted)] inline-flex items-center gap-1">
+          {mode === "cloud" ? (
+            <>
+              <Cloud size={10} aria-hidden="true" />
+              クラウド経由
+            </>
+          ) : (
+            <>
+              <Wifi size={10} aria-hidden="true" />
+              同じ Wi-Fi
+            </>
+          )}
         </span>
         {mode === "cloud" && pairCode && (
           <span className="text-[10px] font-mono text-[var(--color-accent)]">
@@ -229,7 +240,7 @@ export default function MobilePage() {
           URL に <code>?t=&lt;トークン&gt;</code>{" "}
           が付いていません。PCの UNICREW で
           <br />
-          ファイルメニュー →「📱 スマホ連携…」を開いて、 表示された URL を
+          ファイルメニュー →「スマホ連携…」を開いて、 表示された URL を
           再度開いてください。
         </div>
       )}
@@ -241,7 +252,7 @@ export default function MobilePage() {
             ペアリングコードを入力
           </div>
           <div className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-            PC の UNICREW で「📱 スマホ連携…」→「クラウド経由」タブの
+            PC の UNICREW で「スマホ連携…」→「クラウド経由」タブの
             「ペアリングを開始」を押すと、6桁のコードが表示されます。
           </div>
           <input
@@ -260,8 +271,9 @@ export default function MobilePage() {
       )}
 
       {error && (
-        <div className="m-3 p-2.5 rounded-md border border-red-200 bg-red-50 text-[11.5px] text-red-700">
-          ⚠ {error}
+        <div className="m-3 p-2.5 rounded-md border border-red-200 bg-red-50 text-[11.5px] text-red-700 flex items-start gap-1.5">
+          <AlertTriangle size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -286,8 +298,14 @@ export default function MobilePage() {
           {snapshot?.activeThreadTitle ?? "（未選択）"}
         </div>
         {snapshot && (
-          <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5">
-            {snapshot.isStreaming ? "🟡 PC で応答中…" : "🟢 待機中（送信OK）"}
+          <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5 inline-flex items-center gap-1.5">
+            <span
+              className={`inline-block w-1.5 h-1.5 rounded-full ${
+                snapshot.isStreaming ? "bg-amber-500" : "bg-emerald-500"
+              }`}
+              aria-hidden="true"
+            />
+            {snapshot.isStreaming ? "PC で応答中…" : "待機中（送信OK）"}
           </div>
         )}
         {mode === "cloud" && cloudInfo.threads.length >= 1 && (

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Bot,
   Sparkles,
   FolderOpen,
   Users,
@@ -9,13 +10,32 @@ import {
   AlertCircle,
   Settings as SettingsIcon,
   Split,
+  Gift,
+  ChevronDown,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { claudeStatus, codexStatus, isTauri } from "@/lib/tauri";
+import { CategoryDot } from "@/lib/providerVisuals";
+import {
+  ConferencePresets,
+  type ConferencePreset,
+} from "@/components/ConferencePresets";
 
 interface Props {
   onCreate: () => void;
   onOpenSettings: () => void;
+  /**
+   * 「無料で試す」ボタンのハンドラ。
+   * Sprint 2 で OpenCode + Ollama 自動セットアップを wire 予定。
+   * 現状は未提供時に onOpenSettings へフォールバック。
+   */
+  onStartFreeMode?: () => void;
+  /**
+   * 議論モードのキャストプリセットを選択したときのハンドラ。
+   * 親側で participants をセットしたスレッドを作成し議論を開始する。
+   * 未指定なら presets セクション自体を出さない。
+   */
+  onApplyPreset?: (preset: ConferencePreset) => void;
 }
 
 interface Status {
@@ -25,9 +45,20 @@ interface Status {
 
 /**
  * スレッドが1つも無いときに右側に表示するトップ画面。
- * UNICREW のセールスポイント・現在の接続状態・「最初の1スレッドを作る」CTA をまとめる。
+ *
+ * 設計方針（2026-05-10 改訂）:
+ * - **「無料で試す（API キー不要）」を最上位の単一CTA**として提示。
+ *   従来の「Claude をインストール」一択は試用障壁を作っていたため。
+ * - 既存サブスク派の動線は <details> で折りたたみ、必要な人だけ展開。
+ * - StatusCard を 1 行に並べる方式は廃止（プロバイダ増加に耐えない）。
+ *   詳細ステータスは SettingsModal のカテゴリ accordion 側に集約。
  */
-export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
+export function WelcomeLanding({
+  onCreate,
+  onOpenSettings,
+  onStartFreeMode,
+  onApplyPreset,
+}: Props) {
   const [claude, setClaude] = useState<Status | null>(null);
   const [codex, setCodex] = useState<Status | null>(null);
 
@@ -45,6 +76,12 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
       cancelled = true;
     };
   }, []);
+
+  const hasAnyConnected =
+    (claude?.installed && claude?.logged_in) ||
+    (codex?.installed && codex?.logged_in);
+
+  const handleFreeMode = onStartFreeMode ?? onOpenSettings;
 
   return (
     <main className="flex-1 overflow-y-auto bg-gradient-to-b from-white to-[var(--color-surface)]">
@@ -66,60 +103,110 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
             AIを動かすことに、特化したデスクトップ。
           </p>
           <p className="text-[12.5px] text-[var(--color-muted)] mt-1">
-            Claude / Codex を公式CLI経由で束ねるマルチAIランチャー。サブスクでそのまま動く・完全無料。
+            業界標準 ACP 対応のマルチAI ランチャー。サブスクでも、ローカル AI でも動く。
           </p>
         </div>
 
-        {/* セットアップウィザード（AIガイドのセリフ） */}
-        <SetupGuide
-          claude={claude}
-          codex={codex}
-          onOpenSettings={onOpenSettings}
-          onCreate={onCreate}
-        />
-
-        {/* 接続ステータス */}
-        <div className="grid grid-cols-2 gap-3 mb-8">
-          <StatusCard
-            label="Claude"
-            color="#dd6b20"
-            badge="🟠"
-            status={claude}
-            onFix={onOpenSettings}
-          />
-          <StatusCard
-            label="Codex"
-            color="#10a37f"
-            badge="🟢"
-            status={codex}
-            onFix={onOpenSettings}
-            optional
-          />
+        {/* 「無料で試す」最上位 CTA。既存サブスク派は下の <details> から進める。 */}
+        <div className="mb-6 rounded-2xl border-2 border-[var(--color-accent)] bg-gradient-to-br from-amber-50 via-white to-sky-50 p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-12 h-12 rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center shadow-sm">
+              <Gift size={22} strokeWidth={1.8} aria-hidden="true" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-[15px] text-[var(--color-text)] mb-1">
+                まずは無料で試す
+              </div>
+              <p className="text-[12.5px] text-[var(--color-muted)] leading-relaxed mb-3">
+                API キー不要。ローカルで動く OSS AI（OpenCode + Ollama）を自動セットアップして、UNICREW の議論モード・並列モードをすぐ体験できます。
+              </p>
+              <button
+                type="button"
+                onClick={handleFreeMode}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white text-[13px] font-semibold hover:opacity-90 shadow-sm"
+              >
+                <Sparkles size={14} />
+                1分で始める
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* 機能カード */}
-        <div className="grid grid-cols-2 gap-3 mb-8">
+        {/* 既存サブスク派の動線は折りたたみ。 */}
+        <details className="mb-8 rounded-xl border border-[var(--color-border)] bg-white open:shadow-sm">
+          <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-[12.5px] text-[var(--color-text)] font-medium hover:bg-[var(--color-surface)] rounded-xl">
+            <ChevronDown size={14} className="text-[var(--color-muted)] transition-transform" />
+            <span>Claude / Codex / Gemini のサブスクをお持ちの方</span>
+            {hasAnyConnected && (
+              <span className="ml-auto text-[11px] text-emerald-600 inline-flex items-center gap-1">
+                <CheckCircle2 size={12} />
+                接続済み
+              </span>
+            )}
+          </summary>
+          <div className="px-4 pb-4 pt-2 border-t border-[var(--color-border)] space-y-3">
+            <SetupGuide
+              claude={claude}
+              codex={codex}
+              onOpenSettings={onOpenSettings}
+              onCreate={onCreate}
+            />
+            <StatusRow
+              label="Claude"
+              provider="claude"
+              status={claude}
+              onFix={onOpenSettings}
+            />
+            <StatusRow
+              label="Codex"
+              provider="codex"
+              status={codex}
+              onFix={onOpenSettings}
+              optional
+            />
+          </div>
+        </details>
+
+        {/* 機能カード（4 → 3 に削減、「サブスクで動く」は当然なので除去） */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
           <FeatureCard
             icon={<Users size={16} />}
-            title="キャラクター"
-            body="CDO・CMO 等のテンプレ6体＋自作可。並列モードで2人別人格 → 議論させられる。"
+            title="議論モード"
+            body="複数の AI に役割を持たせて議論させる。プリセットあり。"
           />
           <FeatureCard
             icon={<Split size={16} />}
             title="並列モード"
-            body="🟠 Claude × 🟢 Codex を同時実行。会議モードで両AIに最大3ラウンド議論させる。"
+            body="2社以上を同時実行。レスポンスを横並びで比較。"
           />
           <FeatureCard
             icon={<FolderOpen size={16} />}
             title="ローカルファイル"
-            body="フォルダを選んで開けば、AIがそこを編集・実行。許可ダイアログで安全に。"
-          />
-          <FeatureCard
-            icon={<Sparkles size={16} />}
-            title="サブスクで動く"
-            body="Claude Pro/Max でログインすれば追加課金なし。API キーモードも選べる。"
+            body="フォルダを選んで開けば、AI がそこを編集・実行。"
           />
         </div>
+
+        {/* 議論モードのプリセット起動。
+            <details> で閉じておくことで初見の縦長化を避けつつ、
+            「議論モード」カードに惹かれた人がワンクリックで開始できる導線。 */}
+        {onApplyPreset && (
+          <details className="mb-8 rounded-xl border border-[var(--color-border)] bg-white open:shadow-sm">
+            <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-[12.5px] text-[var(--color-text)] font-medium hover:bg-[var(--color-surface)] rounded-xl">
+              <ChevronDown size={14} className="text-[var(--color-muted)] transition-transform" />
+              <Users size={14} className="text-[var(--color-accent)]" />
+              <span>プリセットから議論を始める</span>
+              <span className="ml-auto text-[10.5px] text-[var(--color-muted)]">
+                定番3社 / コードレビュー / ACP 3社 ほか
+              </span>
+            </summary>
+            <div className="px-4 pb-4 pt-2 border-t border-[var(--color-border)]">
+              <ConferencePresets
+                onApply={onApplyPreset}
+                hideComingSoon={true}
+              />
+            </div>
+          </details>
+        )}
 
         {/* CTA */}
         <div className="flex items-center justify-center gap-3">
@@ -150,10 +237,8 @@ export function WelcomeLanding({ onCreate, onOpenSettings }: Props) {
 }
 
 /**
- * アイデア8: 5分セットアップウィザード（最小実装）。
- *
- * Claude キャラの「セリフ風」ガイドで、現在のCLI状態に応じて次の一歩を提示する。
- * フルウィザード（多段モーダル）は将来実装。今はセリフ＋CTAボタンの組合せで誘導する。
+ * セットアップウィザード（折りたたみの中で表示）。
+ * 既存接続状態に応じて次の一歩を提示。
  */
 function SetupGuide({
   claude,
@@ -166,7 +251,7 @@ function SetupGuide({
   onOpenSettings: () => void;
   onCreate: () => void;
 }) {
-  if (!claude) return null; // 確認中は表示しない
+  if (!claude) return null;
 
   const stepIndex = (() => {
     if (!claude.installed) return 1;
@@ -177,37 +262,37 @@ function SetupGuide({
   const message = (() => {
     if (!claude.installed) {
       return {
-        title: "ようこそ！まずは Claude Code をインストールしましょう",
-        body: "UNICREW は公式 CLI を使ってAIを動かします。1分で終わるので、設定画面から「Claude Code をインストール」を押してください。",
-        primary: { label: "セットアップを開く", onClick: onOpenSettings },
+        title: "Claude Code の自動インストールから",
+        body: "「設定」ボタンから「Claude Code を自動インストール」を押すと 2〜3 分で完了します。",
+        primary: { label: "設定を開く", onClick: onOpenSettings },
       };
     }
     if (!claude.logged_in) {
       return {
-        title: "Claude Code が入りました！次はログインを",
-        body: "Claude Pro / Max のアカウントでログインすると、API キーなしで使えます。設定画面の「ログイン」を押してください。",
+        title: "Claude にログインしましょう",
+        body: "Claude Pro / Max のアカウントでログインすると、API キーなしで使えます。",
         primary: { label: "ログインに進む", onClick: onOpenSettings },
       };
     }
     if (codex && !codex.logged_in) {
       return {
-        title: "準備OK！もし Codex も並列で使うなら",
-        body: "Codex CLI を入れてログインすると、Claude と並列で動かして相互レビューや議論モードが使えます（任意）。今すぐ最初の会話を始めても大丈夫です。",
+        title: "Codex も並列で使うなら（任意）",
+        body: "Codex CLI を入れてログインすると、Claude と並列で動かして相互レビューや議論モードが使えます。",
         primary: { label: "最初の会話を始める", onClick: onCreate },
       };
     }
     return {
-      title: "セットアップ完了！最初の会話を始めましょう",
-      body: "ノーマル Claude / Codex で素のCLIをそのまま動かせます。どんな依頼でもいいので、まず一言投げてみてください。",
+      title: "セットアップ完了",
+      body: "Claude（normal）/ Codex（normal）で素の CLI をそのまま動かせます。",
       primary: { label: "最初の会話を始める", onClick: onCreate },
     };
   })();
 
   return (
-    <div className="mb-6 rounded-2xl border border-[var(--color-accent)]/30 bg-gradient-to-br from-sky-50 via-white to-amber-50/50 p-4">
+    <div className="rounded-xl border border-[var(--color-accent)]/30 bg-gradient-to-br from-sky-50 via-white to-amber-50/50 p-3">
       <div className="flex items-start gap-3">
-        <div className="shrink-0 w-10 h-10 rounded-full bg-white border border-[var(--color-accent)]/40 flex items-center justify-center text-lg shadow-sm">
-          🤖
+        <div className="shrink-0 w-9 h-9 rounded-full bg-white border border-[var(--color-accent)]/40 flex items-center justify-center shadow-sm text-[var(--color-accent)]">
+          <Bot size={18} strokeWidth={1.5} aria-hidden="true" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
@@ -218,16 +303,16 @@ function SetupGuide({
               Step {stepIndex}/3
             </span>
           </div>
-          <div className="font-bold text-[14px] text-[var(--color-text)] mb-1">
+          <div className="font-bold text-[13px] text-[var(--color-text)] mb-1">
             {message.title}
           </div>
-          <div className="text-[12px] text-[var(--color-muted)] leading-relaxed mb-2">
+          <div className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
             {message.body}
           </div>
           <button
             type="button"
             onClick={message.primary.onClick}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-white text-[12px] font-semibold hover:opacity-90"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-white text-[11.5px] font-semibold hover:opacity-90"
           >
             {message.primary.label}
           </button>
@@ -247,36 +332,30 @@ function SetupGuide({
   );
 }
 
-function StatusCard({
+/**
+ * シンプルな1行ステータス表示（カードではなく行）。
+ * プロバイダが増えても縦に並べるだけで破綻しない。
+ */
+function StatusRow({
   label,
-  color,
-  badge,
+  provider,
   status,
   onFix,
   optional = false,
 }: {
   label: string;
-  color: string;
-  badge: string;
+  provider: "claude" | "codex" | "gemini";
   status: Status | null;
   onFix: () => void;
   optional?: boolean;
 }) {
   const ok = status?.installed && status?.logged_in;
   return (
-    <div
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
-        ok
-          ? "border-emerald-200 bg-emerald-50/40"
-          : "border-[var(--color-border)] bg-white"
-      }`}
-    >
-      <span className="text-lg" style={{ color }}>
-        {badge}
-      </span>
+    <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-white">
+      <CategoryDot provider={provider} size={9} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 text-[12.5px] font-semibold">
-          <span style={{ color }}>{label}</span>
+          <span>{label}</span>
           {!status && (
             <span className="text-[10.5px] text-[var(--color-muted)]">
               確認中…

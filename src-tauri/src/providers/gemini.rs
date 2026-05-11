@@ -23,7 +23,7 @@ use crate::providers::types::{AuthMode, NormalizedEvent, ProviderError, SpawnOpt
 use crate::providers::{CliProvider, SessionHandle};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Mutex;
 
@@ -107,8 +107,12 @@ impl SessionHandle for GeminiSessionHandle {
 
         let full_prompt = self.build_full_prompt(text).await;
         let mut cmd = crate::build_silent_command("gemini");
-        // -p で非対話モード。履歴は UNICREW 側が握って都度渡し直す。
-        cmd.arg("-p").arg(&full_prompt);
+        // Windows の gemini.cmd へ multi-line 引数を渡すと、Rust 1.77+ が CVE-2024-24576
+        // 対策で改行入りの引数を弾く（"batch file arguments are invalid"）。
+        // Gemini CLI は `-p` arg を stdin 入力に追記する仕様（"Appended to input on stdin"）なので、
+        // 本文は全て stdin に流し、`-p` には短い placeholder を置く。
+        // 履歴は UNICREW 側が握って毎ターン丸ごと再送する。
+        cmd.arg("-p").arg("(prompt provided via stdin above)");
         if !self.model.is_empty() {
             cmd.arg("-m").arg(&self.model);
         }
@@ -130,7 +134,8 @@ impl SessionHandle for GeminiSessionHandle {
             }
         }
 
-        cmd.stdin(Stdio::null());
+        // stdin で本文を流す → close（drop で EOF）
+        cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
@@ -140,6 +145,15 @@ impl SessionHandle for GeminiSessionHandle {
                 e
             ))
         })?;
+
+        // stdin に full_prompt を流して close
+        if let Some(mut stdin) = child.stdin.take() {
+            let bytes = full_prompt.into_bytes();
+            tokio::spawn(async move {
+                let _ = stdin.write_all(&bytes).await;
+                let _ = stdin.shutdown().await;
+            });
+        }
 
         let stdout = child.stdout.take().ok_or_else(|| {
             ProviderError::Session("gemini subprocess の stdout が取得できません".into())

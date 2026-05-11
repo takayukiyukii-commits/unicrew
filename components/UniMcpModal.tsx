@@ -17,9 +17,12 @@ import {
 } from "@/lib/uni-mcp-endpoints";
 import {
   addClaudeMcp,
+  addCodexMcp,
   isTauri,
   listClaudeMcp,
+  listCodexMcp,
   removeClaudeMcp,
+  removeCodexMcp,
   type AddonItem,
 } from "@/lib/tauri";
 
@@ -29,8 +32,21 @@ interface Props {
 }
 
 const STORAGE_KEY = "unicrew.uni_mcp_keys.v1";
+const TARGET_STORAGE_KEY = "unicrew.uni_mcp_target.v1";
 
 type KeysMap = Record<string, string>;
+type Target = "claude" | "codex" | "both";
+
+function loadTarget(): Target {
+  if (typeof window === "undefined") return "both";
+  const v = localStorage.getItem(TARGET_STORAGE_KEY);
+  return v === "claude" || v === "codex" || v === "both" ? v : "both";
+}
+
+function saveTarget(t: Target) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(TARGET_STORAGE_KEY, t);
+}
 
 function loadKeys(): KeysMap {
   if (typeof window === "undefined") return {};
@@ -49,23 +65,34 @@ function saveKeys(keys: KeysMap) {
 
 export function UniMcpModal({ open, onClose }: Props) {
   const [keys, setKeysState] = useState<KeysMap>({});
-  const [installed, setInstalled] = useState<Set<string>>(new Set());
+  const [installedClaude, setInstalledClaude] = useState<Set<string>>(new Set());
+  const [installedCodex, setInstalledCodex] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [target, setTargetState] = useState<Target>("both");
+
+  const setTarget = (t: Target) => {
+    setTargetState(t);
+    saveTarget(t);
+  };
 
   useEffect(() => {
     if (!open) return;
     setKeysState(loadKeys());
+    setTargetState(loadTarget());
     void refreshInstalled();
   }, [open]);
 
   const refreshInstalled = async () => {
     if (!isTauri()) return;
     try {
-      const list: AddonItem[] = await listClaudeMcp();
-      const names = new Set(list.map((x) => x.id));
-      setInstalled(names);
+      const [cl, cx] = await Promise.all([
+        listClaudeMcp().catch(() => [] as AddonItem[]),
+        listCodexMcp().catch(() => [] as AddonItem[]),
+      ]);
+      setInstalledClaude(new Set(cl.map((x) => x.id)));
+      setInstalledCodex(new Set(cx.map((x) => x.id)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -79,12 +106,53 @@ export function UniMcpModal({ open, onClose }: Props) {
     });
   };
 
-  const isInstalled = (e: UniMcpEndpoint) =>
-    installed.has(mcpServerName(e.id));
+  /**
+   * 「target に対して」既に登録されているか。
+   * - claude: Claude 側に入っていれば true
+   * - codex : Codex 側に入っていれば true
+   * - both  : 両方とも入っていれば true（片方だけだと未完了扱い）
+   */
+  const isInstalled = (e: UniMcpEndpoint) => {
+    const name = mcpServerName(e.id);
+    const c = installedClaude.has(name);
+    const x = installedCodex.has(name);
+    if (target === "claude") return c;
+    if (target === "codex") return x;
+    return c && x;
+  };
 
   const canConnect = (e: UniMcpEndpoint): boolean => {
     if (e.noAuth) return true;
     return !!(keys[e.id] && keys[e.id].trim());
+  };
+
+  /** target を踏まえて、UNI MCP を Claude / Codex に追加する（必要な側だけ）。 */
+  const addForTarget = async (e: UniMcpEndpoint) => {
+    const name = mcpServerName(e.id);
+    const headers = e.noAuth
+      ? undefined
+      : { Authorization: `Bearer ${keys[e.id].trim()}` };
+    const tasks: Array<Promise<unknown>> = [];
+    if (target !== "codex" && !installedClaude.has(name)) {
+      tasks.push(addClaudeMcp({ name, kind: "http", url: e.url, headers }));
+    }
+    if (target !== "claude" && !installedCodex.has(name)) {
+      tasks.push(addCodexMcp({ name, kind: "http", url: e.url, headers }));
+    }
+    await Promise.all(tasks);
+  };
+
+  /** target を踏まえて、UNI MCP を Claude / Codex から削除する（入っている側だけ）。 */
+  const removeForTarget = async (e: UniMcpEndpoint) => {
+    const name = mcpServerName(e.id);
+    const tasks: Array<Promise<unknown>> = [];
+    if (target !== "codex" && installedClaude.has(name)) {
+      tasks.push(removeClaudeMcp(name));
+    }
+    if (target !== "claude" && installedCodex.has(name)) {
+      tasks.push(removeCodexMcp(name));
+    }
+    await Promise.all(tasks);
   };
 
   const connectOne = async (e: UniMcpEndpoint) => {
@@ -96,14 +164,7 @@ export function UniMcpModal({ open, onClose }: Props) {
     setBusy((s) => new Set(s).add(e.id));
     setError(null);
     try {
-      await addClaudeMcp({
-        name: mcpServerName(e.id),
-        kind: "http",
-        url: e.url,
-        headers: e.noAuth
-          ? undefined
-          : { Authorization: `Bearer ${keys[e.id].trim()}` },
-      });
+      await addForTarget(e);
       await refreshInstalled();
     } catch (err) {
       setError(
@@ -123,7 +184,7 @@ export function UniMcpModal({ open, onClose }: Props) {
     setBusy((s) => new Set(s).add(e.id));
     setError(null);
     try {
-      await removeClaudeMcp(mcpServerName(e.id));
+      await removeForTarget(e);
       await refreshInstalled();
     } catch (err) {
       setError(
@@ -146,14 +207,7 @@ export function UniMcpModal({ open, onClose }: Props) {
         if (!canConnect(e)) continue;
         if (isInstalled(e)) continue;
         try {
-          await addClaudeMcp({
-            name: mcpServerName(e.id),
-            kind: "http",
-            url: e.url,
-            headers: e.noAuth
-              ? undefined
-              : { Authorization: `Bearer ${keys[e.id].trim()}` },
-          });
+          await addForTarget(e);
         } catch (err) {
           setError(
             `${e.name}: ${err instanceof Error ? err.message : String(err)}`,
@@ -173,7 +227,7 @@ export function UniMcpModal({ open, onClose }: Props) {
       for (const e of UNI_MCP_ENDPOINTS) {
         if (!isInstalled(e)) continue;
         try {
-          await removeClaudeMcp(mcpServerName(e.id));
+          await removeForTarget(e);
         } catch {
           // ignore
         }
@@ -216,8 +270,31 @@ export function UniMcpModal({ open, onClose }: Props) {
 
         <div className="px-5 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)]/40 text-[12px] text-[var(--color-muted)] leading-relaxed">
           各製品の <code className="font-mono">/api-keys</code> から発行した APIキーを
-          貼り付けて「接続」を押すと、Claude Code から直接 UNI 製品の
-          データにアクセスできるようになります。 一度接続すれば以降は再起動しても保持されます。
+          貼り付けて「接続」を押すと、選んだ AI（Claude / Codex / 両方）から直接 UNI 製品の
+          データにアクセスできるようになります。一度接続すれば以降は再起動しても保持されます。
+        </div>
+
+        <div className="px-5 py-2 border-b border-[var(--color-border)] flex items-center gap-2 text-[12px]">
+          <span className="text-[11px] text-[var(--color-muted)] font-medium">
+            接続先:
+          </span>
+          {(["claude", "codex", "both"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTarget(t)}
+              className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium border transition ${
+                target === t
+                  ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
+                  : "bg-white text-[var(--color-muted)] border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+              }`}
+            >
+              {t === "claude" ? "🟠 Claude" : t === "codex" ? "🟢 Codex" : "両方"}
+            </button>
+          ))}
+          <span className="ml-auto text-[10.5px] text-[var(--color-muted)]">
+            Claude {installedClaude.size} / Codex {installedCodex.size}
+          </span>
         </div>
 
         <div className="px-5 py-2 border-b border-[var(--color-border)] flex items-center gap-2 text-[12px]">

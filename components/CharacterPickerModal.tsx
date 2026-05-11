@@ -1,14 +1,36 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X, Plus, Sparkles, Users, ArrowLeft, Check } from "lucide-react";
+import {
+  X,
+  Plus,
+  Sparkles,
+  Users,
+  ArrowLeft,
+  Check,
+  Bot,
+  User,
+  Columns2,
+  Lightbulb,
+  ClipboardList,
+} from "lucide-react";
 import {
   TEMPLATE_CHARACTERS,
+  cloneFromTemplate,
   getCharacter,
   loadUserCharacters,
+  saveUserCharacters,
 } from "@/lib/characters";
-import type { Character } from "@/lib/types";
+import type { Character, Provider } from "@/lib/types";
+import { PROVIDER_LABELS } from "@/lib/types";
+import { CategoryDot } from "@/lib/providerVisuals";
 import { CharacterAvatar } from "./CharacterAvatar";
+
+const NORMAL_TEMPLATE_IDS = new Set(["tmpl-claude-normal", "tmpl-codex-normal"]);
+const isNormalTemplate = (t: Character) => NORMAL_TEMPLATE_IDS.has(t.id);
+
+/** AI タブで切替えるプロバイダの順番。Gemini は将来対応のため UI には出すがオプショナル。 */
+const TEMPLATE_PROVIDER_TABS: Provider[] = ["claude", "codex", "gemini"];
 
 interface Props {
   open: boolean;
@@ -22,7 +44,14 @@ interface Props {
   /** 並列モード時に Claude / Codex のキャラが両方確定したら呼ばれる。 */
   onPickPair: (claudeCharacterId: string, codexCharacterId: string) => void;
   onCreateNew: () => void;
-  onCloneTemplate: (template: Character) => void;
+  /**
+   * テンプレートを元に編集画面を開く。AI タブで provider 上書きが指定された場合は
+   * `overrides` に `{ provider: "..." }` 等が入る。
+   */
+  onCloneTemplate: (
+    template: Character,
+    overrides?: Partial<Character>,
+  ) => void;
 }
 
 type Step = "claude" | "codex";
@@ -42,12 +71,19 @@ export function CharacterPickerModal({
   const [userChars, setUserChars] = useState<Character[]>([]);
   const [step, setStep] = useState<Step>("claude");
   const [firstClaudeId, setFirstClaudeId] = useState<string | null>(null);
+  /**
+   * 「人格 × AI」の AI 部分。テンプレ（CEO/CDO 等の人格）をクリックしたとき、
+   * このタブの provider で起動するように上書きする。normal テンプレは
+   * 自身の provider 固定（このタブでは上書きしない）。
+   */
+  const [templateProvider, setTemplateProvider] = useState<Provider>("claude");
 
   useEffect(() => {
     if (open) {
       setUserChars(loadUserCharacters());
       setStep("claude");
       setFirstClaudeId(null);
+      setTemplateProvider("claude");
     }
   }, [open]);
 
@@ -99,10 +135,26 @@ export function CharacterPickerModal({
 
   // splitモード中はクローン編集フローを通せないので「直接ピック」に切替
   const handleTemplateClick = (t: Character) => {
+    // 人格テンプレ（非 normal）の場合は AI タブの provider で上書き起動。
+    // normal テンプレは自身の provider 固定（タブの影響を受けない）。
+    const overrides: Partial<Character> | undefined =
+      !isNormalTemplate(t) && t.provider !== templateProvider
+        ? { provider: templateProvider }
+        : undefined;
     if (splitMode) {
-      handleSelect(t.id);
+      if (overrides) {
+        // 並列モードは編集画面を挟まないので、先に user character として保存して
+        // その新 ID を選択側に渡す。これで「CEO × Codex」のような組合せが成立する。
+        const clone = cloneFromTemplate(t, overrides);
+        const next = [clone, ...loadUserCharacters()];
+        saveUserCharacters(next);
+        setUserChars(next);
+        handleSelect(clone.id);
+      } else {
+        handleSelect(t.id);
+      }
     } else {
-      onCloneTemplate(t);
+      onCloneTemplate(t, overrides);
     }
   };
 
@@ -140,7 +192,8 @@ export function CharacterPickerModal({
               }`}
             >
               <div className="text-[12.5px] font-semibold flex items-center gap-1.5">
-                <span>👤 単独モード</span>
+                <User size={13} aria-hidden="true" />
+                <span>単独モード</span>
                 {!splitMode && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white">
                     選択中
@@ -187,60 +240,97 @@ export function CharacterPickerModal({
               onChange={(e) => onConferenceModeChange(e.target.checked)}
               className="w-4 h-4"
             />
-            <span className="font-medium">💬 会議モード（AI同士で議論）</span>
+            <span className="font-medium">会議モード（AI同士で議論）</span>
             <span className="text-[var(--color-muted)] text-[11.5px]">
               両AIが互いの回答を読んで批判・改善（最大3ラウンド、足りなければあとから延長可）
             </span>
           </label>
           {!splitMode && (
-            <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed">
-              💡 Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
-              チャット画面右上の「
-              <span className="inline-block align-middle">📋</span>
-              」アイコンで右ペインに別スレッドを開けます。
+            <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed flex items-start gap-1.5">
+              <Lightbulb size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+              <span>
+                Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
+                チャット画面右上の
+                <ClipboardList
+                  size={11}
+                  className="inline-block align-middle mx-1"
+                  aria-hidden="true"
+                />
+                アイコンで右ペインに別スレッドを開けます。
+              </span>
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              if (splitMode) {
-                // 並列モード: 両方ともおまかせで起動（一発でスタート）
-                onPickPair("tmpl-claude-normal", "tmpl-codex-normal");
-              } else {
-                handleSelect("tmpl-claude-normal");
-              }
-            }}
-            className="w-full flex items-center gap-2 rounded-lg border border-[var(--color-accent)]/40 bg-gradient-to-r from-sky-50 to-indigo-50 px-3 py-2.5 hover:border-[var(--color-accent)] hover:shadow-sm transition group text-left"
-          >
-            <span className="text-lg shrink-0">🤖</span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-[12.5px] font-semibold text-[var(--color-text)]">
+          {/* 「このまま開始」: 単独モードでは Claude / Codex の2択、並列モードでは1ボタン。
+              人格テンプレ画面をスキップして素のCLI挙動で即起動するための主導線。 */}
+          <div className="rounded-lg border border-[var(--color-accent)]/40 bg-gradient-to-r from-sky-50 to-indigo-50 p-2.5">
+            <div className="flex items-center gap-1.5 mb-1.5 px-1">
+              <Bot size={14} strokeWidth={1.5} className="text-[var(--color-accent)] shrink-0" aria-hidden="true" />
+              <span className="text-[12px] font-semibold text-[var(--color-text)]">
+                このまま開始
+              </span>
+              <span className="text-[10.5px] text-[var(--color-muted)]">
                 {splitMode
-                  ? "ノーマル Claude × Codex で開始"
-                  : "このまま開始（ノーマル Claude）"}
-                <span className="ml-1.5 text-[10px] font-normal text-[var(--color-muted)]">
-                  {splitMode
-                    ? "(役割なし・素のClaude/Codex)"
-                    : "(役割づけなし・素のClaude)"}
+                  ? "(役割なし・素のClaude × 素のCodex)"
+                  : "(役割づけなし・素のCLI挙動)"}
+              </span>
+            </div>
+            {splitMode ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onPickPair("tmpl-claude-normal", "tmpl-codex-normal")
+                }
+                className="w-full flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[var(--color-accent)] hover:shadow-sm transition text-left"
+              >
+                <span className="text-[12.5px] font-semibold text-[var(--color-accent)]">
+                  🟠×🟢 両方並列で開始
                 </span>
-              </span>
-              <span className="block text-[11px] text-[var(--color-muted)] mt-0.5 leading-snug">
-                素の Claude Code / Codex CLI の挙動。プログラミング・調査・要約・自然な対話まで万能。
-                {splitMode &&
-                  " 役割づけしたキャラを当てたい場合は下から2つ選んでください。"}
-              </span>
-            </span>
-            <span className="text-[var(--color-accent)] shrink-0 group-hover:translate-x-0.5 transition">
-              →
-            </span>
-          </button>
+                <span className="ml-auto text-[var(--color-accent)]">→</span>
+              </button>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelect("tmpl-claude-normal")}
+                  className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[#dd6b20] hover:shadow-sm transition text-left"
+                >
+                  <span className="text-[12.5px] font-semibold text-[#dd6b20]">
+                    🟠 Claude 単独
+                  </span>
+                  <span className="ml-auto text-[#dd6b20] opacity-70">→</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelect("tmpl-codex-normal")}
+                  className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[#10a37f] hover:shadow-sm transition text-left"
+                >
+                  <span className="text-[12.5px] font-semibold text-[#10a37f]">
+                    🟢 Codex 単独
+                  </span>
+                  <span className="ml-auto text-[#10a37f] opacity-70">→</span>
+                </button>
+              </div>
+            )}
+            <p className="text-[11px] text-[var(--color-muted)] mt-1.5 px-1 leading-snug">
+              素の Claude Code / Codex CLI の挙動。プログラミング・調査・要約・自然な対話まで万能。
+              {splitMode &&
+                " 役割づけしたキャラを当てたい場合は下から2つ選んでください。"}
+            </p>
+          </div>
 
           {!splitMode && (
-            <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed">
-              💡 Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
-              チャット画面右上の「
-              <span className="inline-block align-middle">📋</span>
-              」アイコンで右ペインに別スレッドを開けます。
+            <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed flex items-start gap-1.5">
+              <Lightbulb size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
+              <span>
+                Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
+                チャット画面右上の
+                <ClipboardList
+                  size={11}
+                  className="inline-block align-middle mx-1"
+                  aria-hidden="true"
+                />
+                アイコンで右ペインに別スレッドを開けます。
+              </span>
             </div>
           )}
         </div>
@@ -276,8 +366,8 @@ export function CharacterPickerModal({
             <span className="px-2">
               {splitMode
                 ? step === "claude"
-                  ? "👇 Claude 側のキャラを 1つ 選択（任意）"
-                  : "👇 Codex 側のキャラを 1つ 選択（任意）"
+                  ? "🟠 Claude 側のキャラを 1つ 選択（任意）"
+                  : "🟢 Codex 側のキャラを 1つ 選択（任意）"
                 : "もしくは下からキャラを選ぶ（任意）"}
             </span>
             <span className="h-px flex-1 bg-[var(--color-border)]" />
@@ -322,7 +412,9 @@ export function CharacterPickerModal({
           {/* Empty state when no characters */}
           {userChars.length === 0 && !splitMode && (
             <section className="border border-dashed border-[var(--color-border)] rounded-xl p-6 text-center">
-              <div className="text-3xl mb-2">✨</div>
+              <div className="flex justify-center mb-2 text-[var(--color-muted)]">
+                <Sparkles size={24} strokeWidth={1.5} aria-hidden="true" />
+              </div>
               <h3 className="font-bold text-[14px] mb-1">
                 自分のキャラクターを作りましょう
               </h3>
@@ -363,24 +455,62 @@ export function CharacterPickerModal({
                 ? "並列モードではテンプレートをそのまま使います。編集したい場合は単独モードで複製してから戻ってきてください。"
                 : "選ぶと編集画面が開きます。名前・アバター・口調を自分用に変えて保存できます。"}
             </p>
+            {/* AI タブ: 人格テンプレ（CEO/CDO 等）をどの AI で起動するかを切替える。 */}
+            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+              <span className="text-[10.5px] text-[var(--color-muted)] uppercase tracking-wide font-semibold">
+                どのAIで起動：
+              </span>
+              {TEMPLATE_PROVIDER_TABS.map((p) => {
+                const selected = templateProvider === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setTemplateProvider(p)}
+                    className={`px-2 py-0.5 rounded-md text-[11px] border transition inline-flex items-center gap-1 ${
+                      selected
+                        ? "bg-[var(--color-accent-soft)] border-[var(--color-accent)] text-[var(--color-text)] font-semibold"
+                        : "bg-white border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    <CategoryDot provider={p} size={8} />
+                    <span>{PROVIDER_LABELS[p]}</span>
+                  </button>
+                );
+              })}
+              <span className="text-[10px] text-[var(--color-muted)] ml-1">
+                ※ ノーマル系はそれぞれの固定AIで起動します
+              </span>
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              {TEMPLATE_CHARACTERS.map((t) => (
+              {TEMPLATE_CHARACTERS.map((t) => {
+                const isNormal = isNormalTemplate(t);
+                const launchProvider: Provider = isNormal
+                  ? t.provider
+                  : templateProvider;
+                return (
                 <button
                   key={t.id}
                   onClick={() => handleTemplateClick(t)}
                   className="flex items-center gap-2 border border-[var(--color-border)] rounded-md p-2 hover:bg-[var(--color-surface)] transition text-left"
+                  title={`${PROVIDER_LABELS[launchProvider]} で「${t.name}」として起動`}
                 >
                   <CharacterAvatar character={t} size={32} />
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-[12.5px] truncate">
                       {t.name}
                     </div>
-                    <div className="text-[10.5px] text-[var(--color-muted)] truncate">
-                      {t.roleTag}
+                    <div className="text-[10.5px] text-[var(--color-muted)] truncate inline-flex items-center gap-1">
+                      <CategoryDot provider={launchProvider} size={8} />
+                      <span>{PROVIDER_LABELS[launchProvider]}</span>
+                      <span className="text-[var(--color-border)]">／</span>
+                      <span>{t.roleTag}</span>
                     </div>
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </section>
         </div>

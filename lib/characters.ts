@@ -8,15 +8,17 @@ import type { Character, ModelId, Provider, Thread } from "./types";
  * 設定画面から「このテンプレートを元に新しいキャラを作る」起点として使う。
  * 直接編集／削除されることはない（isTemplate: true）。
  *
- * 先頭2件（tmpl-claude-normal / tmpl-codex-normal）は「素の Claude / Codex」用。
- * 役割づけや人格付けを一切しないニュートラル設定。デフォルトは Claude ノーマル。
+ * 先頭2件（tmpl-claude-normal / tmpl-codex-normal）は素の Claude / Codex 用。
+ * 役割づけや人格付けを一切しないニュートラル設定。デフォルトは Claude（normal）。
  */
 export const TEMPLATE_CHARACTERS: Character[] = [
   {
     id: "tmpl-claude-normal",
-    name: "ノーマル（Claude）",
-    roleTag: "素のClaude Code",
+    name: "Claude（normal）",
+    roleTag: "Claude（normal）",
     emoji: "🟠",
+    // normal テンプレは provider 識別の色玉 emoji を avatar に出す（lucide アイコンで上書きしない）。
+    iconName: undefined,
     avatarPath: null,
     accentColor: "#dd6b20",
     description:
@@ -29,9 +31,10 @@ export const TEMPLATE_CHARACTERS: Character[] = [
   },
   {
     id: "tmpl-codex-normal",
-    name: "ノーマル（Codex）",
-    roleTag: "素のCodex CLI",
+    name: "Codex（normal）",
+    roleTag: "Codex（normal）",
     emoji: "🟢",
+    iconName: undefined,
     avatarPath: null,
     accentColor: "#10a37f",
     description:
@@ -43,10 +46,27 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     isTemplate: true,
   },
   {
+    id: "tmpl-opencode-normal",
+    name: "OpenCode（normal）",
+    roleTag: "OpenCode（無料・ローカル）",
+    emoji: "🟣",
+    iconName: undefined,
+    avatarPath: null,
+    accentColor: "#7c3aed",
+    description:
+      "OSS の OpenCode（sst 製）を Ollama のローカル LLM で動かす。API キー不要・完全無料で起動できる。FreeMode Wizard が終わると最初に立ち上がるキャラ。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "opencode",
+    isTemplate: true,
+  },
+  {
     id: "tmpl-auto",
     name: "おまかせ",
     roleTag: "自動アサイン",
-    emoji: "✨",
+    emoji: "",
+    iconName: "Wand2",
     avatarPath: null,
     accentColor: "#0ea5e9",
     description:
@@ -84,7 +104,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-ceo",
     name: "CEO",
     roleTag: "全体統括",
-    emoji: "👑",
+    emoji: "",
+    iconName: "Crown",
     avatarPath: null,
     accentColor: "#7c3aed",
     description:
@@ -122,7 +143,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-cdo",
     name: "技術参謀",
     roleTag: "エンジニア",
-    emoji: "🛠",
+    emoji: "",
+    iconName: "Wrench",
     avatarPath: null,
     accentColor: "#2563eb",
     description:
@@ -142,7 +164,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-cmo",
     name: "マーケ参謀",
     roleTag: "マーケター",
-    emoji: "📣",
+    emoji: "",
+    iconName: "Megaphone",
     avatarPath: null,
     accentColor: "#db2777",
     description:
@@ -162,7 +185,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-cso",
     name: "営業参謀",
     roleTag: "セールス",
-    emoji: "🤝",
+    emoji: "",
+    iconName: "Handshake",
     avatarPath: null,
     accentColor: "#16a34a",
     description:
@@ -182,7 +206,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-cpo",
     name: "プロダクト参謀",
     roleTag: "PdM",
-    emoji: "📐",
+    emoji: "",
+    iconName: "Compass",
     avatarPath: null,
     accentColor: "#9333ea",
     description:
@@ -202,7 +227,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-cfo",
     name: "財務参謀",
     roleTag: "経理",
-    emoji: "📊",
+    emoji: "",
+    iconName: "BarChart3",
     avatarPath: null,
     accentColor: "#0891b2",
     description: "売上・経費・契約書まわり。数字とリスクの一次確認担当。",
@@ -221,7 +247,8 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     id: "tmpl-secretary",
     name: "秘書",
     roleTag: "アシスタント",
-    emoji: "🌷",
+    emoji: "",
+    iconName: "Notebook",
     avatarPath: null,
     accentColor: "#f59e0b",
     description:
@@ -298,12 +325,19 @@ export function newCharacterId(): string {
 /**
  * テンプレートを元に新しいユーザーキャラを作成（クローン）。
  * id を新規発行、isTemplate=false に。名前/アバターはそのまま継承（後で編集前提）。
+ *
+ * @param overrides 任意のフィールド上書き。AI Picker でテンプレ × プロバイダの組合せ
+ *                  （例: CEO × Codex）を作る用途で `{ provider: "codex" }` などを渡す。
  */
-export function cloneFromTemplate(tmpl: Character): Character {
+export function cloneFromTemplate(
+  tmpl: Character,
+  overrides?: Partial<Character>,
+): Character {
   return {
     ...tmpl,
     id: newCharacterId(),
     isTemplate: false,
+    ...overrides,
   };
 }
 
@@ -312,7 +346,8 @@ export function blankCharacter(): Character {
     id: newCharacterId(),
     name: "",
     roleTag: "",
-    emoji: "✨",
+    emoji: "",
+    iconName: "Bot",
     avatarPath: null,
     accentColor: "#3b82f6",
     description: "",
@@ -338,10 +373,12 @@ export const ACCENT_COLORS = [
   "#475569", // slate
 ];
 
-export const EMOJI_OPTIONS = [
-  "✨", "🤖", "💼", "🎯", "📚", "🛠", "📣", "🤝", "📐", "📊",
-  "🌷", "🦊", "🐱", "🐶", "🦄", "🌟", "💡", "🚀", "🌸", "🍀",
-];
+/**
+ * 旧: 絵文字選択肢。UI から絵文字を一掃したため空配列。
+ * `Character.iconName` で lucide ラインアートを指定する方式に切替。
+ * @deprecated 新規コードでは使わない。残してあるのは外部から import している保険。
+ */
+export const EMOJI_OPTIONS: string[] = [];
 
 /** デフォルト character_id（最初に作ったキャラを使う、無ければ最初のテンプレ） */
 export function defaultCharacterId(): string {
@@ -351,5 +388,5 @@ export function defaultCharacterId(): string {
 }
 
 // 後方互換：DEFAULT_CHARACTER_ID は関数ベース推奨だが既存コードに使われている。
-// ノーマル（Claude） を全体既定キャラに。役割・人格を被せず素のClaudeで開始する。
+// Claude（normal） を全体既定キャラに。役割・人格を被せず素のClaudeで開始する。
 export const DEFAULT_CHARACTER_ID = "tmpl-claude-normal";

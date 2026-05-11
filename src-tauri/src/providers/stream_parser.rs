@@ -45,11 +45,22 @@ pub fn parse_line(session_id: &str, line: &str) -> Vec<NormalizedEvent> {
     }
 }
 
-fn parse_system(session_id: &str, _v: &Value) -> Vec<NormalizedEvent> {
-    // init イベントは UI 側で特別扱いせず、Ready で代替
-    vec![NormalizedEvent::Ready {
+fn parse_system(session_id: &str, v: &Value) -> Vec<NormalizedEvent> {
+    // init イベントは UI 側で特別扱いせず、Ready で代替。
+    // ただし `system.init` 内に CLI 側の本物 session_id があれば、
+    // 永続化用に CliSessionId イベントも一緒に送る。
+    let mut out = vec![NormalizedEvent::Ready {
         session_id: session_id.to_string(),
-    }]
+    }];
+    if let Some(cli_sid) = v.get("session_id").and_then(|s| s.as_str()) {
+        if !cli_sid.is_empty() {
+            out.push(NormalizedEvent::CliSessionId {
+                session_id: session_id.to_string(),
+                cli_session_id: cli_sid.to_string(),
+            });
+        }
+    }
+    out
 }
 
 fn parse_assistant(session_id: &str, v: &Value) -> Vec<NormalizedEvent> {

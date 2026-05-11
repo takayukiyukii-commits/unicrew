@@ -20,25 +20,45 @@ import {
 } from "lucide-react";
 import type { AppSettings, AuthMode } from "@/lib/types";
 import {
+  acpCliStatus,
   claudeStatus,
+  cliVersions,
   codexStatus,
+  geminiStatus,
   getApiKey,
   getOpenAiApiKey,
+  installAcpCli,
   installClaudeCode,
   installCodex,
+  installGemini,
+  listenAcpInstallProgress,
+  listenCliUpdate,
   listenCodexInstallProgress,
   listenCodexLoginProgress,
+  listenGeminiInstallProgress,
   listenInstallProgress,
   listenLoginProgress,
   setApiKey,
   setOpenAiApiKey,
   startClaudeLogin,
   startCodexLogin,
+  updateCli,
+  type AcpCliAutoInstallProvider,
+  type AcpCliProvider,
+  type AcpCliStatus,
   type ClaudeStatus,
+  type CliVersions,
   type CodexStatus,
+  type GeminiStatus,
 } from "@/lib/tauri";
 import clsx from "clsx";
 import { CharactersSection } from "./CharactersSection";
+import { CategoryDot } from "@/lib/providerVisuals";
+import {
+  CATEGORY_LABELS,
+  CATEGORY_DESCRIPTIONS,
+  type ProviderCategory,
+} from "@/lib/providerCategories";
 
 interface Props {
   open: boolean;
@@ -46,6 +66,14 @@ interface Props {
   onClose: () => void;
   onSave: (s: AppSettings) => void;
   onCharactersChanged?: () => void;
+  /**
+   * 「無料で試す」など特定セットアップに誘導する deep-link。
+   * 指定されたカテゴリの CategoryAccordion を自動展開する。
+   * 同じ値を渡しても展開を作り直したい場合は呼び出し側で counter を上げる
+   * `forceOpenAccordionKey` を別に渡す（変化検出用）。
+   */
+  forceOpenCategory?: ProviderCategory | null;
+  forceOpenAccordionKey?: number;
 }
 
 type InstallStage = "idle" | "running" | "done" | "failed";
@@ -63,6 +91,8 @@ export function SettingsModal({
   onClose,
   onSave,
   onCharactersChanged,
+  forceOpenCategory,
+  forceOpenAccordionKey,
 }: Props) {
   const [authMode, setAuthMode] = useState<AuthMode>(settings.authMode);
   const [showActivity, setShowActivity] = useState<boolean>(
@@ -81,6 +111,9 @@ export function SettingsModal({
   const [status, setStatus] = useState<ClaudeStatus | null>(null);
   const [cxStatus, setCxStatus] = useState<CodexStatus | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [versions, setVersions] = useState<CliVersions | null>(null);
+  const [updatingCli, setUpdatingCli] = useState<"claude" | "codex" | null>(null);
+  const [updateLine, setUpdateLine] = useState("");
   const [installStage, setInstallStage] = useState<InstallStage>("idle");
   const [installLine, setInstallLine] = useState("");
   const [loginStage, setLoginStage] = useState<LoginStage>("idle");
@@ -89,19 +122,97 @@ export function SettingsModal({
   const [cxInstallLine, setCxInstallLine] = useState("");
   const [cxLoginStage, setCxLoginStage] = useState<LoginStage>("idle");
   const [cxLoginUrl, setCxLoginUrl] = useState<string | null>(null);
+  const [gmStatus, setGmStatus] = useState<GeminiStatus | null>(null);
+  const [gmInstallStage, setGmInstallStage] = useState<InstallStage>("idle");
+  const [gmInstallLine, setGmInstallLine] = useState("");
+  // ACP / ローカル LLM 系（Goose / OpenCode / Ollama / codex-acp / kiro）の status + install 進捗。
+  // - 自動インストール対応の 3 種（goose/opencode/ollama）は stage/line も使う
+  // - 手動インストール限定の 2 種（codex-acp/kiro）は status のみ参照
+  type AcpCliState = {
+    status: AcpCliStatus | null;
+    stage: InstallStage;
+    line: string;
+  };
+  const initialAcpState: Record<AcpCliProvider, AcpCliState> = {
+    goose: { status: null, stage: "idle", line: "" },
+    opencode: { status: null, stage: "idle", line: "" },
+    ollama: { status: null, stage: "idle", line: "" },
+    "codex-acp": { status: null, stage: "idle", line: "" },
+    kiro: { status: null, stage: "idle", line: "" },
+  };
+  const [acpStates, setAcpStates] =
+    useState<Record<AcpCliProvider, AcpCliState>>(initialAcpState);
+  const updateAcpState = useCallback(
+    (provider: AcpCliProvider, patch: Partial<AcpCliState>) => {
+      setAcpStates((prev) => ({
+        ...prev,
+        [provider]: { ...prev[provider], ...patch },
+      }));
+    },
+    [],
+  );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cxPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshStatus = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [c, x] = await Promise.all([claudeStatus(), codexStatus()]);
+      // status / version を全部並列取得。version は npm view を叩くので少し遅いが、待ってから表示。
+      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro] =
+        await Promise.all([
+          claudeStatus(),
+          codexStatus(),
+          geminiStatus(),
+          cliVersions(),
+          acpCliStatus("goose"),
+          acpCliStatus("opencode"),
+          acpCliStatus("ollama"),
+          acpCliStatus("codex-acp"),
+          acpCliStatus("kiro"),
+        ]);
       setStatus(c);
       setCxStatus(x);
+      setGmStatus(g);
+      setVersions(v);
+      setAcpStates((prev) => ({
+        goose: { ...prev.goose, status: goose },
+        opencode: { ...prev.opencode, status: opencode },
+        ollama: { ...prev.ollama, status: ollama },
+        "codex-acp": { ...prev["codex-acp"], status: codexAcp },
+        kiro: { ...prev.kiro, status: kiro },
+      }));
     } finally {
       setRefreshing(false);
     }
   }, []);
+
+  // CLI 更新進捗 listen
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenCliUpdate((line) => setUpdateLine(line)).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  const handleUpdateCli = useCallback(
+    async (provider: "claude" | "codex") => {
+      setUpdatingCli(provider);
+      setUpdateLine("");
+      try {
+        await updateCli(provider);
+        // 完了後にバージョン再取得
+        await refreshStatus();
+      } catch (e) {
+        setUpdateLine(`エラー: ${e}`);
+      } finally {
+        setUpdatingCli(null);
+      }
+    },
+    [refreshStatus],
+  );
 
   useEffect(() => {
     if (open) {
@@ -178,6 +289,42 @@ export function SettingsModal({
       if (cxPollRef.current) clearInterval(cxPollRef.current);
     };
   }, [refreshStatus, cxLoginStage]);
+
+  // Gemini インストール進捗を listen（gemini はブラウザ login 経路を CLI が自前で処理するので、
+  // UNICREW としてはインストール進捗だけ拾えれば十分）
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenGeminiInstallProgress({
+      onLine: (line) => setGmInstallLine(line),
+      onDone: (success) => {
+        setGmInstallStage(success ? "done" : "failed");
+        setTimeout(refreshStatus, 500);
+      },
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [refreshStatus]);
+
+  // ACP CLI（goose/opencode/ollama）の install 進捗。
+  // 同じ acp_install:line / acp_install:done を共有するため、payload の provider で振り分ける。
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listenAcpInstallProgress({
+      onLine: (ev) => updateAcpState(ev.provider, { line: ev.line }),
+      onDone: (ev) => {
+        updateAcpState(ev.provider, { stage: ev.success ? "done" : "failed" });
+        setTimeout(refreshStatus, 500);
+      },
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [refreshStatus, updateAcpState]);
 
   // Subscribe to login progress
   useEffect(() => {
@@ -262,6 +409,24 @@ export function SettingsModal({
     await startCodexLogin();
   };
 
+  const startGmInstall = async () => {
+    setGmInstallStage("running");
+    setGmInstallLine("");
+    await installGemini();
+  };
+
+  const startAcpInstall = async (provider: AcpCliAutoInstallProvider) => {
+    updateAcpState(provider, { stage: "running", line: "" });
+    try {
+      await installAcpCli(provider);
+    } catch (e) {
+      updateAcpState(provider, {
+        stage: "failed",
+        line: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
@@ -329,10 +494,20 @@ export function SettingsModal({
             </div>
           </section>
 
+          {/* ── 接続済みエージェント（カテゴリ accordion） ── */}
+          <div className="text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide pt-2">
+            接続済みエージェント
+          </div>
+
           {authMode === "subscription" && (
-            <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3 bg-[var(--color-surface)]">
-              <div className="flex items-center justify-between">
-                <h4 className="font-semibold text-[13px]">Claude 接続状態</h4>
+            <CategoryAccordion
+              category="claude_family"
+              connectedCount={status?.installed && status?.logged_in ? 1 : 0}
+              totalCount={1}
+              defaultOpen={!status?.installed || !status?.logged_in}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold text-[12.5px]">Claude（公式 CLI）</h4>
                 <button
                   onClick={refreshStatus}
                   disabled={refreshing}
@@ -365,6 +540,14 @@ export function SettingsModal({
                           : "Claude のインストールが必要"
                     }
                   />
+                  {versions?.claude.update_available && (
+                    <CliUpdateBanner
+                      info={versions.claude}
+                      busy={updatingCli === "claude"}
+                      line={updatingCli === "claude" ? updateLine : ""}
+                      onUpdate={() => handleUpdateCli("claude")}
+                    />
+                  )}
 
                   {/* インストール進捗 */}
                   {!status.installed && installStage === "idle" && (
@@ -462,7 +645,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                         <CheckCircle2 size={14} />
-                        ログイン完了 ✓ さっそく使えます。
+                        ログイン完了。さっそく使えます。
                       </div>
                     </div>
                   )}
@@ -486,13 +669,18 @@ export function SettingsModal({
                   )}
                 </>
               )}
-            </section>
+            </CategoryAccordion>
           )}
 
-          {/* Codex setup (always shown so users can opt-in independently of Claude auth mode) */}
-          <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3 bg-[var(--color-surface)]">
-            <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-[13px]">Codex 接続状態（任意）</h4>
+          {/* Codex（OpenAI 系カテゴリ） */}
+          <CategoryAccordion
+            category="openai_family"
+            connectedCount={cxStatus?.installed && cxStatus?.logged_in ? 1 : 0}
+            totalCount={1}
+            defaultOpen={false}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-semibold text-[12.5px]">Codex（公式 CLI）</h4>
               <button
                 onClick={refreshStatus}
                 disabled={refreshing}
@@ -501,7 +689,7 @@ export function SettingsModal({
                 再確認
               </button>
             </div>
-            <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
+            <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
               ChatGPT Plus/Pro/Business をお持ちなら、Codex も繋いで使えます（Claude と切替・並列可）。
               不要なら未接続のままで問題ありません。
             </p>
@@ -524,6 +712,14 @@ export function SettingsModal({
                         : "Codex CLI のインストールが必要"
                   }
                 />
+                {versions?.codex.update_available && (
+                  <CliUpdateBanner
+                    info={versions.codex}
+                    busy={updatingCli === "codex"}
+                    line={updatingCli === "codex" ? updateLine : ""}
+                    onUpdate={() => handleUpdateCli("codex")}
+                  />
+                )}
 
                 {/* Install */}
                 {!cxStatus.installed && cxInstallStage === "idle" && (
@@ -616,7 +812,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                       <CheckCircle2 size={14} />
-                      Codex ログイン完了 ✓
+                      Codex ログイン完了
                     </div>
                   </div>
                 )}
@@ -630,7 +826,292 @@ export function SettingsModal({
                 )}
               </>
             )}
-          </section>
+          </CategoryAccordion>
+
+          {/* Gemini（Google 系カテゴリ） */}
+          <CategoryAccordion
+            category="google_family"
+            connectedCount={
+              gmStatus?.installed && (gmStatus?.logged_in || gmStatus?.has_api_key_env) ? 1 : 0
+            }
+            totalCount={1}
+            defaultOpen={false}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-semibold text-[12.5px]">Gemini（公式 CLI）</h4>
+              <button
+                onClick={refreshStatus}
+                disabled={refreshing}
+                className="text-[11px] text-[var(--color-accent)] hover:underline disabled:opacity-50"
+              >
+                再確認
+              </button>
+            </div>
+            <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
+              Google 公式の <span className="font-mono">@google/gemini-cli</span> が必要です。
+              インストール後は CLI 内で OAuth ログインするか、環境変数 <span className="font-mono">GEMINI_API_KEY</span> をセットすると使えます。
+            </p>
+
+            {gmStatus && (
+              <>
+                <StatusRow
+                  label="Gemini CLI"
+                  ok={gmStatus.installed}
+                  detail={gmStatus.version ?? "未インストール"}
+                />
+                <StatusRow
+                  label="認証状態"
+                  ok={gmStatus.logged_in || gmStatus.has_api_key_env}
+                  detail={
+                    gmStatus.logged_in
+                      ? "OAuth ログイン済み"
+                      : gmStatus.has_api_key_env
+                        ? "GEMINI_API_KEY 環境変数あり"
+                        : gmStatus.installed
+                          ? "未認証（OAuth ログインまたは GEMINI_API_KEY が必要）"
+                          : "Gemini CLI のインストールが必要"
+                  }
+                />
+
+                {/* Install */}
+                {!gmStatus.installed && gmInstallStage === "idle" && (
+                  <div className="pt-2 border-t border-[var(--color-border)]">
+                    <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
+                      npm 経由で公式 CLI をインストールします。ターミナルは開きません。
+                    </p>
+                    <button
+                      onClick={startGmInstall}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
+                    >
+                      <Download size={13} />
+                      Gemini CLI をインストール
+                    </button>
+                  </div>
+                )}
+                {gmInstallStage === "running" && (
+                  <div className="pt-2 border-t border-[var(--color-border)]">
+                    <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)] mb-1">
+                      <Loader2 size={13} className="animate-spin" />
+                      インストール中…
+                    </div>
+                    <div className="text-[10.5px] text-[var(--color-muted)] font-mono truncate">
+                      {gmInstallLine}
+                    </div>
+                  </div>
+                )}
+                {gmInstallStage === "done" && (
+                  <div className="pt-2 border-t border-[var(--color-border)] text-[12px] text-emerald-600 flex items-center gap-1.5">
+                    <CheckCircle2 size={13} />
+                    インストール完了。次は CLI 内で OAuth ログインまたは APIキーを設定してください。
+                  </div>
+                )}
+                {gmInstallStage === "failed" && (
+                  <div className="pt-2 border-t border-[var(--color-border)] text-[12px] text-red-600 flex items-center gap-1.5">
+                    <AlertCircle size={13} />
+                    インストールに失敗しました。npm が PATH にあるか確認してください。
+                  </div>
+                )}
+                {gmStatus.installed && !gmStatus.logged_in && !gmStatus.has_api_key_env && (
+                  <div className="pt-2 border-t border-[var(--color-border)] text-[11.5px] text-[var(--color-muted)] leading-relaxed">
+                    認証方法は2通りあります:
+                    <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                      <li>
+                        <span className="font-mono">gemini</span> を一度ターミナルから実行 → OAuth ログイン（無料枠あり）
+                      </li>
+                      <li>
+                        AI Studio で <span className="font-mono">GEMINI_API_KEY</span> を発行 → OS 環境変数にセット
+                      </li>
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+            {!gmStatus && (
+              <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
+                <Loader2 size={14} className="animate-spin" />
+                確認中…
+              </div>
+            )}
+          </CategoryAccordion>
+
+          {/* ローカル / OSS 系（Sprint 2 で OpenCode + Goose + Ollama を自動インストール対応）。
+              codex-acp / kiro は手動インストールのみ対応（npm パッケージや AWS Builder ID 前提のため）。 */}
+          {(() => {
+            type AcpRow = {
+              provider: AcpCliProvider;
+              label: string;
+              description: string;
+              installHelpUrl: string;
+              /** "auto" = installAcpCli 実行可。"manual" = 手動インストール案内のみ。 */
+              kind: "auto" | "manual";
+            };
+            const acpRows: AcpRow[] = [
+              {
+                provider: "goose",
+                label: "Goose",
+                description:
+                  "Block 製 OSS。ACP プロトコル対応。Claude/OpenAI/Ollama 等を BYOK or ローカルで動かせる。Windows は winget 公式無しのため手動配置：GitHub Releases から goose-x86_64-pc-windows-msvc.zip を解凍し、goose.exe を %LOCALAPPDATA%\\Programs\\Goose\\goose.exe に置く（配置に詰まったら結城さん→AI に依頼で OK）。",
+                installHelpUrl:
+                  "https://github.com/block/goose/releases/latest",
+                kind: "manual",
+              },
+              {
+                provider: "opencode",
+                label: "OpenCode",
+                description:
+                  "sst 製 OSS（MIT）。75+ プロバイダ対応、Ollama 経由で完全無料起動が可能。",
+                installHelpUrl: "https://opencode.ai/docs/install/",
+                kind: "auto",
+              },
+              {
+                provider: "ollama",
+                label: "Ollama",
+                description:
+                  "ローカル LLM ランタイム。これがあれば API キーゼロで OpenCode/Goose を動かせる。",
+                installHelpUrl: "https://ollama.com/download",
+                kind: "auto",
+              },
+              {
+                provider: "codex-acp",
+                label: "Codex-ACP",
+                description:
+                  "Zed Industries 製 OSS（Apache-2.0）。codex を ACP 経由で動かす。インストールは npm 経由、実行時に環境変数 OPENAI_API_KEY が必要。",
+                installHelpUrl:
+                  "https://github.com/zed-industries/codex-acp",
+                kind: "auto",
+              },
+              {
+                provider: "kiro",
+                label: "Kiro CLI",
+                description:
+                  "AWS 製。AWS Bedrock backed。AWS Builder ID と認証情報が必要（前提が複雑なため、配置や認証に詰まったら AI に丸投げ可）。",
+                installHelpUrl: "https://kiro.dev/",
+                kind: "manual",
+              },
+            ];
+            const connected = acpRows.filter(
+              (r) => acpStates[r.provider].status?.installed,
+            ).length;
+            return (
+              <CategoryAccordion
+                category="open_local"
+                connectedCount={connected}
+                totalCount={acpRows.length}
+                defaultOpen={false}
+                forceOpenSignal={
+                  forceOpenCategory === "open_local"
+                    ? forceOpenAccordionKey
+                    : undefined
+                }
+              >
+                <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-3">
+                  API キー不要・完全無料で動かせる OSS エージェントとローカル LLM ランタイム。
+                  Goose / OpenCode / Ollama の 3 つ揃えると{" "}
+                  <strong>Ollama → OpenCode → UNICREW</strong>{" "}
+                  の無料起動経路が完成します。Codex-ACP / Kiro は議論プリセット用の手動インストール枠です。
+                </p>
+                <div className="space-y-2">
+                  {acpRows.map((r) => {
+                    const s = acpStates[r.provider];
+                    const installed = !!s.status?.installed;
+                    const version = s.status?.version ?? null;
+                    const running = s.stage === "running";
+                    return (
+                      <div
+                        key={r.provider}
+                        className="border border-[var(--color-border)] rounded-xl p-3 bg-white"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <CategoryDot category="open_local" size={8} />
+                          <span className="font-semibold text-[12.5px]">
+                            {r.label}
+                          </span>
+                          {installed ? (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-600">
+                              <CheckCircle2 size={12} />
+                              {version ?? "インストール済み"}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--color-muted)]">
+                              <AlertCircle size={12} />
+                              未インストール
+                            </span>
+                          )}
+                          {r.kind === "manual" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-[var(--color-muted)]">
+                              手動のみ
+                            </span>
+                          )}
+                          <a
+                            href={r.installHelpUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto inline-flex items-center gap-1 text-[10.5px] text-[var(--color-accent)] hover:underline"
+                          >
+                            {r.kind === "manual" ? "インストール手順" : "手動手順"}
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
+                        <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
+                          {r.description}
+                        </p>
+                        {r.kind === "auto" && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void startAcpInstall(
+                                  r.provider as AcpCliAutoInstallProvider,
+                                )
+                              }
+                              disabled={running}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-white text-[11.5px] font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-wait"
+                            >
+                              {running ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Download size={12} />
+                              )}
+                              {installed
+                                ? running
+                                  ? "更新中…"
+                                  : "再インストール"
+                                : running
+                                  ? "インストール中…"
+                                  : "自動インストール"}
+                            </button>
+                            {s.stage === "done" && (
+                              <span className="text-[10.5px] text-emerald-600 inline-flex items-center gap-1">
+                                <CheckCircle2 size={12} />
+                                完了
+                              </span>
+                            )}
+                            {s.stage === "failed" && (
+                              <span className="text-[10.5px] text-rose-600 inline-flex items-center gap-1">
+                                <AlertCircle size={12} />
+                                失敗
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {r.kind === "auto" &&
+                          s.line &&
+                          (running || s.stage === "failed") && (
+                            <pre className="mt-2 text-[10.5px] text-[var(--color-muted)] bg-[var(--color-surface)] rounded p-2 max-h-20 overflow-auto whitespace-pre-wrap break-all">
+                              {s.line}
+                            </pre>
+                          )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10.5px] text-[var(--color-muted)] italic mt-3">
+                  ※ Windows は winget / 全 OS は npm 経由。macOS/Linux の Goose・Ollama は「手動手順」リンクから。
+                  Codex-ACP は OPENAI_API_KEY、Kiro は AWS Builder ID + 認証が前提です。
+                </p>
+              </CategoryAccordion>
+            );
+          })()}
 
           {authMode === "apikey" && (
             <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
@@ -725,29 +1206,6 @@ export function SettingsModal({
               </span>
             </label>
 
-            <label
-              className={clsx(
-                "flex items-start gap-2 text-[12.5px] select-none border-t border-[var(--color-border)] pt-3",
-                beginnerMode ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={beginnerMode ? false : showActivity}
-                onChange={(e) => setShowActivity(e.target.checked)}
-                disabled={beginnerMode}
-                className="w-4 h-4 mt-0.5"
-              />
-              <span className="flex-1">
-                <span className="font-medium">
-                  ツール実行・コード編集を表示する（上級者向け）
-                </span>
-                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
-                  ファイル編集・コマンド実行をバブルとターミナル風パネルで可視化。
-                  初心者モード ON 時は自動で OFF になります。
-                </span>
-              </span>
-            </label>
           </section>
 
           <div className="border-t border-[var(--color-border)] pt-5">
@@ -789,6 +1247,19 @@ export function SettingsModal({
             <ul className="list-disc pl-4 space-y-0.5 mt-1 text-[11px]">
               <li>Claude / Anthropic は Anthropic, PBC の商標</li>
               <li>ChatGPT / Codex / GPT は OpenAI, Inc. の商標</li>
+              <li>Gemini は Google LLC の商標</li>
+            </ul>
+
+            <div className="font-semibold text-[var(--color-text)] mb-1 mt-4">
+              利用 OSS（Apache-2.0）
+            </div>
+            <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+              <li>
+                <strong>agent-client-protocol</strong>（Zed 主導の業界標準 ACP）
+                — Goose / OpenCode / Codex-acp / Kiro 等の ACP 対応エージェントとの通信に使用。
+                Copyright 2025 Zed Industries, Inc. and contributors. ライセンス全文は
+                インストール先の <span className="font-mono">THIRD_PARTY_LICENSES/agent-client-protocol/NOTICE.md</span> を参照。
+              </li>
             </ul>
           </section>
         </div>
@@ -809,6 +1280,96 @@ export function SettingsModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * カテゴリ単位の accordion ラッパー。
+ * プロバイダ拡張時に SettingsModal がフラットにスクロール地獄化することを防ぐ。
+ *
+ * 設計指針（AGENTS.md「UI 複雑化を避ける5原則」原則1+3）:
+ * - 視覚要素は4色のみ（カテゴリ色）
+ * - デフォルト全閉、未接続/エラー時のみデフォルト開
+ * - バッジで「N/M 接続」を常時表示
+ */
+function CategoryAccordion({
+  category,
+  connectedCount,
+  totalCount,
+  defaultOpen = false,
+  forceOpenSignal,
+  children,
+}: {
+  category: ProviderCategory;
+  connectedCount: number;
+  totalCount: number;
+  defaultOpen?: boolean;
+  /**
+   * 外部から「開いてほしい」シグナル（変化検出用キー）。
+   * undefined → 何もしない。値が変わったタイミングで open=true を強制。
+   */
+  forceOpenSignal?: number;
+  children: React.ReactNode;
+}) {
+  const allConnected = totalCount > 0 && connectedCount === totalCount;
+  const partial = connectedCount > 0 && connectedCount < totalCount;
+  const empty = totalCount === 0;
+
+  // defaultOpen は status 読み込み完了で flip するケースがある（claude_family 等）。
+  // 元の挙動を維持するため `<details open={defaultOpen}>` の reactive を残す。
+  // それを上書きする外部シグナル（forceOpenSignal）が変わったら "ロック" を立て、
+  // ユーザーが手動で閉じるまで open=true を維持する。
+  const [forceOpenLatched, setForceOpenLatched] = useState(false);
+  useEffect(() => {
+    if (forceOpenSignal !== undefined) setForceOpenLatched(true);
+  }, [forceOpenSignal]);
+  const effectiveOpen = forceOpenLatched || defaultOpen;
+
+  return (
+    <details
+      open={effectiveOpen}
+      onToggle={(e) => {
+        // ユーザーが閉じたら latch を解除し、defaultOpen 主導に戻す。
+        if (!(e.currentTarget as HTMLDetailsElement).open) {
+          setForceOpenLatched(false);
+        }
+      }}
+      className="group border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] overflow-hidden"
+    >
+      <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 hover:bg-white/40 transition">
+        <CategoryDot category={category} size={10} />
+        <span className="font-semibold text-[13px] text-[var(--color-text)]">
+          {CATEGORY_LABELS[category]}
+        </span>
+        <span
+          className={clsx(
+            "ml-auto text-[11px] px-2 py-0.5 rounded-full font-medium",
+            empty
+              ? "bg-gray-100 text-[var(--color-muted)]"
+              : allConnected
+                ? "bg-emerald-100 text-emerald-700"
+                : partial
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-gray-100 text-[var(--color-muted)]",
+          )}
+        >
+          {empty
+            ? "Coming soon"
+            : allConnected
+              ? "接続済み"
+              : `${connectedCount} / ${totalCount} 接続`}
+        </span>
+        <span className="text-[var(--color-muted)] group-open:rotate-180 transition-transform">
+          ▾
+        </span>
+      </summary>
+      <div className="px-4 pb-4 pt-1 space-y-2 border-t border-[var(--color-border)] bg-white">
+        <p className="text-[10.5px] text-[var(--color-muted)] mb-1 italic leading-relaxed">
+          {CATEGORY_DESCRIPTIONS[category]}
+        </p>
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -964,6 +1525,58 @@ function StatusRow({
       <span className="text-[var(--color-muted)] font-mono text-[11.5px] truncate max-w-[60%]">
         {detail}
       </span>
+    </div>
+  );
+}
+
+/**
+ * CLI が古い時に出す警告バナー。ワンクリックで `npm install -g <pkg>@latest` を実行する。
+ */
+function CliUpdateBanner({
+  info,
+  busy,
+  line,
+  onUpdate,
+}: {
+  info: { name: string; package: string; current: string | null; latest: string | null };
+  busy: boolean;
+  line: string;
+  onUpdate: () => void;
+}) {
+  return (
+    <div className="border border-amber-300 bg-amber-50 rounded-md px-3 py-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[12px] text-amber-800">
+          <AlertCircle size={13} />
+          <span className="font-medium">{info.name} の更新あり</span>
+          <span className="font-mono text-[11px] text-amber-700">
+            {info.current ?? "—"} → {info.latest ?? "—"}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onUpdate}
+          disabled={busy}
+          className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-md bg-amber-600 text-white font-medium hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? (
+            <>
+              <Loader2 size={11} className="animate-spin" />
+              更新中…
+            </>
+          ) : (
+            <>
+              <Download size={11} />
+              今すぐ更新
+            </>
+          )}
+        </button>
+      </div>
+      {busy && line && (
+        <div className="text-[10.5px] text-amber-700 font-mono truncate">
+          {line}
+        </div>
+      )}
     </div>
   );
 }

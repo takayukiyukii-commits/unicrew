@@ -16,7 +16,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 KEY_FILE = Path(
-    r"C:/Users/takay/OneDrive/デスクトップ/company/API管理/APIキー一覧.md"
+    r"D:/secrets/APIキー一覧.md"
 )
 OUT_PATH = REPO / "public" / "brand" / "app-icon.png"
 

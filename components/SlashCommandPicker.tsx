@@ -19,11 +19,14 @@ interface Props {
   disabled?: boolean;
 }
 
-const PROVIDER_BADGE: Record<Provider, { label: string; color: string }> = {
-  claude: { label: "Claude", color: "#dd6b20" },
-  codex: { label: "Codex", color: "#10a37f" },
-  gemini: { label: "Gemini", color: "#4285f4" },
-};
+// プロバイダ色は lib/providerCategories の CATEGORY_COLORS に集約済み（4 色）。
+// ローカルテーブルを再定義しない。新プロバイダ追加で毎回 ここを直さないため。
+import { colorOf } from "@/lib/providerCategories";
+import { PROVIDER_LABELS as PROVIDER_LABELS_CENTRAL } from "@/lib/types";
+
+function providerBadge(p: Provider): { label: string; color: string } {
+  return { label: PROVIDER_LABELS_CENTRAL[p], color: colorOf(p) };
+}
 
 const CATEGORY_ORDER: SlashCommandCategory[] = [
   "basic",
@@ -147,7 +150,6 @@ export function SlashCommandPicker({
         )}
       >
         <Slash size={13} />
-        <span className="hidden md:inline">コマンド</span>
         <ChevronDown size={11} className="opacity-60" />
       </button>
 
@@ -218,11 +220,11 @@ export function SlashCommandPicker({
                                     key={p}
                                     className="text-[9.5px] px-1 py-0.5 rounded font-medium border"
                                     style={{
-                                      color: PROVIDER_BADGE[p].color,
-                                      borderColor: PROVIDER_BADGE[p].color,
+                                      color: providerBadge(p).color,
+                                      borderColor: providerBadge(p).color,
                                     }}
                                   >
-                                    {PROVIDER_BADGE[p].label}
+                                    {providerBadge(p).label}
                                   </span>
                                 ))}
                               </span>

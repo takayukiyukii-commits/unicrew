@@ -9,7 +9,7 @@ import sys
 
 TARGETS = [
     # 現在地ナレッジ（リブランド済の正本）
-    Path(r"C:/Users/takay/OneDrive/デスクトップ/company/ナレッジ/UNIシリーズ横断まとめ/24_UNICREW.md"),
+    Path(r"D:/company/ナレッジ/UNIシリーズ横断まとめ/24_UNICREW.md"),
     # メモリ
     Path(r"C:/Users/takay/.claude/projects/C--Users-takay-OneDrive--------company/memory/project_unipilot.md"),
     Path(r"C:/Users/takay/.claude/projects/C--Users-takay-OneDrive--------company/memory/project_unipilot_free_funnel.md"),

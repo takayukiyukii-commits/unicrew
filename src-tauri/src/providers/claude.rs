@@ -8,7 +8,7 @@
 //!  - OAuth トークンは UNICREW 側で読み書きしない（CLI が `~/.claude/credentials` 等で自前管理）
 //!  - サブスクモード時は `ANTHROPIC_API_KEY` を env から外して CLI のサブスク認証経路に乗せる
 
-use crate::providers::types::{AuthMode, NormalizedEvent, ProviderError, SpawnOpts};
+use crate::providers::types::{AuthMode, NormalizedEvent, PermissionMode, ProviderError, SpawnOpts};
 use crate::providers::{stream_parser, CliProvider, SessionHandle};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -52,9 +52,39 @@ impl CliProvider for ClaudeProvider {
             "--verbose",
         ]);
 
-        // システムプロンプト（人格＋キャラ合成済の文字列）
+        // 既存セッションを再開（任意）。
+        // CLI 側の session_id を渡せば、Claude が前回の会話履歴をロードして継続する。
+        // セッションが消えていた場合は CLI が起動時にエラーで落ちるが、
+        // 上位のフォールバック（新規セッションで再起動）はフロント側で判断する。
+        if let Some(sid) = &opts.resume_cli_session_id {
+            cmd.arg("--resume").arg(sid);
+        }
+
+        // システムプロンプト（人格＋キャラ合成済の文字列）。
+        //
+        // Windows で `claude` が `.cmd` シムに resolve される環境（npm install 経由など）だと、
+        // Rust 1.77+ の CVE-2024-24576 対策で、改行入りの引数が "batch file arguments are invalid"
+        // で弾かれる。multi-line system_prompt はメモリ注入機能で更に確実に複数行になるため、
+        // 安全側に倒して `--append-system-prompt-file <path>` で渡す。
+        // これは `claude --help` には出ない隠しオプションだが、`--bare` の説明で言及されてる。
+        let mut sysprompt_temp_path: Option<std::path::PathBuf> = None;
         if !opts.system_prompt.is_empty() {
-            cmd.arg("--append-system-prompt").arg(&opts.system_prompt);
+            let mut path = std::env::temp_dir();
+            // セッションIDは UNICREW 内のものを使う（衝突しない）
+            path.push(format!("unicrew-claude-sysprompt-{}.txt", opts.session_id));
+            match std::fs::write(&path, &opts.system_prompt) {
+                Ok(()) => {
+                    cmd.arg("--append-system-prompt-file").arg(&path);
+                    sysprompt_temp_path = Some(path);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[unicrew/claude] system_prompt の一時ファイル書き出しに失敗、argv 渡しにフォールバック: {}",
+                        e
+                    );
+                    cmd.arg("--append-system-prompt").arg(&opts.system_prompt);
+                }
+            }
         }
 
         // モデル
@@ -81,9 +111,14 @@ impl CliProvider for ClaudeProvider {
             }
         }
 
-        // パーミッション：UNICREW UI 側で許可UIを今すぐ提供しないので、acceptEdits を既定にしておく。
-        // 将来 PermissionRequest の UI を実装したら "default" に戻して --allowedTools で制御する。
-        cmd.arg("--permission-mode").arg("acceptEdits");
+        // パーミッション：Shift+Tab でフロントが切り替えた値をそのまま CLI に渡す。
+        // - AcceptEdits（既定）: 編集・実行を自動許可（UNICREW UI に承認フロー無いため）
+        // - Plan: 読み取り・分析のみ。Claude 側で edit/bash がブロックされる
+        let permission_mode_arg = match opts.permission_mode {
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::Plan => "plan",
+        };
+        cmd.arg("--permission-mode").arg(permission_mode_arg);
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -156,6 +191,7 @@ impl CliProvider for ClaudeProvider {
             stdin,
             child,
             _stdout_handle: stdout_handle,
+            sysprompt_temp_path,
         }))
     }
 }
@@ -165,6 +201,16 @@ pub struct ClaudeSessionHandle {
     stdin: ChildStdin,
     child: Child,
     _stdout_handle: JoinHandle<()>,
+    /// `--append-system-prompt-file` 用に書き出した一時ファイル。Drop で削除する。
+    sysprompt_temp_path: Option<std::path::PathBuf>,
+}
+
+impl Drop for ClaudeSessionHandle {
+    fn drop(&mut self) {
+        if let Some(p) = self.sysprompt_temp_path.take() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
 }
 
 #[async_trait::async_trait]

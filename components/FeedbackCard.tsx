@@ -100,7 +100,7 @@ export function FeedbackCard({
             総合評価
           </div>
           <div className="flex gap-1.5">
-            {RATING_OPTIONS.map((opt) => {
+            {RATING_OPTIONS.map((opt, idx) => {
               const active = rating === opt.id;
               return (
                 <button
@@ -115,7 +115,9 @@ export function FeedbackCard({
                   ].join(" ")}
                   aria-pressed={active}
                 >
-                  <span className="text-[20px] leading-none">{opt.emoji}</span>
+                  <span className="text-[14px] leading-none font-bold tabular-nums">
+                    {idx + 1}
+                  </span>
                   <span className="text-[10px] text-[var(--color-muted)]">
                     {opt.label}
                   </span>

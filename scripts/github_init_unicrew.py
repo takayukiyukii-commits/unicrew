@@ -20,7 +20,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 KEY_FILE = Path(
-    r"C:/Users/takay/OneDrive/デスクトップ/company/API管理/APIキー一覧.md"
+    r"D:/secrets/APIキー一覧.md"
 )
 OWNER = "takayukiyukii-commits"
 REPO_NAME = "unicrew"

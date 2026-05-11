@@ -38,14 +38,14 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // ── 基本操作 ──
   {
     command: "/clear",
-    label: "🧹 会話履歴をクリア",
+    label: "会話履歴をクリア",
     description: "今のスレッドの履歴をリセットして、ゼロから話し始める。",
     providers: ["claude", "codex"],
     category: "basic",
   },
   {
     command: "/compact",
-    label: "📦 履歴を要約して圧縮",
+    label: "履歴を要約して圧縮",
     description:
       "長くなった会話を要約して短くする。トークン節約と話の整理に。",
     providers: ["claude", "codex"],
@@ -53,7 +53,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/new",
-    label: "✨ 新しいセッション",
+    label: "新しいセッション",
     description: "今までの文脈をリセットして新しいセッションを始める（Codex）。",
     providers: ["codex"],
     category: "basic",
@@ -62,7 +62,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // ── 開発支援 ──
   {
     command: "/init",
-    label: "📘 CLAUDE.mdを初期化",
+    label: "CLAUDE.mdを初期化",
     description:
       "ワークスペースを解析して CLAUDE.md / AGENTS.md の雛形を作る。新規プロジェクトの最初に。",
     providers: ["claude", "codex"],
@@ -70,7 +70,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/review",
-    label: "🔍 コードレビュー",
+    label: "コードレビュー",
     description:
       "現在のブランチの変更をプルリクとして読み、改善点・バグ・スタイル違反を指摘してもらう。",
     providers: ["claude"],
@@ -78,7 +78,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/security-review",
-    label: "🛡️ セキュリティレビュー",
+    label: "セキュリティレビュー",
     description:
       "未コミットの変更を OWASP Top10 視点で監査。販売開始前の最終チェックに。",
     providers: ["claude"],
@@ -86,7 +86,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/pr_comments",
-    label: "💬 PRコメント取得",
+    label: "PRコメント取得",
     description:
       "GitHub PR のレビューコメントを読み込んで、対応方針を整理してもらう。",
     providers: ["claude"],
@@ -94,7 +94,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/diff",
-    label: "📝 差分を表示",
+    label: "差分を表示",
     description:
       "現在のワークスペースの未コミット差分を表示する（Codex）。",
     providers: ["codex"],
@@ -102,7 +102,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/loop ",
-    label: "🔁 定期実行（要・コマンド）",
+    label: "定期実行（要・コマンド）",
     description:
       "間隔を置いて指定タスクを繰り返す（例: 5m / build-status）。スペース後に頻度＋指示を続ける。",
     providers: ["claude"],
@@ -111,7 +111,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/schedule ",
-    label: "⏰ スケジュール実行",
+    label: "スケジュール実行",
     description:
       "cronで動く遠隔エージェントを作成・更新・一覧する。スペース後に内容を続ける。",
     providers: ["claude"],
@@ -122,7 +122,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // ── 設定・管理 ──
   {
     command: "/model",
-    label: "🧠 モデル切替",
+    label: "モデル切替",
     description:
       "応答に使うモデルを切り替える。UNICREWでは右ペインのプルダウンでも切替可能。",
     providers: ["claude", "codex"],
@@ -130,7 +130,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/permissions",
-    label: "🔐 パーミッション設定",
+    label: "パーミッション設定",
     description:
       "ツール実行の許可/拒否ルールを編集する。Bashコマンドの自動許可リストなど。",
     providers: ["claude"],
@@ -138,7 +138,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/mcp",
-    label: "🔌 MCPサーバー管理",
+    label: "MCPサーバー管理",
     description:
       "接続中のMCPサーバー一覧・追加・削除。LINE Harness / Sentry / Linear 等。",
     providers: ["claude"],
@@ -146,7 +146,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/agents",
-    label: "🧑‍🤝‍🧑 サブエージェント管理",
+    label: "サブエージェント管理",
     description:
       "Explore / code-architect / code-reviewer 等のサブエージェント一覧・新規作成。",
     providers: ["claude"],
@@ -154,7 +154,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/hooks",
-    label: "🪝 フック設定",
+    label: "フック設定",
     description:
       "PreToolUse / PostToolUse / Stop 等のシェルフックを編集する。",
     providers: ["claude"],
@@ -162,7 +162,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/memory",
-    label: "🧠 メモリ管理",
+    label: "メモリ管理",
     description:
       "auto-memory（恒久記憶）を確認・編集する。MEMORY.md と各トピック.md。",
     providers: ["claude"],
@@ -170,7 +170,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/config",
-    label: "⚙️ 設定を変更",
+    label: "設定を変更",
     description:
       "テーマ・通知・キーボードなど Claude Code 全般の設定を開く。",
     providers: ["claude"],
@@ -178,14 +178,14 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/vim",
-    label: "⌨️ Vimモード切替",
+    label: "Vimモード切替",
     description: "入力エリアでVimキーバインドを使えるようにする。",
     providers: ["claude"],
     category: "config",
   },
   {
     command: "/ide",
-    label: "🖥️ IDE接続",
+    label: "IDE接続",
     description:
       "VSCode / JetBrains の開いているファイルや診断情報を取り込めるようにする。",
     providers: ["claude"],
@@ -193,7 +193,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/login",
-    label: "🔑 ログイン",
+    label: "ログイン",
     description:
       "Claude / Codex のサブスク認証を再実行する。401 エラー時の復旧用。",
     providers: ["claude", "codex"],
@@ -201,7 +201,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/logout",
-    label: "🚪 ログアウト",
+    label: "ログアウト",
     description: "保存された認証情報をクリアする。",
     providers: ["claude"],
     category: "config",
@@ -210,14 +210,14 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // ── 情報・ヘルプ ──
   {
     command: "/help",
-    label: "❓ ヘルプ",
+    label: "ヘルプ",
     description: "使えるコマンド一覧と基本操作を表示する。",
     providers: ["claude", "codex"],
     category: "info",
   },
   {
     command: "/status",
-    label: "📊 ステータス表示",
+    label: "ステータス表示",
     description:
       "認証状態・モデル・ワークスペース・MCP接続を一覧表示する。",
     providers: ["claude", "codex"],
@@ -225,7 +225,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/cost",
-    label: "💰 コスト・使用量",
+    label: "コスト・使用量",
     description:
       "今日のセッションのトークン使用量と概算コストを表示する。",
     providers: ["claude"],
@@ -233,7 +233,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/doctor",
-    label: "🩺 ヘルスチェック",
+    label: "ヘルスチェック",
     description:
       "PATH・Node・Rust・CLI 認証など環境を点検し、問題があれば指摘する。",
     providers: ["claude"],
@@ -241,14 +241,14 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/release-notes",
-    label: "📰 リリースノート",
+    label: "リリースノート",
     description: "Claude Code 直近バージョンの変更点を表示する。",
     providers: ["claude"],
     category: "info",
   },
   {
     command: "/upgrade",
-    label: "⬆️ プランをアップグレード",
+    label: "プランをアップグレード",
     description:
       "Claude Pro / Max のサブスク変更ページを開く。",
     providers: ["claude"],
@@ -256,7 +256,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   },
   {
     command: "/bug",
-    label: "🐞 バグ報告",
+    label: "バグ報告",
     description: "Claude Code のバグレポートを送る。",
     providers: ["claude"],
     category: "info",

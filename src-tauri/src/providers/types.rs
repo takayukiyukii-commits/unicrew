@@ -20,6 +20,34 @@ pub struct SpawnOpts {
     pub auth_mode: AuthMode,
     /// auth_mode == "apikey" のときのみ使う
     pub api_key: Option<String>,
+    /// 既存 CLI セッションを再開する場合の CLI 側 session_id。
+    /// Claude: `--resume <sid>` に使う。Codex: `exec resume <sid>` に使う。
+    /// None なら新規セッション。
+    pub resume_cli_session_id: Option<String>,
+    /// Shift+Tab で切替するパーミッションモード（フロントから受け取る）。
+    /// AcceptEdits（既定）= 自動編集 / Plan = 読み取り・分析のみ。
+    pub permission_mode: PermissionMode,
+}
+
+/// Shift+Tab トグルで切替するパーミッションモード。
+///
+/// 各 provider への射影:
+/// - Claude: AcceptEdits → `--permission-mode acceptEdits`、Plan → `--permission-mode plan`
+/// - Codex : AcceptEdits → 既存の `--dangerously-bypass-approvals-and-sandbox`、
+///           Plan → `--sandbox read-only --ask-for-approval never`（書込・実行を拒否）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionMode {
+    AcceptEdits,
+    Plan,
+}
+
+impl PermissionMode {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "plan" => PermissionMode::Plan,
+            _ => PermissionMode::AcceptEdits,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +76,17 @@ impl AuthMode {
 pub enum NormalizedEvent {
     #[serde(rename = "ready")]
     Ready { session_id: String },
+
+    /// CLI（Claude / Codex）が割り当てた本物のセッションID。
+    /// フロント側で thread に保存しておくことで、将来 `--resume` / `exec resume` で
+    /// アプリ再起動後も同じ会話文脈を続けられる。
+    #[serde(rename = "cli_session_id")]
+    CliSessionId {
+        /// UNICREW 内部のセッションID（slot 単位）
+        session_id: String,
+        /// CLI が割り当てた実セッション ID（Claude の system.init / Codex の task_started から）
+        cli_session_id: String,
+    },
 
     #[serde(rename = "assistant_text")]
     AssistantText {

@@ -20,7 +20,7 @@ GPT_SCRIPT = Path(
     r"C:/Users/takay/.claude/skills/gpt-image2/scripts/gpt_image2.py"
 )
 KEY_FILE = Path(
-    r"C:/Users/takay/OneDrive/デスクトップ/company/API管理/APIキー一覧.md"
+    r"D:/secrets/APIキー一覧.md"
 )
 
 DNA_B = (

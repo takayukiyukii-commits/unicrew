@@ -6,6 +6,30 @@ import { DEFAULT_CHARACTER_ID, getCharacter } from "./characters";
 
 const THREADS_KEY = "unicrew.threads.v2";
 const SETTINGS_KEY = "unicrew.settings.v2";
+const LAST_WORKSPACE_KEY = "unicrew.lastWorkspace.v1";
+
+// ---------- last workspace ----------
+// 直近に開いたワークスペースを記憶し、新規スレッド作成時の既定値に使う。
+// 既存スレッドの workspace は thread 自身に保存されるので、ここは「次に開く時の初期値」専用。
+
+export function loadLastWorkspace(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(LAST_WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastWorkspace(path: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (path) localStorage.setItem(LAST_WORKSPACE_KEY, path);
+    else localStorage.removeItem(LAST_WORKSPACE_KEY);
+  } catch {
+    /* noop */
+  }
+}
 
 // ---------- threads ----------
 
@@ -82,7 +106,7 @@ export function loadSettings(): AppSettings {
       ...DEFAULTS,
       ...(JSON.parse(raw) as Partial<AppSettings>),
     };
-    // 旧デフォルト（秘書）のまま明示変更されていないユーザーは新デフォルト（ノーマル Claude）に揃える。
+    // 旧デフォルト（秘書）のまま明示変更されていないユーザーは新デフォルト（Claude（normal））に揃える。
     // 明示的に tmpl-secretary を選んだ人もここで上書きされるが、再選択できるので影響は許容範囲。
     if (merged.defaultCharacterId === "tmpl-secretary") {
       merged.defaultCharacterId = DEFAULT_CHARACTER_ID;

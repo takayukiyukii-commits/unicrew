@@ -481,11 +481,15 @@ export function AddonsSection({
           installed={installed["codex-plugin"]}
           locale={locale}
           pendingInstall={null}
-          onInstall={() => {
+          onInstall={(id) => {
+            // Codex CLI には Claude の `/plugin install` 相当が公式提供されていないため、
+            // 1クリックは MCP（add_codex_mcp 経由）に限定し、プラグインは
+            // ~/.codex/config.toml 直編集が必要であることを明示する。
+            // 「Phase D」みたいな曖昧な文言で詰まらせない方針。
             setError(
               locale === "ja"
-                ? "Codex 側の 1 クリックインストールは Phase D で実装予定です"
-                : "Codex 1-click install will land in Phase D",
+                ? `Codex プラグイン「${id}」は ~/.codex/config.toml の [plugins.${id}] セクションに直接追記して有効化してください（codex CLI は現時点で /plugin install を提供していません）。MCP サーバーは「Codex MCP」タブから1クリックで追加できます。`
+                : `Codex plugin "${id}" must be enabled by editing ~/.codex/config.toml directly under [plugins.${id}] (the codex CLI doesn't provide a /plugin install command yet). MCP servers can still be added via the "Codex MCP" tab.`,
             );
           }}
         />

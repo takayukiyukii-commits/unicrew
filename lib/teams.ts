@@ -18,7 +18,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
     name: "uniLinks 企画会議チーム",
     description:
       "新機能・新製品の企画レビュー。プロダクト/マーケ/技術の3視点で並走し、中立審判が合意度を測る。",
-    emoji: "🪄",
+    emoji: "",
     defaultConference: true,
     defaultMaxRounds: 3,
     participants: [
@@ -42,7 +42,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
     name: "コードレビューチーム",
     description:
       "実装者・レビュアー・セキュリティ監査の3体で同じPRを評価。CDOが司会して合意を取る。",
-    emoji: "🛡",
+    emoji: "",
     defaultConference: true,
     defaultMaxRounds: 3,
     participants: [
@@ -60,7 +60,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
     name: "ディベートチーム（賛成 vs 反対）",
     description:
       "論点を「賛成派」「反対派」に分けて議論させる。中立審判が論理性で勝敗判定。",
-    emoji: "⚖️",
+    emoji: "",
     defaultConference: true,
     defaultMaxRounds: 4,
     participants: [
@@ -83,7 +83,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
     name: "マーケ作戦会議",
     description:
       "CMO/CSO/CPO の3体でキャンペーン設計。客視点・売上視点・体験視点を並走。",
-    emoji: "📣",
+    emoji: "",
     defaultConference: false,
     defaultMaxRounds: 2,
     participants: [

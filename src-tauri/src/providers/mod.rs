@@ -8,12 +8,23 @@
 //!  - claude  → `claude` CLI（Anthropic公式、Pro/Max OAuth または ANTHROPIC_API_KEY）
 //!  - codex   → `codex` CLI（OpenAI公式、ChatGPT Plus/Pro OAuth または OPENAI_API_KEY）
 //!  - gemini  → `gemini` CLI（Google、stream-json対応待ちで現在 stub）
+//!  - goose     → `goose acp` subprocess（業界標準 ACP プロトコル経由、Apache-2.0、Sprint 1 で追加）
+//!  - opencode  → `opencode acp` subprocess（同上、MIT、Sprint 2 で追加）
+//!  - codex-acp → `codex-acp` binary（zed-industries 製、Apache-2.0、OPENAI_API_KEY BYOK 経路、Sprint 2）
+//!  - kiro      → `kiro-cli acp --trust-all-tools`（AWS Bedrock backed、Sprint 2）
 //!
-//! 将来追加候補: copilot-cli。
+//! 将来追加候補:
+//!  - copilot   → `copilot` CLI（GitHub）
+//!  - qwen / kimi（独自 stream-json 経路）
 
+pub mod acp_transport;
 pub mod claude;
 pub mod codex;
+pub mod codex_acp;
 pub mod gemini;
+pub mod goose;
+pub mod kiro;
+pub mod opencode;
 pub mod stream_parser;
 pub mod types;
 
@@ -61,6 +72,10 @@ pub fn build_provider(id: &str) -> Option<Arc<dyn CliProvider>> {
         "claude" => Some(Arc::new(claude::ClaudeProvider::new())),
         "codex" => Some(Arc::new(codex::CodexProvider::new())),
         "gemini" => Some(Arc::new(gemini::GeminiProvider::new())),
+        "goose" => Some(Arc::new(goose::GooseProvider::new())),
+        "opencode" => Some(Arc::new(opencode::OpenCodeProvider::new())),
+        "codex-acp" => Some(Arc::new(codex_acp::CodexAcpProvider::new())),
+        "kiro" => Some(Arc::new(kiro::KiroProvider::new())),
         _ => None,
     }
 }

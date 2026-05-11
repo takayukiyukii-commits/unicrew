@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。"
 authors = ["uniLinks / ZUBOLAND"]
 edition = "2021"
-rust-version = "1.77"
+# 2026-05-10 Sprint 1 で 1.77 → 1.91.1 に引き上げ。
+# 理由: agent-client-protocol crate を取り込むため goose workspace の MSRV に合わせる。
+rust-version = "1.91.1"
 
 [lib]
 name = "unicrew_lib"
@@ -25,13 +27,20 @@ keyring = { version = "3.6", features = ["windows-native", "apple-native", "linu
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
 anyhow = "1.0"
 base64 = "0.22"
 toml = "0.8"
 dirs = "5.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "json"] }
+# reqwest 0.13: rustls-tls フィーチャーは "rustls" + "rustls-native-certs" に分割された（2026-05-10 移行）
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "rustls-native-certs", "multipart", "json"] }
 async-trait = "0.1"
 thiserror = "2.0"
+
+# 業界標準 ACP（Agent Client Protocol）— Zed 主導のオープンプロトコル。
+# Goose / OpenCode / Codex-acp / Kiro 等の ACP 対応 agent と型付き JSON-RPC で通信する。
+# Sprint 1（2026-05-13）追加。providers/acp_transport.rs と providers/goose.rs から使用。
+agent-client-protocol = "0.11"
 
 [features]
 default = ["custom-protocol"]

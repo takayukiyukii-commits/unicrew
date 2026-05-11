@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Smartphone, X, Copy, Check, Cloud, Wifi, Power } from "lucide-react";
+import {
+  Smartphone,
+  X,
+  Copy,
+  Check,
+  Cloud,
+  Wifi,
+  Power,
+  AlertTriangle,
+  Settings,
+} from "lucide-react";
 import QRCode from "qrcode";
 import {
   generateMobileToken,
@@ -228,7 +238,10 @@ export function MobileBridgeModal({
           </div>
 
           <div className="rounded-md border border-amber-200 bg-amber-50/50 p-2.5 text-[11.5px] text-amber-900 leading-relaxed">
-            <div className="font-semibold mb-1">⚠ 繋がらない時のチェック</div>
+            <div className="font-semibold mb-1 flex items-center gap-1.5">
+              <AlertTriangle size={12} aria-hidden="true" />
+              繋がらない時のチェック
+            </div>
             <ol className="list-decimal pl-4 space-y-1">
               <li>
                 スマホとPCが <strong>同じ Wi-Fi</strong> に接続されているか
@@ -332,7 +345,10 @@ function CloudPairingPanel({
     return (
       <div className="px-5 py-4">
         <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-[12px] text-amber-900 leading-relaxed">
-          <div className="font-semibold mb-1">⚙️ クラウドリレー未設定</div>
+          <div className="font-semibold mb-1 flex items-center gap-1.5">
+            <Settings size={12} aria-hidden="true" />
+            クラウドリレー未設定
+          </div>
           UNICREW 配布版で外出先からスマホ連携するには、Supabase 中継プロジェクトを
           1つ用意して環境変数に設定する必要があります。
           <pre className="mt-2 p-2 bg-amber-100 rounded font-mono text-[10.5px] overflow-x-auto">

@@ -23,7 +23,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO / "public" / "brand" / "vivid2"
 KEY_FILE = Path(
-    r"C:/Users/takay/OneDrive/デスクトップ/company/API管理/APIキー一覧.md"
+    r"D:/secrets/APIキー一覧.md"
 )
 
 
