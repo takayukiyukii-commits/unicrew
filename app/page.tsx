@@ -157,6 +157,13 @@ interface ActiveDraft {
   startedAt: number;
   /** 最初のテキストブロックが到着した時刻。null なら未到達（ツール実行中の場合あり） */
   firstTextAt: number | null;
+  /**
+   * 直近の Tauri agent:event 到着時刻。inactivity watchdog 用。
+   * OpenCode / Goose 等 ACP プロバイダで agent 側が StopReason を返さず
+   * 「応答中…」スピナーが永久に止まらないバグへの保険として、
+   * lastEventAt から一定時間 (INACTIVITY_STUCK_MS) 経過したら finalize を促すバナーを出す。
+   */
+  lastEventAt: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -175,6 +182,7 @@ const FRESH_DRAFT = (
   toolMap: new Map(),
   startedAt: Date.now(),
   firstTextAt: null,
+  lastEventAt: Date.now(),
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
@@ -1023,6 +1031,12 @@ export default function Page() {
       draftsRef.current = { ...draftsRef.current, [sid]: fresh };
       setDrafts(draftsRef.current);
       setStreamingSids((prev) => new Set([...prev, sid]));
+    } else {
+      // inactivity watchdog 用に「最後に何か来た時刻」を更新。
+      // 全 event 共通の path（result/error 含む）で叩いておく。
+      // updateDraft 経由で setDrafts も発火し、StreamingStatus 側の「応答止まったかも？」
+      // 検知ロジックが新しい lastEventAt を読めるようになる。
+      updateDraft(sid, (d) => ({ ...d, lastEventAt: Date.now() }));
     }
 
     if (event.kind === "assistant_text") {
@@ -2213,7 +2227,11 @@ export default function Page() {
   const pickWorkspaceWithTrust = async (): Promise<
     { path: string; trusted: boolean } | null
   > => {
-    const ws = await pickWorkspace();
+    // 直前に開いていたフォルダをダイアログの初期表示位置にする。
+    // 新しいターミナル/会話を始める時にユーザーが毎回フォルダを探し直さずに済む。
+    const ws = await pickWorkspace({
+      defaultPath: activeThread?.workspace ?? loadLastWorkspace(),
+    });
     if (!ws) return null;
     const ok = await isWorkspaceTrusted(ws);
     if (ok) return { path: ws, trusted: true };
@@ -2575,6 +2593,86 @@ ${command}
     }
   };
 
+  /**
+   * 「resume failed: claude --resume <死んだsid> でハング」自動回復ウォッチドッグ。
+   *
+   * - 30秒以上ブロックが0でかつ claude/codex session id が保存されてる draft を検出
+   * - 1度だけ自動で sid を破棄して新規セッションで再起動を試みる（無限ループ防止に Set 管理）
+   * - 失敗を会話末尾に明示し、未送信ユーザーメッセージを再送する
+   *
+   * 既に session が応答してれば（少なくとも cli_session_id イベントは即届く）firstTextAt
+   * か blocks.length > 0 になるので、ここには引っかからない。
+   */
+  const resumeRecoveredRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const RESUME_STUCK_MS = 30_000;
+      const drafts = draftsRef.current;
+      for (const [sid, d] of Object.entries(drafts)) {
+        if (!d) continue;
+        if (resumeRecoveredRef.current.has(sid)) continue;
+        if (d.blocks.length > 0) continue;
+        if (now - d.startedAt < RESUME_STUCK_MS) continue;
+        const thread = threadsRef.current.find((t) => t.id === d.threadId);
+        if (!thread) continue;
+        const slot = effectiveParticipants(thread).find(
+          (s) => s.id === d.slotId,
+        );
+        if (!slot) continue;
+        // resume_cli_session_id が無いケース（純粋な無音）は対象外。
+        // CLI 側のバグや認証問題を強引に新規起動で踏み抜く副作用を避ける。
+        const cliSid =
+          slot.provider === "codex"
+            ? thread.codexSessionId
+            : slot.provider === "claude"
+              ? thread.claudeSessionId
+              : null;
+        if (!cliSid) continue;
+        resumeRecoveredRef.current.add(sid);
+        // 直近のユーザーメッセージ（直前の send）を回収して再送する。
+        const lastUserMsg = [...thread.messages]
+          .reverse()
+          .find((m) => m.role === "user");
+        const retryText = lastUserMsg?.content ?? null;
+        // 1) 古いセッション破棄
+        finalizeDraft(sid);
+        sessionsStartedRef.current.delete(sid);
+        void agentStop(sid).catch(() => {});
+        // 2) thread の壊れた cli_session_id をクリア（型上は string|undefined なので undefined を入れる）
+        updateThread(thread.id, (t) => ({
+          ...t,
+          claudeSessionId:
+            slot.provider === "claude" ? undefined : t.claudeSessionId,
+          codexSessionId:
+            slot.provider === "codex" ? undefined : t.codexSessionId,
+        }));
+        // 3) 失敗を会話末尾に明示
+        const noticeMsg = {
+          id: nanoid(8),
+          role: "assistant" as const,
+          content:
+            "**自動回復**: 前回の会話セッションが応答しなかったため、新規セッションで再起動します。",
+          createdAt: Date.now(),
+          provider: slot.provider,
+          participantSlotId: slot.id,
+        };
+        updateThread(thread.id, (t) => appendMessage(t, noticeMsg));
+        // 4) ユーザーメッセージを再送（ある場合のみ）
+        if (retryText) {
+          setTimeout(() => {
+            const fresh = threadsRef.current.find((t) => t.id === thread.id);
+            if (fresh) {
+              void handleSendForThread(retryText, fresh);
+            }
+          }, 250);
+        }
+      }
+    }, 5_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePermissionDecision = async (
     decision: "allow" | "deny" | "allow_once",
   ) => {
@@ -2686,6 +2784,15 @@ ${command}
     abortThread: handleAbortForThread,
     abortAll: handleAbortAll,
   };
+  // 「あなた」アバター用の userProfile を AppSettings から派生。
+  // ChatPane → MessageItem まで流して、ユーザー側メッセージのアイコン・表示名に使う。
+  const userProfile = {
+    displayName: settings.userDisplayName,
+    avatarPath: settings.userAvatarPath ?? null,
+    emoji: settings.userEmoji,
+    accentColor: settings.userAccentColor,
+  };
+
   // モバイルA案: 状態 ref と /api/mobile/state push（render毎に最新化）
   activeIdRef.current = activeId;
   // クラウドリレーは別の useEffect 内 setInterval で heartbeat する（subscribe 非同期対応）
@@ -3255,6 +3362,8 @@ ${command}
               <AddonsSection
                 workspace={activeThread?.workspace ?? null}
                 advancedMode={settings.advancedMode ?? false}
+                autoCheckAddonUpdates={settings.autoCheckAddonUpdates ?? true}
+                autoApplyAddonUpdates={settings.autoApplyAddonUpdates ?? false}
                 onAdvancedModeChange={(next) => {
                   const updated = { ...settings, advancedMode: next };
                   setSettings(updated);
@@ -3299,6 +3408,7 @@ ${command}
                 paneRole="primary"
                 isStreaming={primaryStreaming}
                 threadDrafts={primaryDrafts}
+                userProfile={userProfile}
                 onSend={(text) =>
                   activeThread && handleSendForThread(text, activeThread)
                 }
@@ -3376,6 +3486,7 @@ ${command}
                   paneRole="split"
                   isStreaming={streaming}
                   threadDrafts={drafts}
+                  userProfile={userProfile}
                   onSend={(text) => handleSendForThread(text, t)}
                   onAbort={() => handleAbortForThread(t)}
                   onSplit={handleOpenSplitPane}
@@ -3417,6 +3528,7 @@ ${command}
                 paneRole={showSplit ? "primary" : "single"}
                 isStreaming={primaryStreaming}
                 threadDrafts={primaryDrafts}
+                userProfile={userProfile}
                 onSend={(text) =>
                   activeThread && handleSendForThread(text, activeThread)
                 }
@@ -3501,6 +3613,7 @@ ${command}
                     paneRole="split"
                     isStreaming={splitPaneStates[0]?.streaming ?? false}
                     threadDrafts={splitPaneStates[0]?.drafts ?? {}}
+                    userProfile={userProfile}
                     onSend={(text) =>
                       handleSendForThread(text, splitThread)
                     }

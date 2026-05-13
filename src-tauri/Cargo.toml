@@ -1,6 +1,6 @@
 [package]
 name = "unicrew"
-version = "0.2.0"
+version = "0.2.1"
 description = "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。"
 authors = ["uniLinks / ZUBOLAND"]
 edition = "2021"
@@ -23,6 +23,10 @@ tauri-plugin-shell = "2.0"
 tauri-plugin-store = "2.1"
 tauri-plugin-os = "2.0"
 tauri-plugin-process = "2.0"
+# UNICREW 本体のアップデート（Ed25519 署名済 latest.json を GitHub Releases から取得して
+# msi/nsis インストーラを差し替える）。署名鍵は D:\secrets\tauri-signing\ にあり、
+# ビルド時に TAURI_SIGNING_PRIVATE_KEY 経由で読み込まれる。
+tauri-plugin-updater = "2.0"
 keyring = { version = "3.6", features = ["windows-native", "apple-native", "linux-native"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

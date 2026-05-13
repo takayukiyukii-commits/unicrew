@@ -53,6 +53,15 @@ import {
 } from "@/lib/tauri";
 import clsx from "clsx";
 import { CharactersSection } from "./CharactersSection";
+import { UserAvatar } from "./UserAvatar";
+import {
+  pickAndSaveAvatar,
+  deleteAvatar,
+  saveAvatarFromFile,
+  checkUnicrewUpdate,
+  downloadAndInstallUnicrewUpdate,
+  type UnicrewUpdateInfo,
+} from "@/lib/tauri";
 import { CategoryDot } from "@/lib/providerVisuals";
 import {
   CATEGORY_LABELS,
@@ -1208,6 +1217,14 @@ export function SettingsModal({
             </a>
           </section>
 
+          <UserProfileSection
+            displayName={settings.userDisplayName ?? ""}
+            avatarPath={settings.userAvatarPath ?? null}
+            emoji={settings.userEmoji ?? ""}
+            accentColor={settings.userAccentColor ?? "#111827"}
+            onChange={(patch) => onSave({ ...settings, ...patch })}
+          />
+
           <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
             <h4 className="font-semibold text-[13px]">表示モード</h4>
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
@@ -1228,7 +1245,59 @@ export function SettingsModal({
               </span>
             </label>
 
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.autoCheckAddonUpdates ?? true}
+                onChange={(e) =>
+                  onSave({
+                    ...settings,
+                    autoCheckAddonUpdates: e.target.checked,
+                  })
+                }
+                className="w-4 h-4 mt-0.5"
+              />
+              <span className="flex-1">
+                <span className="font-medium">
+                  起動時にアドオンの最新版を自動チェック（既定 ON）
+                </span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  Claude / Codex 本体、Claude プラグイン、git 連携されたスキル・Codex marketplace の最新版を <strong>1 日 1 回</strong> 確認します。
+                  更新があると「機能の追加」ページ上部にバナーが出るので、ボタンで適用できます。
+                  OFF にすると「機能の追加 → アップデート確認」ボタンを押した時だけ走ります。
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.autoApplyAddonUpdates ?? false}
+                disabled={!(settings.autoCheckAddonUpdates ?? true)}
+                onChange={(e) =>
+                  onSave({
+                    ...settings,
+                    autoApplyAddonUpdates: e.target.checked,
+                  })
+                }
+                className="w-4 h-4 mt-0.5"
+              />
+              <span className="flex-1">
+                <span className="font-medium">
+                  検出した更新をバックグラウンドで自動適用（オプトイン・既定 OFF）
+                </span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  ON にすると、起動時の自動チェックで検出した更新を <strong>確認なしで適用</strong> します。
+                  Claude / Codex 本体は npm 経由で書き換わるため、本番運用に乗せる前に
+                  「機能の追加」ページの自動チェックを 1〜2 回見て安全性を確認してから ON 推奨。
+                  上の「起動時の自動チェック」が OFF だと一緒に無効化されます。
+                </span>
+              </span>
+            </label>
+
           </section>
+
+          <UnicrewSelfUpdateSection currentVersion="0.2.1" />
 
           <div className="border-t border-[var(--color-border)] pt-5">
             <CharactersSection onCharactersChanged={onCharactersChanged} />
@@ -1600,5 +1669,352 @@ function CliUpdateBanner({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 「あなた」プロフィール編集セクション。
+ *
+ * - 表示名 / アバター画像 / 1文字（絵文字 or 漢字）/ 背景色 を編集できる
+ * - アバター画像があれば 1文字 / 背景色は無視される（CharacterAvatar と同じ優先度）
+ * - onChange はフィールド更新ごとに親へ patch を投げ、settings に即マージ保存される
+ */
+const USER_ACCENT_PRESETS = [
+  "#111827", // 黒（既定）
+  "#1e40af", // 紺
+  "#0f766e", // ティール
+  "#16a34a", // 緑
+  "#ca8a04", // 黄
+  "#ea580c", // 橙
+  "#db2777", // ピンク
+  "#7c3aed", // 紫
+];
+
+function UserProfileSection({
+  displayName,
+  avatarPath,
+  emoji,
+  accentColor,
+  onChange,
+}: {
+  displayName: string;
+  avatarPath: string | null;
+  emoji: string;
+  accentColor: string;
+  onChange: (patch: Partial<AppSettings>) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [dragHot, setDragHot] = useState(false);
+  const handlePickAvatar = async () => {
+    setBusy(true);
+    try {
+      const saved = await pickAndSaveAvatar();
+      if (saved) {
+        if (avatarPath) {
+          await deleteAvatar(avatarPath).catch(() => {});
+        }
+        onChange({ userAvatarPath: saved });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handleClearAvatar = async () => {
+    if (avatarPath) {
+      await deleteAvatar(avatarPath).catch(() => {});
+    }
+    onChange({ userAvatarPath: null });
+  };
+  const handleDropFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      // png/jpg/webp/gif/svg 以外は弾く（Rust 側でも弾くが UI 側のフィードバックを早く返す）
+      alert("画像ファイルをドロップしてください（PNG / JPG / WebP / GIF / SVG）");
+      return;
+    }
+    setBusy(true);
+    try {
+      const saved = await saveAvatarFromFile(file);
+      if (saved) {
+        if (avatarPath) {
+          await deleteAvatar(avatarPath).catch(() => {});
+        }
+        onChange({ userAvatarPath: saved });
+      }
+    } catch (e) {
+      alert(
+        "画像の保存に失敗しました: " +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+      <h4 className="font-semibold text-[13px]">あなたのプロフィール</h4>
+      <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
+        チャット画面でユーザー側に表示されるアバターと名前を変更できます。
+        画像アップロードを優先、無ければ 1 文字＋背景色を表示します。
+      </p>
+      <div className="flex items-center gap-4">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!dragHot) setDragHot(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragHot(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragHot(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) void handleDropFile(file);
+          }}
+          className={`relative rounded-full transition ${
+            dragHot
+              ? "ring-2 ring-[var(--color-accent)] ring-offset-2"
+              : ""
+          }`}
+          title="画像をドラッグ&ドロップでも変更できます"
+        >
+          <UserAvatar
+            avatarPath={avatarPath}
+            emoji={emoji}
+            accentColor={accentColor}
+            fallbackText={displayName.trim().charAt(0) || "あ"}
+            size={64}
+          />
+          {dragHot && (
+            <div className="absolute inset-0 rounded-full bg-[var(--color-accent)]/20 flex items-center justify-center text-[10px] text-[var(--color-accent)] font-semibold pointer-events-none">
+              Drop
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0 space-y-2">
+          <label className="block">
+            <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
+              表示名
+            </span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => onChange({ userDisplayName: e.target.value })}
+              placeholder="あなた"
+              className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[13px] bg-white outline-none focus:border-[var(--color-accent)]"
+            />
+          </label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handlePickAvatar}
+              disabled={busy}
+              className="px-2.5 py-1 text-[11.5px] rounded-md border border-[var(--color-border)] hover:bg-[var(--color-surface)] disabled:opacity-50"
+            >
+              画像を選ぶ
+            </button>
+            {avatarPath && (
+              <button
+                type="button"
+                onClick={handleClearAvatar}
+                className="px-2.5 py-1 text-[11.5px] rounded-md border border-[var(--color-border)] hover:bg-red-50 text-red-600"
+              >
+                画像を外す
+              </button>
+            )}
+            <span className="text-[10.5px] text-[var(--color-muted)]">
+              またはアバターに画像をドロップ
+            </span>
+          </div>
+        </div>
+      </div>
+      {!avatarPath && (
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <label className="block">
+            <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
+              1 文字 / 絵文字（画像が無い時に表示）
+            </span>
+            <input
+              type="text"
+              value={emoji}
+              onChange={(e) =>
+                onChange({ userEmoji: e.target.value.slice(0, 4) })
+              }
+              maxLength={4}
+              placeholder="あ"
+              className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[13px] bg-white outline-none focus:border-[var(--color-accent)] text-center"
+            />
+          </label>
+          <div>
+            <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
+              背景色
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {USER_ACCENT_PRESETS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onChange({ userAccentColor: c })}
+                  className={`w-6 h-6 rounded-full border-2 transition ${
+                    accentColor === c
+                      ? "border-[var(--color-text)]"
+                      : "border-white hover:scale-110"
+                  }`}
+                  style={{ background: c }}
+                  aria-label={`背景色 ${c}`}
+                  title={c}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * UNICREW 本体の自動アップデート UI。
+ *
+ * 流れ:
+ *   1) 「最新版を確認」押下 → GitHub Releases の latest.json を fetch（plugin-updater が裏でやる）
+ *   2) 新版があれば情報＋「ダウンロードして適用」ボタン
+ *   3) 押下 → .exe/.msi をダウンロード → 署名検証 → 既存版置換 → 自動再起動
+ *
+ * 署名鍵：D:\secrets\tauri-signing\unicrew.key（Ed25519 / minisign 互換）。
+ * 公開鍵は tauri.conf.json の plugins.updater.pubkey に直書きされており、
+ * バイナリにビルドインされる。鍵が一致しないアップデートは弾かれる。
+ */
+function UnicrewSelfUpdateSection({
+  currentVersion,
+}: {
+  currentVersion: string;
+}) {
+  const [info, setInfo] = useState<UnicrewUpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const onCheck = async () => {
+    setChecking(true);
+    setErrorMsg(null);
+    try {
+      const r = await checkUnicrewUpdate();
+      setInfo(r);
+      if (r && !r.available) {
+        setProgress("最新版を使用中です。");
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const onInstall = async () => {
+    if (!info || !info.available) return;
+    setInstalling(true);
+    setErrorMsg(null);
+    setProgress("ダウンロード開始…");
+    try {
+      // DownloadEvent の型は { event: "Started"|"Progress"|"Finished", data?: any }
+      await downloadAndInstallUnicrewUpdate(info.__token, (ev) => {
+        const e = ev as { event?: string; data?: { chunkLength?: number; contentLength?: number } };
+        if (e?.event === "Started") {
+          setProgress(
+            `ダウンロード開始: ${
+              e.data?.contentLength
+                ? Math.round(e.data.contentLength / 1024 / 1024) + "MB"
+                : "サイズ不明"
+            }`,
+          );
+        } else if (e?.event === "Progress") {
+          setProgress("ダウンロード中…");
+        } else if (e?.event === "Finished") {
+          setProgress("ダウンロード完了、インストール中…");
+        }
+      });
+      // ここまで来たら relaunch されているので普通は到達しない
+      setProgress("適用完了。再起動します。");
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+      <h4 className="font-semibold text-[13px] flex items-center gap-1.5">
+        UNICREW 本体のアップデート
+        <span className="text-[10.5px] font-mono text-[var(--color-muted)]">
+          v{currentVersion}
+        </span>
+      </h4>
+      <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
+        ZUBOLAND が GitHub Releases に公開する署名済みインストーラを取得して、UNICREW を最新版に置き換えます。
+        署名は Ed25519（minisign 互換）で検証されるため、第三者が差し替えたバイナリは弾かれます。
+        ダウンロード完了後、自動でアプリが再起動します。
+      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={onCheck}
+          disabled={checking || installing}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] rounded-md border border-[var(--color-border)] hover:bg-[var(--color-surface)] disabled:opacity-50"
+        >
+          {checking ? (
+            <>
+              <Loader2 size={11} className="animate-spin" />
+              確認中…
+            </>
+          ) : (
+            "最新版を確認"
+          )}
+        </button>
+        {info?.available && (
+          <button
+            type="button"
+            onClick={onInstall}
+            disabled={installing}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] rounded-md bg-amber-600 text-white font-semibold hover:opacity-90 disabled:opacity-50"
+          >
+            {installing ? (
+              <>
+                <Loader2 size={11} className="animate-spin" />
+                インストール中…
+              </>
+            ) : (
+              <>v{info.version} に更新して再起動</>
+            )}
+          </button>
+        )}
+      </div>
+      {info?.available && info.body && (
+        <details className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
+          <summary className="cursor-pointer text-[var(--color-text)] font-medium">
+            v{info.version} の変更内容を表示
+          </summary>
+          <pre className="mt-1 whitespace-pre-wrap text-[11px] bg-[var(--color-surface)] rounded-md p-2 max-h-64 overflow-auto">
+            {info.body}
+          </pre>
+        </details>
+      )}
+      {progress && (
+        <div className="text-[11.5px] text-[var(--color-muted)] font-mono">
+          {progress}
+        </div>
+      )}
+      {errorMsg && (
+        <div className="text-[11.5px] text-red-600 leading-relaxed">
+          エラー: {errorMsg}
+        </div>
+      )}
+    </section>
   );
 }

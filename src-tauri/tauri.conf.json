@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "UNICREW",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "jp.unilinks.unicrew",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -21,17 +21,19 @@
         "fullscreen": false,
         "decorations": true,
         "center": true,
-        "theme": "Light"
+        "theme": "Light",
+        "dragDropEnabled": false
       }
     ],
     "security": {
       "csp": null,
-      "capabilities": ["default"]
+      "capabilities": ["default", "updater"]
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,10 +42,11 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "AIを動かすことに特化したマルチAIデスクトップ",
-    "longDescription": "UNICREW は AIを動かすことに特化したデスクトップアプリ。Anthropic / OpenAI 公式 CLI（claude / codex）を subprocess として束ねるピュアCLIランチャーで、複数AIを同時に並べて議論させたり、キャラクター別の役割で頼み分けたりできます。サブスクリプション（Pro/Max / ChatGPT Plus）でそのまま動きます。",
-    "copyright": "© 2026 ZUBOLAND / uniLinks",
-    "publisher": "ZUBOLAND",
+    "shortDescription": "ZUBOLAND の Pure CLI Conductor 型 AI デスクトップ",
+    "longDescription": "UNICREW は AIを動かすことに特化したデスクトップアプリです。Anthropic / OpenAI 公式 CLI（claude / codex / gemini / goose / opencode / codex-acp / kiro / qwen / kimi）を subprocess として束ねる Pure CLI Conductor 型ランチャーで、複数 AI を同時に並べて議論させたり、キャラクター別の役割で頼み分けたりできます。Claude Pro/Max・ChatGPT Plus/Pro のサブスクリプションでそのまま動き、追加の API 課金もありません。完全無料（Apache-2.0）で配布されており、配布元の ZUBOLAND 株式会社（uniLinks 事業群を運営）が提供するメインの AI 開発体験になります。",
+    "copyright": "© 2026 ZUBOLAND株式会社 / uniLinks. All rights reserved.",
+    "publisher": "ZUBOLAND株式会社",
+    "homepage": "https://uni-core.jp/",
     "windows": {
       "wix": {
         "language": "ja-JP"
@@ -54,6 +57,16 @@
         "displayLanguageSelector": false,
         "languages": ["Japanese", "English"]
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/takayukiyukii-commits/unicrew/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNEQkQ1MDg4MjUwQkYyQ0YKUldUUDhnc2xpRkM5UFRidWhzS2lENUw2NmY3YmU4QXhxdmFCWFZiWWo2VFFFYjNqdmozbDVGM0gK",
+      "dialog": false
     }
   }
 }

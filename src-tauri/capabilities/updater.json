@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "UNICREW 本体の Tauri Updater (check / download_and_install / restart) 用許可",
+  "windows": ["main"],
+  "permissions": [
+    "updater:default",
+    "process:default",
+    "process:allow-restart"
+  ]
+}

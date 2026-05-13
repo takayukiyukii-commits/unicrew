@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUpCircle,
   Blocks,
   BookOpen,
   Brush,
@@ -32,6 +33,8 @@ import {
   addClaudeMarketplace,
   addClaudeMcp,
   addCodexMcp,
+  applyAddonUpdate,
+  checkAddonUpdates,
   installClaudePlugin,
   listClaudeMarketplaceCatalog,
   listClaudeMcp,
@@ -48,6 +51,7 @@ import {
   uninstallClaudePlugin,
   type AddonItem,
   type AddonSource,
+  type AddonUpdateItem,
   type McpAddRequest,
 } from "@/lib/tauri";
 import {
@@ -63,6 +67,13 @@ interface Props {
   workspace?: string | null;
   advancedMode?: boolean;
   onAdvancedModeChange?: (next: boolean) => void;
+  /** 起動時の自動アップデートチェックを行うか（既定 true）。 */
+  autoCheckAddonUpdates?: boolean;
+  /**
+   * 自動チェックで検知した更新をバックグラウンド適用するか（既定 false）。
+   * true の場合、ユーザー承認なしに `applyAllUpdates` 相当を走らせる。
+   */
+  autoApplyAddonUpdates?: boolean;
 }
 
 type TabId =
@@ -152,6 +163,8 @@ export function AddonsSection({
   workspace,
   advancedMode = false,
   onAdvancedModeChange,
+  autoCheckAddonUpdates = true,
+  autoApplyAddonUpdates = false,
 }: Props) {
   const [active, setActive] = useState<TabId>("claude-plugin");
   const [installed, setInstalled] = useState<Record<TabId, AddonItem[]>>({
@@ -172,6 +185,16 @@ export function AddonsSection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>("ja");
+  // 更新チェック関連の state（Phase 1）。
+  // items は「has_update=true」のものだけを保持し、id → AddonUpdateItem の Map。
+  // チェック中・適用中の進捗用 string も同居させる。
+  const [updates, setUpdates] = useState<Map<string, AddonUpdateItem>>(
+    () => new Map(),
+  );
+  const [updatesCheckedAt, setUpdatesCheckedAt] = useState<number | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<string | null>(null);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   // localStorage で言語選好を永続化（プラグインタブのみのスコープ）
   useEffect(() => {
@@ -269,6 +292,144 @@ export function AddonsSection({
     [reload],
   );
 
+  // ----- 更新チェック / 適用（Phase 1） -----
+
+  /**
+   * Rust `check_addon_updates` を呼び、has_update=true の項目だけ Map に格納する。
+   * 自動呼び出し（マウント時 1 日 1 回）と「いま確認」ボタンの両方から使う。
+   */
+  const checkUpdates = useCallback(async (silent = false) => {
+    if (checkingUpdates) return;
+    setCheckingUpdates(true);
+    if (!silent) {
+      setError(null);
+      setInfo(null);
+    }
+    try {
+      const res = await checkAddonUpdates();
+      if (!res) return;
+      const m = new Map<string, AddonUpdateItem>();
+      for (const item of res.items) {
+        if (item.has_update) {
+          m.set(`${item.kind}:${item.id}`, item);
+        }
+      }
+      setUpdates(m);
+      setUpdatesCheckedAt(res.checked_at);
+      if (!silent) {
+        setInfo(
+          m.size === 0
+            ? "すべて最新です。"
+            : `${m.size} 件のアップデートが見つかりました。`,
+        );
+      }
+      // localStorage に時刻だけ保存（毎回チェックしないため）
+      try {
+        localStorage.setItem(
+          "unicrew.addons.updates.lastCheckedAt",
+          String(res.checked_at),
+        );
+      } catch {
+        /* noop */
+      }
+    } catch (e) {
+      if (!silent) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }, [checkingUpdates]);
+
+  /** 1 アイテム適用。成功時はそのアイテムを updates Map から外す。 */
+  const applyOneUpdate = useCallback(
+    async (item: AddonUpdateItem) => {
+      const key = `${item.kind}:${item.id}`;
+      setPendingUpdate(key);
+      setError(null);
+      try {
+        await applyAddonUpdate(item.kind, item.id);
+        setUpdates((prev) => {
+          const next = new Map(prev);
+          next.delete(key);
+          return next;
+        });
+        setInfo(`${item.name} を更新しました。`);
+        await reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPendingUpdate(null);
+      }
+    },
+    [reload],
+  );
+
+  /** 全 has_update を順次適用。失敗してもループは続けて、最後にまとめてエラー表示。 */
+  const applyAllUpdates = useCallback(async () => {
+    if (bulkUpdating || updates.size === 0) return;
+    setBulkUpdating(true);
+    setError(null);
+    setInfo(null);
+    const errors: string[] = [];
+    const items = Array.from(updates.values());
+    for (const item of items) {
+      const key = `${item.kind}:${item.id}`;
+      setPendingUpdate(key);
+      try {
+        await applyAddonUpdate(item.kind, item.id);
+        setUpdates((prev) => {
+          const next = new Map(prev);
+          next.delete(key);
+          return next;
+        });
+      } catch (e) {
+        errors.push(`${item.name}: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setPendingUpdate(null);
+      }
+    }
+    setBulkUpdating(false);
+    await reload();
+    if (errors.length === 0) {
+      setInfo(`${items.length} 件のアップデートを適用しました。`);
+    } else {
+      setError(
+        `${items.length - errors.length} 件成功 / ${errors.length} 件失敗:\n` +
+          errors.join("\n"),
+      );
+    }
+  }, [bulkUpdating, updates, reload]);
+
+  // マウント時に 1 日 1 回の自動チェック（localStorage の前回時刻と比較）。
+  // 設定で OFF になっていれば手動チェックボタンに任せて自動チェックは行わない。
+  // 失敗は静かに飲み込む（オフライン等）。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const last = parseInt(
+      localStorage.getItem("unicrew.addons.updates.lastCheckedAt") || "0",
+      10,
+    );
+    if (!autoCheckAddonUpdates) {
+      setUpdatesCheckedAt(last || null);
+      return;
+    }
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    if (!last || Date.now() - last > ONE_DAY) {
+      void (async () => {
+        await checkUpdates(true);
+        // 自動適用がオプトインで ON なら、検知直後にそのままバックグラウンドで適用。
+        // 既に「更新中…」状態のセットを待つので、ボタンクリックと二重発火しない。
+        if (autoApplyAddonUpdates) {
+          await applyAllUpdates();
+        }
+      })();
+    } else {
+      setUpdatesCheckedAt(last);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCheckAddonUpdates, autoApplyAddonUpdates]);
+
   const onUninstallItem = useCallback(
     async (item: AddonItem) => {
       // Codex MCP は対応済（codex mcp remove 経由）。それ以外の Codex（plugin/skill）は Phase D 留保
@@ -302,9 +463,73 @@ export function AddonsSection({
     [reload],
   );
 
+  const updateCount = updates.size;
+
   return (
     <div className="space-y-3">
+      {/* アップデート通知バナー。1日1回の自動チェックで件数があれば表示。 */}
+      {updateCount > 0 && (
+        <div className="border border-amber-300 bg-amber-50 rounded-lg px-3 py-2.5 flex items-center gap-2.5">
+          <ArrowUpCircle size={18} className="text-amber-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[12.5px] font-semibold text-amber-900">
+              {updateCount} 件のアップデートがあります
+            </div>
+            <div className="text-[11px] text-amber-700/90 leading-snug">
+              CLI / プラグイン / git 連携スキル の最新版が利用できます。
+              {updatesCheckedAt && (
+                <>
+                  {" "}
+                  <span className="opacity-70">
+                    （最終チェック:{" "}
+                    {new Date(updatesCheckedAt).toLocaleString("ja-JP", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    ）
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void applyAllUpdates()}
+            disabled={bulkUpdating || pendingUpdate !== null}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-600 text-white text-[12px] font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {bulkUpdating ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                更新中…
+              </>
+            ) : (
+              <>
+                <ArrowUpCircle size={12} />
+                すべて更新
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-end gap-2">
+        {/* アップデート確認ボタン。タブ切替に関係なくチェック対象は全カテゴリ。 */}
+        <button
+          onClick={() => void checkUpdates(false)}
+          disabled={checkingUpdates}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] rounded-md border border-[var(--color-border)] hover:bg-white transition disabled:opacity-50"
+          title="CLI / プラグイン / Skill の最新版を確認"
+        >
+          {checkingUpdates ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <ArrowUpCircle size={13} />
+          )}
+          {checkingUpdates ? "確認中…" : "アップデート確認"}
+        </button>
         {/* 言語切替（プラグイン説明の表示言語のみを切替） */}
         <div
           className="inline-flex rounded-md border border-[var(--color-border)] overflow-hidden text-[11px] font-mono"
@@ -415,25 +640,45 @@ export function AddonsSection({
             </div>
           ) : (
             <ul className="space-y-1.5">
-              {activeItems.map((it) => (
-                <InstalledRow
-                  key={`${it.kind}:${it.id}`}
-                  item={it}
-                  locale={locale}
-                  pending={pendingToggle === it.id}
-                  uninstalling={pendingUninstall === it.id}
-                  onToggle={
-                    it.kind === "mcp" && it.source === "claude"
-                      ? (next) => void onToggleMcp(it, next)
-                      : undefined
-                  }
-                  onUninstall={
-                    it.source === "claude" && it.kind !== "skill"
-                      ? () => void onUninstallItem(it)
-                      : undefined
-                  }
-                />
-              ))}
+              {activeItems.map((it) => {
+                // 更新キー命名規則は Rust 側と揃える: "claude_plugin" / "skill"。
+                // MCP は今回対象外、Codex plugin は version 検出が辛いので Phase 2 で。
+                const updateKey =
+                  it.source === "claude" && it.kind === "plugin"
+                    ? `claude_plugin:${it.id}`
+                    : it.source === "claude" && it.kind === "skill" && it.path
+                      ? `skill:${it.path}`
+                      : null;
+                const updateInfo = updateKey ? updates.get(updateKey) : null;
+                return (
+                  <InstalledRow
+                    key={`${it.kind}:${it.id}`}
+                    item={it}
+                    locale={locale}
+                    pending={pendingToggle === it.id}
+                    uninstalling={pendingUninstall === it.id}
+                    updateInfo={updateInfo}
+                    updating={
+                      updateKey != null && pendingUpdate === updateKey
+                    }
+                    onUpdate={
+                      updateInfo
+                        ? () => void applyOneUpdate(updateInfo)
+                        : undefined
+                    }
+                    onToggle={
+                      it.kind === "mcp" && it.source === "claude"
+                        ? (next) => void onToggleMcp(it, next)
+                        : undefined
+                    }
+                    onUninstall={
+                      it.source === "claude" && it.kind !== "skill"
+                        ? () => void onUninstallItem(it)
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </ul>
           )}
         </div>
@@ -540,6 +785,9 @@ function InstalledRow({
   locale,
   pending,
   uninstalling,
+  updateInfo,
+  updating,
+  onUpdate,
   onToggle,
   onUninstall,
 }: {
@@ -547,6 +795,10 @@ function InstalledRow({
   locale: Locale;
   pending?: boolean;
   uninstalling?: boolean;
+  /** 「このアイテムにアップデートあり」情報。null なら最新 or 検知対象外。 */
+  updateInfo?: AddonUpdateItem | null;
+  updating?: boolean;
+  onUpdate?: () => void;
   onToggle?: (next: boolean) => void;
   onUninstall?: () => void;
 }) {
@@ -610,6 +862,31 @@ function InstalledRow({
         )}
       </div>
       <div className="flex items-center gap-2 pt-0.5 shrink-0">
+        {updateInfo && onUpdate && (
+          <button
+            type="button"
+            disabled={updating}
+            onClick={onUpdate}
+            title={
+              updateInfo.detail ??
+              (updateInfo.latest
+                ? `最新 v${updateInfo.latest} に更新`
+                : "更新を適用")
+            }
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500 text-white text-[11px] font-semibold hover:opacity-90 disabled:opacity-50"
+          >
+            {updating ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <ArrowUpCircle size={11} />
+            )}
+            {updating
+              ? "更新中…"
+              : updateInfo.latest
+                ? `更新 → v${updateInfo.latest}`
+                : "更新"}
+          </button>
+        )}
         {onToggle && (
           <button
             type="button"

@@ -108,6 +108,12 @@ export interface Character {
   description: string;
   /** true = 組み込みテンプレート（編集・削除不可、複製のみ）。false = ユーザー作成 */
   isTemplate: boolean;
+  /**
+   * このキャラがどのテンプレを元に複製されたか（テンプレID、例: "tmpl-ceo"）。
+   * テンプレ一覧で「ユーザーが既に複製済みのテンプレ」を二重表示しないために使う。
+   * ゼロから作った場合は undefined。旧データ（このフィールドが無いユーザーキャラ）も undefined になる。
+   */
+  clonedFrom?: string;
 }
 
 export interface Thread {
@@ -269,6 +275,28 @@ export interface AppSettings {
    * - 上級者は OFF にして開発者向け表示を有効化
    */
   beginnerMode?: boolean;
+  /**
+   * 「あなた」アバター（ユーザー自身の表示）のカスタマイズ。
+   * - displayName: 既定「あなた」。空文字なら「あなた」に戻す
+   * - avatarPath: pickAndSaveAvatar で保存した画像の絶対パス。null なら text/emoji フォールバック
+   * - emoji: 1文字（絵文字 or "あ" 等の文字）。avatarPath がある時は無視
+   * - accentColor: アバター背景色（avatarPath が無い時のみ反映）
+   */
+  userDisplayName?: string;
+  userAvatarPath?: string | null;
+  userEmoji?: string;
+  userAccentColor?: string;
+  /**
+   * 起動時に CLI / プラグイン / Skill のアップデート有無を 1 日 1 回自動チェックするか。
+   * 既定 true。false にすると AddonsSection の「アップデート確認」ボタンを押した時しか走らない。
+   */
+  autoCheckAddonUpdates?: boolean;
+  /**
+   * 検知したアップデートをバックグラウンドで自動適用するか（オプトイン・既定 false）。
+   * true の場合、起動時の自動チェックで検出した全アップデートを順次適用する（手動承認なし）。
+   * false（既定）ならバナーを出して、ユーザーが「すべて更新」ボタンを押した時のみ適用される。
+   */
+  autoApplyAddonUpdates?: boolean;
   // apiKey は OS Keychain（Tauri）に格納するためここに置かない
   // ブラウザdev時のみ localStorage 経由で別キー保管（lib/tauri.ts）
 }

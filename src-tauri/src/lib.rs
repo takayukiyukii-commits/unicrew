@@ -176,6 +176,51 @@ async fn save_avatar_image(app: AppHandle, source_path: String) -> Result<String
     Ok(dest.to_string_lossy().to_string())
 }
 
+/// Drag&Drop で webview に落とされた画像のバイト列をそのまま AppData/avatars/ に保存する。
+///
+/// `pickAndSaveAvatar` が `dialog.open` で取得した OS パスを受け取る経路なのに対し、
+/// こちらは「OS パスを取れない（webview File API 経由）」ケースのために用意する。
+/// 呼び出し側で File.arrayBuffer() → Uint8Array → btoa して bytes_b64 に詰める。
+#[tauri::command]
+async fn save_avatar_bytes(
+    app: AppHandle,
+    bytes_b64: String,
+    ext: String,
+) -> Result<String, String> {
+    use base64::Engine;
+    let ext = ext.to_lowercase();
+    if !["png", "jpg", "jpeg", "webp", "gif", "svg"].contains(&ext.as_str()) {
+        return Err("対応していない画像形式です（png/jpg/webp/gif/svg のみ）".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&bytes_b64)
+        .map_err(|e| format!("base64 デコード失敗: {}", e))?;
+    if bytes.is_empty() {
+        return Err("空のファイルです".into());
+    }
+    // 上限 10MB（プロフィール用としては十分。誤って巨大ファイルを掴まないように）
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err("ファイルサイズが大きすぎます（10MB 以下にしてください）".into());
+    }
+    let dest_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("avatars");
+    tokio::fs::create_dir_all(&dest_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dest = dest_dir.join(format!("dropped-{}.{}", ts, ext));
+    tokio::fs::write(&dest, &bytes)
+        .await
+        .map_err(|e| format!("書き込み失敗: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 async fn delete_avatar_image(path: String) -> Result<(), String> {
     let p = std::path::PathBuf::from(&path);
@@ -1576,6 +1621,395 @@ async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- Aggregated update checker (Phase 1) ----------
+
+/// 「設定 → 機能の追加」に並んでいる CLI / Plugin / Skill が
+/// 最新版より古くないかを 1 回でまとめて確認するための集約結果。
+///
+/// フロント側はバッジ (`has_update_count`) と、各 item 横の「更新」ボタンを描画する。
+#[derive(Debug, Serialize)]
+struct AddonUpdateSummary {
+    /// epoch millis。フロントで「最終チェック: HH:mm」表示用。
+    checked_at: u64,
+    items: Vec<AddonUpdateItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct AddonUpdateItem {
+    /// 更新の種類: "cli" | "claude_plugin" | "codex_plugin" | "skill"
+    kind: String,
+    /// 識別子。apply_addon_update に渡すと適切なコマンドが実行される。
+    /// - cli: "claude" / "codex"
+    /// - claude_plugin: "<name>@<marketplace>"（installed_plugins.json の key）
+    /// - codex_plugin: "<name>@<marketplace>"
+    /// - skill: 絶対パス
+    id: String,
+    /// 表示用名前
+    name: String,
+    /// 現在のバージョン or git short hash。取れなければ None
+    current: Option<String>,
+    /// 最新バージョン or "N commits behind" の右辺
+    latest: Option<String>,
+    /// このアイテムに更新があるか。フロントは true のものだけバッジに含める。
+    has_update: bool,
+    /// 追加情報 (例: "3 commits behind origin")
+    detail: Option<String>,
+}
+
+/// 全ての更新可能アドオン（CLI / git-backed Skill / Plugin）を 1 ショットで集約。
+///
+/// 設計メモ:
+/// - 外部 HTTP は npm view（claude / codex CLI）と git ls-remote（skill）のみ
+/// - 1 つの取得が失敗しても他は止めず、`has_update` を判断不能なら false を返す（控えめ運用）
+/// - 結果のキャッシュはフロント側で localStorage 管理（バックエンドはステートレス）
+#[tauri::command]
+async fn check_addon_updates() -> Result<AddonUpdateSummary, String> {
+    let mut items: Vec<AddonUpdateItem> = Vec::new();
+
+    // ----- CLI 本体（既存 cli_versions ロジックを再利用） -----
+    let cli_summary = cli_versions().await.ok();
+    if let Some(v) = cli_summary {
+        let mut push_cli = |id: &str, name: &str, info: &CliVersionInfo| {
+            let has_update = match (&info.current, &info.latest) {
+                (Some(c), Some(l)) => semver_lt(c, l),
+                _ => false,
+            };
+            items.push(AddonUpdateItem {
+                kind: "cli".to_string(),
+                id: id.to_string(),
+                name: name.to_string(),
+                current: info.current.clone(),
+                latest: info.latest.clone(),
+                has_update,
+                detail: None,
+            });
+        };
+        push_cli("claude", "Claude Code", &v.claude);
+        push_cli("codex", "Codex", &v.codex);
+    }
+
+    // ----- Skills（git 管理されたものだけバージョン判定可能） -----
+    if let Ok(home) = home_dir() {
+        let skills_dir = home.join(".claude").join("skills");
+        if skills_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    // .git ディレクトリがあるものだけが「リモート由来」なので、上流と比較できる。
+                    // それ以外（手書き skill）は更新検知の対象外。
+                    if !path.join(".git").exists() {
+                        continue;
+                    }
+                    let name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    match check_skill_git_update(&path).await {
+                        Ok((current, latest, behind)) => {
+                            let detail = if behind > 0 {
+                                Some(format!("{} commits behind origin", behind))
+                            } else {
+                                None
+                            };
+                            items.push(AddonUpdateItem {
+                                kind: "skill".to_string(),
+                                id: path.to_string_lossy().to_string(),
+                                name,
+                                current: Some(current),
+                                latest: Some(latest),
+                                has_update: behind > 0,
+                                detail,
+                            });
+                        }
+                        Err(_) => {
+                            // 取得失敗（オフライン等）は静かにスキップ
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Codex marketplaces（git管理）の更新検知 -----
+    // Codex は plugin ごとの version が config.toml に保存されない設計のため、
+    // marketplace ディレクトリそのものを git で更新するアプローチを採る。
+    // 個別 plugin 単位ではなく marketplace 単位の "N commits behind" を表示する。
+    if let Ok(home) = home_dir() {
+        for root in [
+            home.join(".codex").join(".tmp").join("bundled-marketplaces"),
+            home.join(".codex").join("plugins").join("marketplaces"),
+        ] {
+            if !root.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(&root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    if !path.join(".git").exists() {
+                        continue;
+                    }
+                    let mp_name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if mp_name.is_empty() {
+                        continue;
+                    }
+                    match check_skill_git_update(&path).await {
+                        Ok((current, latest, behind)) => {
+                            let detail = if behind > 0 {
+                                Some(format!("{} commits behind", behind))
+                            } else {
+                                None
+                            };
+                            items.push(AddonUpdateItem {
+                                kind: "codex_marketplace".to_string(),
+                                id: path.to_string_lossy().to_string(),
+                                name: format!("Codex: {}", mp_name),
+                                current: Some(current),
+                                latest: Some(latest),
+                                has_update: behind > 0,
+                                detail,
+                            });
+                        }
+                        Err(_) => {
+                            /* オフライン等は静かにスキップ */
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- Claude プラグイン（installed_plugins.json の version vs marketplace.json の version） -----
+    if let Ok(home) = home_dir() {
+        let installed_path = home
+            .join(".claude")
+            .join("plugins")
+            .join("installed_plugins.json");
+        if let Some(installed) = read_json_file(&installed_path) {
+            if let Some(plugins) = installed.get("plugins").and_then(|p| p.as_object()) {
+                let marketplaces_dir =
+                    home.join(".claude").join("plugins").join("marketplaces");
+                for (key, entries) in plugins {
+                    // entries は [{ scope, version, installPath, ... }] の配列
+                    let installed_version: Option<String> = entries
+                        .as_array()
+                        .and_then(|arr| arr.first())
+                        .and_then(|e| e.get("version"))
+                        .and_then(|s| s.as_str())
+                        .map(|s| s.to_string());
+                    let (plugin_name, marketplace_id) = match key.split_once('@') {
+                        Some((n, ns)) => (n.to_string(), ns.to_string()),
+                        None => (key.clone(), String::new()),
+                    };
+                    if marketplace_id.is_empty() {
+                        continue;
+                    }
+                    let mp_path = marketplaces_dir.join(&marketplace_id);
+                    let latest_version =
+                        find_plugin_latest_version(&mp_path, &plugin_name);
+                    let has_update = match (&installed_version, &latest_version) {
+                        (Some(c), Some(l)) => semver_lt(c, l),
+                        _ => false,
+                    };
+                    items.push(AddonUpdateItem {
+                        kind: "claude_plugin".to_string(),
+                        id: key.clone(),
+                        name: plugin_name,
+                        current: installed_version,
+                        latest: latest_version,
+                        has_update,
+                        detail: None,
+                    });
+                }
+            }
+        }
+    }
+
+    let checked_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Ok(AddonUpdateSummary { checked_at, items })
+}
+
+/// 指定 skill ディレクトリで `git fetch` し、HEAD と upstream の差分を取得する。
+/// 戻り値: (current_short_hash, latest_short_hash, commits_behind)
+async fn check_skill_git_update(
+    path: &std::path::Path,
+) -> Result<(String, String, usize), String> {
+    // 1) git fetch --quiet
+    let mut fetch = build_silent_command("git");
+    fetch.current_dir(path).args(["fetch", "--quiet"]);
+    let _ = fetch
+        .output()
+        .await
+        .map_err(|e| format!("git fetch failed: {}", e))?;
+
+    // 2) HEAD short hash
+    let head = build_silent_command("git")
+        .current_dir(path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .await
+        .map_err(|e| format!("git rev-parse HEAD: {}", e))?;
+    let head_str = String::from_utf8_lossy(&head.stdout).trim().to_string();
+
+    // 3) upstream short hash
+    let upstream = build_silent_command("git")
+        .current_dir(path)
+        .args(["rev-parse", "--short", "@{u}"])
+        .output()
+        .await
+        .map_err(|e| format!("git rev-parse @{{u}}: {}", e))?;
+    if !upstream.status.success() {
+        // upstream branch が未設定なら検知対象外として扱う
+        return Err("no upstream".into());
+    }
+    let upstream_str = String::from_utf8_lossy(&upstream.stdout).trim().to_string();
+
+    // 4) commits behind
+    let count = build_silent_command("git")
+        .current_dir(path)
+        .args(["rev-list", "--count", "HEAD..@{u}"])
+        .output()
+        .await
+        .map_err(|e| format!("git rev-list: {}", e))?;
+    let behind: usize = String::from_utf8_lossy(&count.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+
+    Ok((head_str, upstream_str, behind))
+}
+
+/// marketplace 配下の plugin.json から該当 plugin の version を取得。
+/// `<mp>/.claude-plugin/marketplace.json` の plugins[] を最優先で見る。
+fn find_plugin_latest_version(
+    marketplace_dir: &std::path::Path,
+    plugin_name: &str,
+) -> Option<String> {
+    let candidates = [
+        marketplace_dir.join(".claude-plugin").join("marketplace.json"),
+        marketplace_dir.join("marketplace.json"),
+    ];
+    for path in &candidates {
+        if let Some(v) = read_json_file(path) {
+            if let Some(arr) = v.get("plugins").and_then(|p| p.as_array()) {
+                for entry in arr {
+                    let name = entry
+                        .get("name")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("");
+                    if name == plugin_name {
+                        return entry
+                            .get("version")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 雑な semver 比較: current < latest なら true。
+/// pre-release / build metadata は無視（最初の 3 つの数値だけ見る）。
+fn semver_lt(current: &str, latest: &str) -> bool {
+    fn parts(v: &str) -> [u64; 3] {
+        let core = v.trim_start_matches('v');
+        let core = core.split(|c: char| c == '-' || c == '+').next().unwrap_or("");
+        let mut it = core.split('.');
+        let a = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let b = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let c = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        [a, b, c]
+    }
+    parts(current) < parts(latest)
+}
+
+/// 指定アドオンを実際に更新する。
+///
+/// - kind="cli", id="claude"|"codex": npm install -g <pkg>@latest（既存 update_cli を流用）
+/// - kind="claude_plugin", id="<name>@<marketplace>": claude --print /plugin install <id>
+///   （CLI の install コマンドは再実行で latest に差し替わる）
+/// - kind="skill", id=<absolute path>: git pull --ff-only
+#[tauri::command]
+async fn apply_addon_update(
+    app: AppHandle,
+    kind: String,
+    id: String,
+) -> Result<String, String> {
+    match kind.as_str() {
+        "cli" => {
+            update_cli(app, id).await?;
+            Ok("CLI を更新しました".into())
+        }
+        "claude_plugin" => {
+            let id_trim = id.trim();
+            if id_trim.is_empty() {
+                return Err("プラグイン ID が空です".into());
+            }
+            let mut cmd = build_silent_command("claude");
+            cmd.arg("--print")
+                .arg(format!("/plugin install {}", id_trim))
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let output = cmd
+                .output()
+                .await
+                .map_err(|e| format!("claude CLI を起動できませんでした: {}", e))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "プラグイン更新に失敗しました（exit={}）\nstderr: {}",
+                    output.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        "skill" | "codex_marketplace" => {
+            // skill / codex marketplace どちらも git ディレクトリのフォルダ更新で同じ動作。
+            let path = std::path::PathBuf::from(&id);
+            if !path.join(".git").exists() {
+                return Err(format!(
+                    "git 管理ではないため自動更新できません: {}",
+                    id
+                ));
+            }
+            let output = build_silent_command("git")
+                .current_dir(&path)
+                .args(["pull", "--ff-only"])
+                .output()
+                .await
+                .map_err(|e| format!("git pull failed: {}", e))?;
+            if !output.status.success() {
+                return Err(format!(
+                    "git pull が失敗しました（exit={}）\nstderr: {}",
+                    output.status.code().unwrap_or(-1),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        other => Err(format!("未対応の更新種別: {}", other)),
+    }
+}
+
 // ---------- Claude Code (CLI) status & login ----------
 
 #[derive(Debug, Serialize)]
@@ -2746,6 +3180,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
+        // 自動アップデート用。フロントから @tauri-apps/plugin-updater 経由で check / download_and_install を叩く。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AgentState::default())
         .invoke_handler(tauri::generate_handler![
             get_api_key,
@@ -2753,6 +3189,7 @@ pub fn run() {
             delete_api_key,
             default_workspace_path,
             save_avatar_image,
+            save_avatar_bytes,
             delete_avatar_image,
             read_image_as_data_url,
             claude_status,
@@ -2768,6 +3205,8 @@ pub fn run() {
             ollama_pull,
             cli_versions,
             update_cli,
+            check_addon_updates,
+            apply_addon_update,
             agent_start,
             agent_send,
             agent_stop,

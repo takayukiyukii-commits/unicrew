@@ -144,27 +144,56 @@ export function CharactersSection({ onCharactersChanged }: Props) {
         </div>
         <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
           テンプレを選んで複製→自分用に名前・アバター・口調を編集します。
+          <span className="block text-[10.5px] mt-0.5">
+            既に複製済みのテンプレは上の「マイキャラクター」に居るので、ここからは隠しています。
+          </span>
         </p>
-        <div className="grid grid-cols-2 gap-1.5">
-          {TEMPLATE_CHARACTERS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => onCloneTemplate(t)}
-              className="flex items-center gap-2 border border-[var(--color-border)] rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface)] transition"
-            >
-              <CharacterAvatar character={t} size={28} />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-[12px] truncate">
-                  {t.name}
-                </div>
-                <div className="text-[10.5px] text-[var(--color-muted)] truncate">
-                  {t.roleTag}
-                </div>
+        {(() => {
+          // 既に複製済みのテンプレを隠す（CEO 2つ表示の二重感を防止）。
+          // 旧データ（clonedFrom 未設定）は判定できないので、その場合は名前一致でフォールバック判定する。
+          const clonedIds = new Set(
+            userChars.map((c) => c.clonedFrom).filter((x): x is string => !!x),
+          );
+          const clonedNamesAndRoles = new Set(
+            userChars
+              .filter((c) => !c.clonedFrom)
+              .map((c) => `${c.name}${c.roleTag}`),
+          );
+          const remainingTemplates = TEMPLATE_CHARACTERS.filter(
+            (t) =>
+              !clonedIds.has(t.id) &&
+              !clonedNamesAndRoles.has(`${t.name}${t.roleTag}`),
+          );
+          if (remainingTemplates.length === 0) {
+            return (
+              <div className="text-[11.5px] text-[var(--color-muted)] border border-dashed border-[var(--color-border)] rounded-md p-3 text-center">
+                テンプレートは全て複製済みです。
               </div>
-              <Copy size={12} className="text-[var(--color-muted)]" />
-            </button>
-          ))}
-        </div>
+            );
+          }
+          return (
+            <div className="grid grid-cols-2 gap-1.5">
+              {remainingTemplates.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => onCloneTemplate(t)}
+                  className="flex items-center gap-2 border border-[var(--color-border)] rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-surface)] transition"
+                >
+                  <CharacterAvatar character={t} size={28} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-[12px] truncate">
+                      {t.name}
+                    </div>
+                    <div className="text-[10.5px] text-[var(--color-muted)] truncate">
+                      {t.roleTag}
+                    </div>
+                  </div>
+                  <Copy size={12} className="text-[var(--color-muted)]" />
+                </button>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       <CharacterEditModal

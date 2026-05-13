@@ -94,6 +94,12 @@ export function RightPane({
     (s) => s.role !== "moderator",
   ).length;
   const hasModerator = slots.some((s) => s.role === "moderator");
+  // MODEL_LABELS は Claude 系モデルしか定義されていないため、Claude を使うプロバイダが
+  // 1人もいない時に「モデル」セレクトを出すと、ユーザーが Codex/Gemini/OpenCode 等を
+  // 動かしているのに Claude モデル切替UIが見えて混乱する。Claude が含まれる時だけ表示する。
+  const showModelSection = isParallel
+    ? slots.some((s) => s.provider === "claude")
+    : character?.provider === "claude";
   return (
     <aside className="w-72 shrink-0 border-l border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col overflow-y-auto">
       {!thread ? (
@@ -235,28 +241,35 @@ export function RightPane({
             </div>
           )}
 
-          <div>
-            <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-              モデル
-            </label>
-            <div className="relative">
-              <select
-                value={thread.model}
-                onChange={(e) => onChangeModel(e.target.value as ModelId)}
-                className="w-full appearance-none border border-[var(--color-border)] rounded-md px-3 py-2 text-sm bg-white pr-8"
-              >
-                {(Object.keys(MODEL_LABELS) as ModelId[]).map((m) => (
-                  <option key={m} value={m}>
-                    {MODEL_LABELS[m]}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={14}
-                className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-muted)]"
-              />
+          {showModelSection && (
+            <div>
+              <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
+                モデル
+                {isParallel && (
+                  <span className="ml-1.5 normal-case font-normal text-[10px] text-[var(--color-muted)]">
+                    （Claude スロットのみに適用）
+                  </span>
+                )}
+              </label>
+              <div className="relative">
+                <select
+                  value={thread.model}
+                  onChange={(e) => onChangeModel(e.target.value as ModelId)}
+                  className="w-full appearance-none border border-[var(--color-border)] rounded-md px-3 py-2 text-sm bg-white pr-8"
+                >
+                  {(Object.keys(MODEL_LABELS) as ModelId[]).map((m) => (
+                    <option key={m} value={m}>
+                      {MODEL_LABELS[m]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-muted)]"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {onChangePersistentMemory && (
             <PersistentMemorySection
@@ -279,7 +292,9 @@ export function RightPane({
               {thread.splitMode && (
                 <li>並列モードでは Claude / Codex に別人格を割り当て可能</li>
               )}
-              <li>モデルは応答の質と速度のトレードオフ</li>
+              {showModelSection && (
+                <li>モデルは応答の質と速度のトレードオフ</li>
+              )}
               <li>ワークスペースは作業対象のフォルダ</li>
             </ul>
           </div>

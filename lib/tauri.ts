@@ -55,7 +55,14 @@ export async function setApiKey(key: string): Promise<void> {
 
 // ---------- Workspace selection ----------
 
-export async function pickWorkspace(): Promise<string | null> {
+export async function pickWorkspace(opts?: {
+  /**
+   * ダイアログを最初に開いた時に表示するフォルダ。
+   * 「新しいターミナル/会話を開いた時に最後に開いたフォルダがデフォルト選択されてほしい」
+   * 要望に応えるため、呼び出し側で `loadLastWorkspace()` を渡すのが既定の使い方。
+   */
+  defaultPath?: string | null;
+}): Promise<string | null> {
   if (!isTauri()) {
     alert(
       "ワークスペース選択は Tauri アプリ起動時のみ利用できます。\n`npm run tauri:dev` で起動してください。",
@@ -67,6 +74,7 @@ export async function pickWorkspace(): Promise<string | null> {
     directory: true,
     multiple: false,
     title: "ワークスペースとして開くフォルダを選択",
+    defaultPath: opts?.defaultPath ?? undefined,
   });
   if (!path || Array.isArray(path)) return null;
   return path as string;
@@ -173,6 +181,35 @@ export async function deleteAvatar(path: string): Promise<void> {
   if (!isTauri()) return;
   const invoke = await loadInvoke();
   await invoke("delete_avatar_image", { path });
+}
+
+/**
+ * Drag&Drop で受け取った File をそのまま AppData/avatars/ に保存する。
+ * Tauri webview に画像がドロップされても OS パスが取れない（File API 経由）のため、
+ * ArrayBuffer を base64 化して Rust 側に流す。
+ */
+export async function saveAvatarFromFile(file: File): Promise<string | null> {
+  if (!isTauri()) {
+    alert("画像保存は Tauri アプリ起動時のみ利用できます。");
+    return null;
+  }
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  const bytes_b64 = btoa(binary);
+  // 拡張子: file.name の最後の "." 以降。無ければ MIME から推測
+  const dot = file.name.lastIndexOf(".");
+  let ext = dot >= 0 ? file.name.slice(dot + 1).toLowerCase() : "";
+  if (!ext) {
+    const m = (file.type || "").match(/^image\/(\w+)$/);
+    ext = m ? m[1] : "png";
+  }
+  const invoke = await loadInvoke();
+  return invoke<string>("save_avatar_bytes", { bytesB64: bytes_b64, ext });
 }
 
 /** ローカル絶対パスをdata URLとして取得（asset protocol不要の安定方式）。 */
@@ -500,6 +537,141 @@ export async function updateCli(provider: "claude" | "codex"): Promise<void> {
   }
   const invoke = await loadInvoke();
   await invoke("update_cli", { provider });
+}
+
+// ---------- UNICREW 本体（self-update）の自動アップデート ----------
+
+/**
+ * GitHub Releases に上がっている latest.json を見にいき、新しいバージョンがあるかチェックする。
+ * 戻り値: { available, version, body } / null = エラー or 未対応環境
+ */
+export interface UnicrewUpdateInfo {
+  available: boolean;
+  /** 利用可能な最新バージョン（available=false の時は現在バージョン） */
+  version: string;
+  /** リリースノート（CHANGELOG）。Markdown 文字列。 */
+  body: string;
+  /** 内部的に保持する「進める準備が出来た Update オブジェクト」へのトークン。
+   * downloadAndInstallUnicrewUpdate で再利用する。 */
+  __token: number;
+}
+
+// Update オブジェクトは Promise を返すと壊れるので、グローバルにキャッシュしてトークンで参照する。
+let _updateCache:
+  | { token: number; update: { available: boolean; version: string; body?: string | null; downloadAndInstall: (cb?: (e: unknown) => void) => Promise<void> } }
+  | null = null;
+let _updateTokenSeq = 1;
+
+export async function checkUnicrewUpdate(): Promise<UnicrewUpdateInfo | null> {
+  if (!isTauri()) return null;
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) {
+      // 未対応 or 同じバージョン
+      return {
+        available: false,
+        version: "",
+        body: "",
+        __token: 0,
+      };
+    }
+    const token = _updateTokenSeq++;
+    _updateCache = { token, update };
+    return {
+      available: update.available,
+      version: update.version ?? "",
+      body: update.body ?? "",
+      __token: token,
+    };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[updater] check failed", e);
+    return null;
+  }
+}
+
+/**
+ * 直前の checkUnicrewUpdate で見つかった更新をダウンロード→インストール→再起動する。
+ * 失敗時は throw、進捗は progressCb に DownloadEvent が流れる。
+ */
+export async function downloadAndInstallUnicrewUpdate(
+  token: number,
+  progressCb?: (event: unknown) => void,
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Tauri アプリ起動時のみ利用できます");
+  }
+  if (!_updateCache || _updateCache.token !== token) {
+    throw new Error("更新トークンが古いため再度チェックしてください");
+  }
+  await _updateCache.update.downloadAndInstall(progressCb);
+  // インストール直後にアプリ再起動（プロセス入れ替え）
+  try {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[updater] relaunch failed", e);
+  }
+}
+
+// ---------- Aggregated Addon updates (Phase 1) ----------
+
+/**
+ * 設定 → 機能の追加に並ぶ CLI / Plugin / Skill の最新版チェック結果。
+ *
+ * - `kind` で分岐：cli / claude_plugin / codex_plugin / skill
+ * - `id` を `applyAddonUpdate` にそのまま渡すと Rust 側で適切なコマンド（npm / claude / git）が走る
+ * - `detail` は人間向け補足（"3 commits behind origin" など）
+ */
+export interface AddonUpdateItem {
+  kind:
+    | "cli"
+    | "claude_plugin"
+    | "codex_plugin"
+    | "codex_marketplace"
+    | "skill";
+  id: string;
+  name: string;
+  current: string | null;
+  latest: string | null;
+  has_update: boolean;
+  detail: string | null;
+}
+
+export interface AddonUpdateSummary {
+  /** epoch millis。最終チェック表示用。 */
+  checked_at: number;
+  items: AddonUpdateItem[];
+}
+
+/**
+ * 全アドオン（CLI/Plugin/Skill）の最新版を一括チェック。
+ * 通信先は npm registry と各 skill の git remote のみ。
+ */
+export async function checkAddonUpdates(): Promise<AddonUpdateSummary | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return await invoke<AddonUpdateSummary>("check_addon_updates");
+}
+
+/**
+ * 1 アイテム分のアドオン更新を実行。
+ * - kind="cli" → npm install -g <pkg>@latest（進捗は cli_update:line で stream）
+ * - kind="claude_plugin" → claude --print /plugin install <id>
+ * - kind="skill" → git pull --ff-only
+ * 戻り値は CLI / git の stdout 文字列（成功時の表示用）。
+ */
+export async function applyAddonUpdate(
+  kind: AddonUpdateItem["kind"],
+  id: string,
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error("更新操作は Tauri アプリ起動時のみ利用できます。");
+  }
+  const invoke = await loadInvoke();
+  return await invoke<string>("apply_addon_update", { kind, id });
 }
 
 export async function listenCliUpdate(

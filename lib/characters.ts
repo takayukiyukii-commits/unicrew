@@ -369,6 +369,9 @@ export function cloneFromTemplate(
     ...tmpl,
     id: newCharacterId(),
     isTemplate: false,
+    // テンプレ複製時はソースを記録しておく。CharactersSection 側で「既に複製済みのテンプレ」
+    // をテンプレ一覧から隠すための判定キー。
+    clonedFrom: tmpl.id,
     ...overrides,
   };
 }

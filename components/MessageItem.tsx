@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy, LifeBuoy, Play } from "lucide-react";
 import type { Character, Message, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
+import { UserAvatar } from "./UserAvatar";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
+import { resolveFilePath, segmentText } from "@/lib/file-link";
+import { openFileInEditorWindow } from "@/lib/editor-window";
 import clsx from "clsx";
 
 interface Props {
@@ -19,6 +22,22 @@ interface Props {
    * エラー本文を渡し、page.tsx 側で対処プロンプトに整形して送り直す。
    */
   onSosForError?: (errorText: string) => void;
+  /**
+   * AI が応答内で言及したファイル名（NOTE_xxx.md など）を Ctrl+Click で
+   * 別ウィンドウのエディタに開けるようにするための workspace 基準パス。
+   * 未指定でも動作するが、相対ファイル名の絶対化はできない。
+   */
+  workspace?: string | null;
+  /**
+   * 「あなた」アバターの設定。AppSettings から流し込む。
+   * 未指定なら従来通り黒丸 + "あ"。
+   */
+  userProfile?: {
+    displayName?: string;
+    avatarPath?: string | null;
+    emoji?: string;
+    accentColor?: string;
+  };
 }
 
 const ERROR_PATTERNS = ["**エラー**", "**起動エラー**"];
@@ -45,9 +64,17 @@ export function MessageItem({
   character,
   onExecute,
   onSosForError,
+  workspace,
+  userProfile,
 }: Props) {
   const isUser = message.role === "user";
   const showSos = !isUser && onSosForError && looksLikeError(message.content);
+  // ReactMarkdown は markdown ASTを `<p>`, `<li>`, `<strong>` ... と HTML 要素に近い
+  // タグでレンダリングする。これらの中身（children）には plain text のノードが混在する。
+  // text ノードを「ファイル名 / 通常テキスト」に分割し、ファイル名だけをクリッカブルに
+  // 差し替える共通レンダラを用意し、ブロック要素ごとに適用する。
+  const linkify = (children: React.ReactNode): React.ReactNode =>
+    isUser ? children : linkifyFilePaths(children, workspace ?? null);
   const renderers = {
     code: (props: {
       inline?: boolean;
@@ -62,6 +89,18 @@ export function MessageItem({
         {props.children}
       </CodeRenderer>
     ),
+    p: (props: { children?: React.ReactNode }) => (
+      <p>{linkify(props.children)}</p>
+    ),
+    li: (props: { children?: React.ReactNode }) => (
+      <li>{linkify(props.children)}</li>
+    ),
+    strong: (props: { children?: React.ReactNode }) => (
+      <strong>{linkify(props.children)}</strong>
+    ),
+    em: (props: { children?: React.ReactNode }) => (
+      <em>{linkify(props.children)}</em>
+    ),
   };
 
   return (
@@ -72,19 +111,23 @@ export function MessageItem({
       )}
     >
       {isUser ? (
-        <div
-          className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center text-base shadow-sm border border-[var(--color-border)] bg-[#111827] text-white"
-          title="あなた"
-        >
-          あ
-        </div>
+        <UserAvatar
+          avatarPath={userProfile?.avatarPath ?? null}
+          emoji={userProfile?.emoji}
+          accentColor={userProfile?.accentColor}
+          fallbackText={userProfile?.displayName?.trim().charAt(0) || "あ"}
+          title={userProfile?.displayName?.trim() || "あなた"}
+          size={36}
+        />
       ) : (
         <CharacterAvatar character={character} size={36} />
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-semibold">
-            {isUser ? "あなた" : character?.name ?? "Claude"}
+            {isUser
+              ? userProfile?.displayName?.trim() || "あなた"
+              : character?.name ?? "Claude"}
           </span>
           {!isUser && character && (
             <span className="text-[11px] text-[var(--color-muted)]">
@@ -235,6 +278,117 @@ function CodeBlockShell({
         <code className={className}>{children}</code>
       </pre>
     </div>
+  );
+}
+
+/**
+ * markdown 描画後の children を走査して、文字列ノード内のファイル名（NOTE_xxx.md 等）を
+ * クリック可能な `<FilePathLink>` に置換する。React 要素はそのまま再帰。
+ *
+ * - 入力 children には `string | number | ReactElement` が混在する
+ * - 単純な split/正規表現で書き換えると ReactMarkdown の構造を破壊するので、
+ *   文字列ノードだけ touch し、要素ノードは props.children を再帰処理して新しい要素として返す
+ */
+function linkifyFilePaths(
+  node: React.ReactNode,
+  workspace: string | null,
+): React.ReactNode {
+  // 文字列ノード: セグメント化して file 部分だけ <FilePathLink> に置換
+  if (typeof node === "string") {
+    const segments = segmentText(node);
+    if (segments.length === 1 && segments[0].kind === "text") return node;
+    return segments.map((seg, i) =>
+      seg.kind === "text" ? (
+        seg.text
+      ) : (
+        <FilePathLink
+          key={`fp-${i}-${seg.text}`}
+          display={seg.text}
+          path={seg.path ?? seg.text}
+          workspace={workspace}
+        />
+      ),
+    );
+  }
+  if (typeof node === "number" || typeof node === "boolean" || node == null) {
+    return node;
+  }
+  // 配列: 各要素を再帰
+  if (Array.isArray(node)) {
+    return node.map((child, i) => (
+      <React.Fragment key={i}>{linkifyFilePaths(child, workspace)}</React.Fragment>
+    ));
+  }
+  // React 要素: props.children を再帰してクローン
+  if (React.isValidElement(node)) {
+    const el = node as React.ReactElement<{ children?: React.ReactNode }>;
+    const children = el.props?.children;
+    if (children === undefined) return el;
+    return React.cloneElement(el, undefined, linkifyFilePaths(children, workspace));
+  }
+  return node;
+}
+
+/**
+ * AI 応答内のファイルパス用クリック可能リンク。
+ *
+ * - 通常クリック / Ctrl+Click / Cmd+Click いずれでも別ウィンドウのエディタで開く
+ *   （UNICREW では「別ウィンドウで開く」が既定挙動なので分けない）
+ * - 開けない場合は console.error にとどめ、ユーザーには干渉しない
+ */
+function FilePathLink({
+  display,
+  path,
+  workspace,
+}: {
+  display: string;
+  path: string;
+  workspace: string | null;
+}) {
+  // VSCode 風: 修飾キー (Ctrl/Cmd) なしの単純クリックでは何も起こらず、テキスト選択が普通にできる。
+  // Ctrl+Click（Win/Linux）または Cmd+Click（Mac）で別ウィンドウのエディタを開く。
+  // 中ボタンクリックも同等扱い。
+  const isModifierClick = (e: React.MouseEvent) =>
+    e.ctrlKey || e.metaKey || e.button === 1;
+
+  const tryOpen = (e: React.MouseEvent<HTMLSpanElement>) => {
+    if (!isModifierClick(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const absolute = resolveFilePath(path, workspace);
+    void openFileInEditorWindow(absolute).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error("[file-link] failed to open", absolute, err);
+    });
+  };
+
+  const absoluteForTitle = resolveFilePath(path, workspace);
+  // a タグから span に変更：通常クリックでナビゲーションが走らないようにする
+  // （a + href="#" だとアンカージャンプ抑止のためにイベント preventDefault が必須で、選択が壊れがち）。
+  return (
+    <span
+      onClick={tryOpen}
+      onAuxClick={tryOpen}
+      // ホバーで「Ctrl+Click で開く」を案内
+      title={`Ctrl+クリックで別ウィンドウで開く: ${absoluteForTitle}`}
+      className="text-[var(--color-accent)] underline decoration-dotted underline-offset-2 hover:decoration-solid"
+      // 通常テキストとして選択もできるよう cursor は text のまま、ホバー時のみ移動感を出す
+      style={{ cursor: "text" }}
+      onMouseEnter={(e) => {
+        if (e.ctrlKey || e.metaKey) {
+          (e.currentTarget as HTMLSpanElement).style.cursor = "pointer";
+        }
+      }}
+      onMouseMove={(e) => {
+        (e.currentTarget as HTMLSpanElement).style.cursor =
+          e.ctrlKey || e.metaKey ? "pointer" : "text";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLSpanElement).style.cursor = "text";
+      }}
+    >
+      {display}
+    </span>
   );
 }
 

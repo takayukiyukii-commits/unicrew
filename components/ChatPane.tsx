@@ -54,11 +54,24 @@ interface ActiveDraftLite {
   blocks: Block[];
   startedAt: number;
   firstTextAt: number | null;
+  /**
+   * 直近のイベント到着時刻。inactivity watchdog 用。
+   * 応答が長時間止まったままだった時に「応答止まってる？停止」ヒントを出す根拠。
+   * provider 側（OpenCode 等）が StopReason を返さず spinner が止まらないケースの保険。
+   */
+  lastEventAt: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
 }
+
+/**
+ * 「応答止まってるかも」ヒントを出すまでの無反応許容時間 (ms)。
+ * 通常の AI 応答は秒〜10秒台で連続でトークン or tool event を吐くため、
+ * 45 秒以上沈黙していたら何か詰まっているとみなす。長すぎず短すぎず。
+ */
+const INACTIVITY_HINT_MS = 45_000;
 
 interface Props {
   thread: Thread | null;
@@ -98,6 +111,16 @@ interface Props {
    * 長い会話を畳んで token 消費を抑える導線。未指定ならバナー自体を出さない。
    */
   onSuggestNewThread?: () => void;
+  /**
+   * 「あなた」アバター用の設定。AppSettings から流し込む。
+   * 各メッセージの user 側アバター・表示名に使う。
+   */
+  userProfile?: {
+    displayName?: string;
+    avatarPath?: string | null;
+    emoji?: string;
+    accentColor?: string;
+  };
 }
 
 export function ChatPane({
@@ -117,12 +140,29 @@ export function ChatPane({
   onTogglePeek,
   onTogglePermissionMode,
   onSuggestNewThread,
+  userProfile,
 }: Props) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   // 「新スレッド推奨」バナーを当該スレッドで一度閉じたかどうか（per thread, セッション単位）。
   const [longChatDismissedFor, setLongChatDismissedFor] = useState<string | null>(null);
+  // 沈黙検知用ティック（500ms ごとに inactivity 状況を再評価して停止ボタンの強調を切替）
+  const [, setStuckTick] = useState(0);
+  useEffect(() => {
+    if (!isStreaming) return;
+    const id = setInterval(() => setStuckTick((x) => (x + 1) & 0xffff), 500);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+  // ストリーミング中の draft が 45 秒以上イベントを受け取っていなければ「沈黙中」とみなす。
+  // 1つでも沈黙してたら停止ボタンを強調表示する根拠にする。
+  const anyDraftStuck = (() => {
+    if (!isStreaming) return false;
+    const now = Date.now();
+    return Object.values(threadDrafts).some(
+      (d) => d != null && now - d.lastEventAt > INACTIVITY_HINT_MS,
+    );
+  })();
 
   // 参加者リスト（N-way対応）。単独モードでも1要素配列が返る。
   const slots: ParticipantSlot[] = thread ? effectiveParticipants(thread) : [];
@@ -336,12 +376,16 @@ export function ChatPane({
             drafts={threadDrafts}
             conferenceMode={thread.conferenceMode}
             isStreaming={isStreaming}
+            workspace={thread.workspace ?? null}
+            userProfile={userProfile}
             onExecuteCommand={onExecuteCommand}
           />
         ) : (
           <SingleView
             messages={thread.messages}
             character={character}
+            workspace={thread.workspace ?? null}
+            userProfile={userProfile}
             draft={
               // 単独モード時はキー何でも先頭1個を採用
               Object.values(threadDrafts).find((d) => d) ?? null
@@ -457,11 +501,19 @@ export function ChatPane({
           {isStreaming ? (
             <button
               onClick={onAbort}
-              title="Esc または Ctrl+C で停止"
-              className="shrink-0 px-3 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5"
+              title={
+                anyDraftStuck
+                  ? "応答が止まっています。クリックで強制停止"
+                  : "Esc または Ctrl+C で停止"
+              }
+              className={`shrink-0 px-3 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5 ${
+                anyDraftStuck
+                  ? "bg-amber-500 ring-2 ring-amber-300 unicrew-pulse-attention"
+                  : "bg-red-500"
+              }`}
             >
               <Square size={14} fill="currentColor" />
-              停止
+              {anyDraftStuck ? "強制停止" : "停止"}
               <span className="hidden md:inline text-[10px] opacity-80 font-mono">
                 Esc
               </span>
@@ -534,12 +586,16 @@ function SingleView({
   messages,
   character,
   draft,
+  workspace,
+  userProfile,
   onExecuteCommand,
   onSosForError,
 }: {
   messages: Message[];
   character: ReturnType<typeof getCharacter>;
   draft: ActiveDraftLite | null;
+  workspace?: string | null;
+  userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
   onSosForError?: (errorText: string) => void;
 }) {
@@ -550,6 +606,8 @@ function SingleView({
           key={m.id}
           message={m}
           character={character}
+          workspace={workspace}
+          userProfile={userProfile}
           onExecute={onExecuteCommand}
           onSosForError={onSosForError}
         />
@@ -630,6 +688,8 @@ function NwayView({
   drafts,
   conferenceMode,
   isStreaming,
+  workspace,
+  userProfile,
   onExecuteCommand,
 }: {
   messages: Message[];
@@ -637,6 +697,8 @@ function NwayView({
   drafts: Record<string, ActiveDraftLite | null>;
   conferenceMode: boolean;
   isStreaming: boolean;
+  workspace?: string | null;
+  userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
 }) {
   const groups = groupMessagesForNway(messages, slots);
@@ -673,6 +735,8 @@ function NwayView({
               key={g.message.id}
               message={g.message}
               character={getCharacter(slotsForView[0]?.characterId ?? "")}
+              workspace={workspace}
+              userProfile={userProfile}
               onExecute={onExecuteCommand}
             />
           );
@@ -1186,7 +1250,9 @@ function StreamingStatus({
   const now = Date.now();
   const elapsedMs = Math.max(0, now - draft.startedAt);
   const hasFirstText = draft.firstTextAt !== null;
-  const label = hasFirstText ? "応答中" : "考え中";
+  const inactiveMs = Math.max(0, now - draft.lastEventAt);
+  const stuck = inactiveMs > INACTIVITY_HINT_MS;
+  const label = stuck ? "応答止まってる？" : hasFirstText ? "応答中" : "考え中";
   const thinkingMs =
     draft.firstTextAt !== null
       ? Math.max(0, draft.firstTextAt - draft.startedAt)
@@ -1199,21 +1265,36 @@ function StreamingStatus({
   if (thinkingMs !== null) {
     segments.push(`thought for ${formatThinking(thinkingMs)}`);
   }
+  if (stuck) {
+    // 「最後の反応から何秒沈黙してるか」を表示。下の停止ボタンの存在に
+    // ユーザーが気付くための、控えめな注意喚起。
+    const sec = Math.round(inactiveMs / 1000);
+    segments.push(`${sec}秒沈黙`);
+  }
 
   const isRow = variant === "row";
+  const toneClass = stuck
+    ? "text-amber-700"
+    : "text-[var(--color-accent)]";
+  const subClass = stuck ? "text-amber-700/70" : "text-[var(--color-muted)]";
   return (
     <span
       className={
         isRow
-          ? "ml-auto flex items-center gap-1.5 text-[11px] text-[var(--color-accent)] font-mono tabular-nums"
-          : "inline-flex items-center gap-1.5 text-[11px] text-[var(--color-accent)] font-mono tabular-nums"
+          ? `ml-auto flex items-center gap-1.5 text-[11px] ${toneClass} font-mono tabular-nums`
+          : `inline-flex items-center gap-1.5 text-[11px] ${toneClass} font-mono tabular-nums`
       }
       aria-live="polite"
       aria-busy="true"
+      title={
+        stuck
+          ? "AI 側の応答が止まっている可能性があります。画面下の「停止」ボタンでこのターンを終わらせてやり直せます。"
+          : undefined
+      }
     >
       <Loader2 size={12} className="animate-spin shrink-0" />
       <span className="font-medium">{label}…</span>
-      <span className="text-[var(--color-muted)] font-normal">
+      <span className={`${subClass} font-normal`}>
         ({segments.join(" · ")})
       </span>
     </span>
