@@ -41,6 +41,7 @@ import {
   listenOllamaPullProgress,
   ollamaPull,
 } from "@/lib/tauri";
+import { useTranslation, t as translate } from "@/lib/i18n";
 
 /** Wizard が叩く各ステップの状態。 */
 type StepStatus = "pending" | "running" | "skipped" | "ok" | "error";
@@ -57,26 +58,26 @@ const STEPS = [
   {
     key: "ollama",
     icon: Cpu,
-    title: "Ollama を準備",
-    description: "ローカル LLM ランタイム。あなたの PC で AI が動く土台。",
+    titleKey: "freeMode.step.ollama.title",
+    descriptionKey: "freeMode.step.ollama.desc",
   },
   {
     key: "model",
     icon: Download,
-    title: "モデルをダウンロード",
-    description: "qwen2.5-coder:7b（コード特化・軽量）を取得します。",
+    titleKey: "freeMode.step.model.title",
+    descriptionKey: "freeMode.step.model.desc",
   },
   {
     key: "opencode",
     icon: Terminal,
-    title: "OpenCode CLI を準備",
-    description: "ACP 経由で Ollama を呼び出す OSS エージェント。",
+    titleKey: "freeMode.step.opencode.title",
+    descriptionKey: "freeMode.step.opencode.desc",
   },
   {
     key: "spawn",
     icon: Rocket,
-    title: "最初の会話を準備",
-    description: "セットアップ完了。OpenCode のスレッドを起動します。",
+    titleKey: "freeMode.step.spawn.title",
+    descriptionKey: "freeMode.step.spawn.desc",
   },
 ] as const;
 
@@ -97,6 +98,7 @@ interface Props {
  * 途中で閉じるとステップ状態は破棄され、次回開いた時に再実行する。
  */
 export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
+  const { t } = useTranslation();
   const [steps, setSteps] = useState<Record<StepKey, StepState>>({
     ollama: { status: "pending" },
     model: { status: "pending" },
@@ -145,7 +147,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
             if (ev.provider !== provider) return;
             unlisten?.();
             if (ev.success) resolve();
-            else reject(new Error(`${provider} のインストールに失敗しました`));
+            else reject(new Error(translate("freeMode.installFailed", { provider })));
           },
         })
           .then((u) => {
@@ -178,7 +180,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
             if (ev.model !== model) return;
             unlisten?.();
             if (ev.success) resolve();
-            else reject(new Error(`${model} のダウンロードに失敗しました`));
+            else reject(new Error(translate("freeMode.pullFailed", { model })));
           },
         })
           .then((u) => {
@@ -198,8 +200,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
     if (!isTauri()) {
       updateStep("ollama", {
         status: "error",
-        error:
-          "FreeMode は Tauri デスクトップ起動時のみ動作します。`npm run tauri:dev` で起動してください。",
+        error: translate("freeMode.requireTauri"),
       });
       return;
     }
@@ -209,7 +210,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
       const st = await acpCliStatus("ollama");
       if (st.installed) {
         updateStep("ollama", { status: "skipped", progress: st.version ?? undefined });
-        appendLog(`[ollama] 既にインストール済み (${st.version ?? "version unknown"})`);
+        appendLog(translate("freeMode.alreadyInstalled", { provider: "ollama", version: st.version ?? translate("freeMode.versionUnknown") }));
       } else {
         await runAcpInstall("ollama");
         updateStep("ollama", { status: "ok" });
@@ -217,7 +218,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateStep("ollama", { status: "error", error: msg });
-      appendLog(`[ollama] エラー: ${msg}`);
+      appendLog(translate("freeMode.errorLog", { key: "ollama", error: msg }));
       return;
     }
 
@@ -229,7 +230,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateStep("model", { status: "error", error: msg });
-      appendLog(`[model] エラー: ${msg}`);
+      appendLog(translate("freeMode.errorLog", { key: "model", error: msg }));
       return;
     }
 
@@ -239,7 +240,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
       const st = await acpCliStatus("opencode");
       if (st.installed) {
         updateStep("opencode", { status: "skipped", progress: st.version ?? undefined });
-        appendLog(`[opencode] 既にインストール済み (${st.version ?? "version unknown"})`);
+        appendLog(translate("freeMode.alreadyInstalled", { provider: "opencode", version: st.version ?? translate("freeMode.versionUnknown") }));
       } else {
         await runAcpInstall("opencode");
         updateStep("opencode", { status: "ok" });
@@ -247,7 +248,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateStep("opencode", { status: "error", error: msg });
-      appendLog(`[opencode] エラー: ${msg}`);
+      appendLog(translate("freeMode.errorLog", { key: "opencode", error: msg }));
       return;
     }
 
@@ -304,17 +305,17 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-[15px] font-bold text-[var(--color-text)]">
-              1分で始める — 完全自動セットアップ
+              {t("freeMode.title")}
             </h2>
             <p className="text-[11.5px] text-[var(--color-muted)] mt-0.5">
-              API キーなしで UNICREW を体験できる状態まで自動で進めます。
+              {t("freeMode.subtitle")}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="shrink-0 w-8 h-8 rounded-lg hover:bg-[var(--color-surface)] flex items-center justify-center text-[var(--color-muted)]"
-            aria-label="閉じる"
+            aria-label={t("common.close")}
           >
             <X size={16} />
           </button>
@@ -329,8 +330,8 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
                   key={s.key}
                   index={idx + 1}
                   icon={<s.icon size={16} />}
-                  title={s.title}
-                  description={s.description}
+                  title={t(s.titleKey)}
+                  description={t(s.descriptionKey)}
                   state={state}
                 />
               );
@@ -344,10 +345,10 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
           >
             <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[11.5px] text-[var(--color-muted)]">
               <ChevronDown size={12} />
-              詳細ログ（{log.length}行）
+              {t("freeMode.logDetails", { lines: log.length })}
             </summary>
             <pre className="px-3 pb-3 pt-1 text-[10.5px] leading-relaxed text-[var(--color-muted)] font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
-              {log.length === 0 ? "（ログはまだありません）" : log.join("\n")}
+              {log.length === 0 ? t("freeMode.logEmpty") : log.join("\n")}
             </pre>
           </details>
         </div>
@@ -355,17 +356,17 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
         <footer className="px-5 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex items-center gap-2">
           {hasError && (
             <p className="text-[11.5px] text-rose-600 flex-1">
-              失敗したステップがあります。詳細ログを確認してください。
+              {t("freeMode.hasError")}
             </p>
           )}
           {!hasError && !allDone && (
             <p className="text-[11.5px] text-[var(--color-muted)] flex-1">
-              実行中… ウィンドウを閉じないでください。
+              {t("freeMode.running")}
             </p>
           )}
           {!hasError && allDone && (
             <p className="text-[11.5px] text-emerald-600 flex-1 font-semibold">
-              セットアップ完了。最初の会話を始められます。
+              {t("freeMode.allDone")}
             </p>
           )}
           <button
@@ -374,7 +375,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
             className="px-4 py-1.5 rounded-lg bg-[var(--color-accent)] text-white text-[12px] font-semibold hover:opacity-90 disabled:opacity-50"
             disabled={!allDone && !hasError}
           >
-            {allDone && !hasError ? "閉じる" : "中断して閉じる"}
+            {allDone && !hasError ? t("freeMode.closeCta") : t("freeMode.abortCta")}
           </button>
         </footer>
       </div>
@@ -395,6 +396,7 @@ function StepRow({
   description: string;
   state: StepState;
 }) {
+  const { t } = useTranslation();
   const statusIcon = (() => {
     switch (state.status) {
       case "pending":
@@ -425,22 +427,22 @@ function StepRow({
           </span>
           {state.status === "skipped" && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
-              既に導入済み
+              {t("freeMode.badgeSkipped")}
             </span>
           )}
           {state.status === "ok" && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
-              完了
+              {t("freeMode.badgeOk")}
             </span>
           )}
           {state.status === "running" && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
-              実行中
+              {t("freeMode.badgeRunning")}
             </span>
           )}
           {state.status === "error" && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700">
-              エラー
+              {t("freeMode.badgeError")}
             </span>
           )}
         </div>

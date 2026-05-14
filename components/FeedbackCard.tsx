@@ -9,6 +9,7 @@ import {
   recordFeedback,
   markFeedbackDismissed,
 } from "@/lib/feedback";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   /** UNICREW のバージョン（mailto に含めるため） */
@@ -24,6 +25,7 @@ export function FeedbackCard({
   userMessageCount,
   onClose,
 }: Props) {
+  const { t } = useTranslation();
   const [rating, setRating] = useState<FeedbackRating | null>(null);
   const [improvement, setImprovement] = useState("");
   const [featureRequest, setFeatureRequest] = useState("");
@@ -64,8 +66,7 @@ export function FeedbackCard({
       <div className="my-4 mx-auto max-w-2xl rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex items-center gap-3">
         <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
         <div className="text-[13px] text-emerald-900 leading-relaxed">
-          ありがとうございます！メーラーが開いたら送信ボタンを押してください。
-          いただいたフィードバックは UNICREW の改善に活用させていただきます。
+          {t("feedback.thanks")}
         </div>
       </div>
     );
@@ -76,18 +77,18 @@ export function FeedbackCard({
       <div className="flex items-start justify-between px-5 pt-4 pb-2">
         <div>
           <div className="text-[13.5px] font-semibold text-[var(--color-text)]">
-            UNICREW の使い心地はいかがですか？
+            {t("feedback.title")}
           </div>
           <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 leading-relaxed">
-            たまに様子を聞かせてください。改善要望・欲しい機能のヒントになります（30秒）。
+            {t("feedback.subtitle")}
           </div>
         </div>
         <button
           type="button"
           onClick={dismiss}
           className="text-[var(--color-muted)] hover:text-[var(--color-text)] -mt-1 -mr-1 p-1"
-          title="あとで（14日後にもう一度）"
-          aria-label="フィードバックを閉じる"
+          title={t("feedback.laterTitle")}
+          aria-label={t("feedback.closeAria")}
         >
           <X size={15} />
         </button>
@@ -97,7 +98,7 @@ export function FeedbackCard({
         {/* 評価 */}
         <div>
           <div className="text-[11.5px] text-[var(--color-muted)] mb-1.5">
-            総合評価
+            {t("feedback.ratingLabel")}
           </div>
           <div className="flex gap-1.5">
             {RATING_OPTIONS.map((opt, idx) => {
@@ -130,12 +131,12 @@ export function FeedbackCard({
         {/* 改善要望 */}
         <div>
           <label className="block text-[11.5px] text-[var(--color-muted)] mb-1">
-            もっとこうして欲しいこと
+            {t("feedback.improvementLabel")}
           </label>
           <textarea
             value={improvement}
             onChange={(e) => setImprovement(e.target.value)}
-            placeholder="例：起動を速くしてほしい / 〇〇の表示をもっとシンプルに…"
+            placeholder={t("feedback.improvementPlaceholder")}
             rows={2}
             className="w-full text-[12.5px] border border-[var(--color-border)] rounded-md px-2.5 py-1.5 resize-none focus:outline-none focus:border-[var(--color-accent)]"
           />
@@ -144,12 +145,12 @@ export function FeedbackCard({
         {/* 新機能要望 */}
         <div>
           <label className="block text-[11.5px] text-[var(--color-muted)] mb-1">
-            こんな機能が欲しい
+            {t("feedback.featureLabel")}
           </label>
           <textarea
             value={featureRequest}
             onChange={(e) => setFeatureRequest(e.target.value)}
-            placeholder="例：〇〇と連携できると嬉しい / 〇〇を自動でやってほしい…"
+            placeholder={t("feedback.featurePlaceholder")}
             rows={2}
             className="w-full text-[12.5px] border border-[var(--color-border)] rounded-md px-2.5 py-1.5 resize-none focus:outline-none focus:border-[var(--color-accent)]"
           />
@@ -158,7 +159,7 @@ export function FeedbackCard({
         {/* 連絡先（任意） */}
         <div>
           <label className="block text-[11.5px] text-[var(--color-muted)] mb-1">
-            連絡先（任意・お返事希望の方のみ）
+            {t("feedback.contactLabel")}
           </label>
           <input
             type="email"
@@ -176,7 +177,7 @@ export function FeedbackCard({
             onClick={dismiss}
             className="text-[11.5px] text-[var(--color-muted)] hover:text-[var(--color-text)] underline-offset-2 hover:underline"
           >
-            あとで
+            {t("feedback.later")}
           </button>
           <button
             type="button"
@@ -185,13 +186,13 @@ export function FeedbackCard({
             className="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
           >
             <Send size={12} />
-            送信する
+            {t("feedback.submit")}
           </button>
         </div>
 
         <div className="flex items-center gap-1.5 text-[10.5px] text-[var(--color-muted)] pt-1 border-t border-[var(--color-border)]">
           <Mail size={11} />
-          <span>送信ボタンでメーラーが開きます。送信先: support@uni-core.jp</span>
+          <span>{t("feedback.mailerHint")}</span>
         </div>
       </div>
     </div>

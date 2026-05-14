@@ -6,12 +6,13 @@ import { X, Save, FileText, Plus, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import { readTextFile, writeTextFile, isTauri } from "@/lib/tauri";
 import { EDITOR_OPEN_TAB_EVENT } from "@/lib/editor-window";
+import { useTranslation, t as translate } from "@/lib/i18n";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
     <div className="h-full w-full flex items-center justify-center text-[12px] text-neutral-500">
-      エディタ読み込み中…
+      {translate("editor.loading")}
     </div>
   ),
 });
@@ -96,6 +97,7 @@ function makeNewTab(path: string): Tab {
 }
 
 export function EditorWindow() {
+  const { t: tr } = useTranslation();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   /** 起動時の URL クエリ ?file= に対する 1 回限りの初期処理フラグ */
@@ -125,6 +127,7 @@ export function EditorWindow() {
       );
       return;
     }
+    // (i18n note: 上記コメント "// browser preview: cannot read" はファイル内容なのでそのまま)
     try {
       const text = await readTextFile(rawPath);
       setTabs((prev) =>
@@ -220,7 +223,7 @@ export function EditorWindow() {
     if (activeTab.loading) return;
     if (activeTab.original === activeTab.content) return;
     if (!isTauri()) {
-      alert("ブラウザ開発モードでは保存できません。");
+      alert(translate("editor.browserSaveBlocked"));
       return;
     }
     try {
@@ -231,7 +234,7 @@ export function EditorWindow() {
         ),
       );
     } catch (e) {
-      alert(`保存に失敗: ${e instanceof Error ? e.message : String(e)}`);
+      alert(translate("editor.saveFailed", { error: e instanceof Error ? e.message : String(e) }));
     }
   }, [activeTab]);
 
@@ -260,7 +263,7 @@ export function EditorWindow() {
         {tabs.length === 0 && (
           <div className="px-4 py-2 text-[12px] text-neutral-500 flex items-center gap-2">
             <FileText size={12} />
-            エクスプローラーからファイルを開いてください
+            {tr("editor.empty")}
           </div>
         )}
         {tabs.map((t) => {
@@ -289,7 +292,7 @@ export function EditorWindow() {
               {isDirty && (
                 <span
                   className="w-1.5 h-1.5 rounded-full bg-white/80 ml-0.5"
-                  title="未保存"
+                  title={tr("editor.dirty")}
                 />
               )}
               <button
@@ -303,7 +306,7 @@ export function EditorWindow() {
                     ? "opacity-80"
                     : "opacity-0 group-hover:opacity-80",
                 )}
-                title="タブを閉じる (Ctrl+W)"
+                title={tr("editor.closeTabTitle")}
               >
                 <X size={12} />
               </button>
@@ -332,10 +335,10 @@ export function EditorWindow() {
                 ? "border-sky-500 text-sky-300 hover:bg-sky-500/10"
                 : "border-neutral-700 text-neutral-600 cursor-not-allowed",
             )}
-            title="保存 (Ctrl+S)"
+            title={tr("editor.saveTitle")}
           >
             <Save size={11} />
-            保存
+            {tr("editor.saveLabel")}
           </button>
         </div>
       </div>
@@ -345,21 +348,21 @@ export function EditorWindow() {
         {!activeTab && (
           <div className="h-full w-full flex flex-col items-center justify-center gap-3 text-neutral-500">
             <Plus size={28} className="opacity-40" />
-            <div className="text-[13px]">タブが開かれていません</div>
+            <div className="text-[13px]">{tr("editor.noTab")}</div>
             <div className="text-[11px] opacity-70">
-              UNICREW のエクスプローラーからファイルをクリックすると、ここに新しいタブが追加されます
+              {tr("editor.noTabHint")}
             </div>
           </div>
         )}
         {activeTab && activeTab.loading && (
           <div className="h-full w-full flex items-center justify-center text-[12px] text-neutral-500">
-            読み込み中…
+            {tr("editor.fileLoading")}
           </div>
         )}
         {activeTab && activeTab.error && (
           <div className="h-full w-full flex items-center justify-center text-[12px] text-red-400">
             <AlertCircle size={14} className="mr-2" />
-            読み込み失敗: {activeTab.error}
+            {tr("editor.loadFailed", { error: activeTab.error })}
           </div>
         )}
         {activeTab && !activeTab.loading && !activeTab.error && (

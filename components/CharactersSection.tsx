@@ -14,12 +14,14 @@ import type { Character } from "@/lib/types";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { CharacterEditModal } from "./CharacterEditModal";
 import { deleteAvatar } from "@/lib/tauri";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   onCharactersChanged?: () => void;
 }
 
 export function CharactersSection({ onCharactersChanged }: Props) {
+  const { t: tr } = useTranslation();
   const [userChars, setUserChars] = useState<Character[]>([]);
   const [editing, setEditing] = useState<Character | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -73,19 +75,19 @@ export function CharactersSection({ onCharactersChanged }: Props) {
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-sm flex items-center gap-1.5">
           <Users size={15} />
-          キャラクター
+          {tr("character.section.title")}
         </h3>
         <button
           onClick={onCreateBlank}
           className="flex items-center gap-1 px-2.5 py-1 text-[11.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
         >
           <Plus size={12} />
-          新規作成
+          {tr("character.section.newButton")}
         </button>
       </div>
 
       <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
-        自分専用のキャラクターを作って、用途別に呼び出せます。名前・アバター・口調・専門を自由にカスタマイズできます。
+        {tr("character.section.intro")}
       </p>
 
       {/* User characters */}
@@ -102,7 +104,7 @@ export function CharactersSection({ onCharactersChanged }: Props) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-[13px] truncate">
-                      {c.name || "（名前未設定）"}
+                      {c.name || tr("character.section.nameless")}
                     </span>
                     {c.roleTag && (
                       <span className="text-[10.5px] text-[var(--color-muted)] truncate">
@@ -111,8 +113,8 @@ export function CharactersSection({ onCharactersChanged }: Props) {
                     )}
                   </div>
                   <div className="text-[11px] text-[var(--color-muted)] truncate">
-                    {p ? p.label : "口調未設定"} ・{" "}
-                    {c.description || "説明なし"}
+                    {p ? p.label : tr("character.section.unsetTone")} ・{" "}
+                    {c.description || tr("character.section.noDesc")}
                   </div>
                 </div>
                 <button
@@ -120,7 +122,7 @@ export function CharactersSection({ onCharactersChanged }: Props) {
                   className="px-2 py-1 text-[11px] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface)] flex items-center gap-1"
                 >
                   <Pencil size={11} />
-                  編集
+                  {tr("character.section.edit")}
                 </button>
               </div>
             );
@@ -130,9 +132,9 @@ export function CharactersSection({ onCharactersChanged }: Props) {
 
       {userChars.length === 0 && (
         <div className="border border-dashed border-[var(--color-border)] rounded-md p-4 text-center text-[12px] text-[var(--color-muted)] mb-4">
-          まだキャラクターがありません。
+          {tr("character.section.emptyLine1")}
           <br />
-          下のテンプレートから作るか、「新規作成」してください。
+          {tr("character.section.emptyLine2")}
         </div>
       )}
 
@@ -140,12 +142,12 @@ export function CharactersSection({ onCharactersChanged }: Props) {
       <div>
         <div className="text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide flex items-center gap-1">
           <Sparkles size={11} />
-          テンプレートから作る
+          {tr("character.section.templatesTitle")}
         </div>
         <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-          テンプレを選んで複製→自分用に名前・アバター・口調を編集します。
+          {tr("character.section.templatesIntro")}
           <span className="block text-[10.5px] mt-0.5">
-            既に複製済みのテンプレは上の「マイキャラクター」に居るので、ここからは隠しています。
+            {tr("character.section.templatesNote")}
           </span>
         </p>
         {(() => {
@@ -167,7 +169,7 @@ export function CharactersSection({ onCharactersChanged }: Props) {
           if (remainingTemplates.length === 0) {
             return (
               <div className="text-[11.5px] text-[var(--color-muted)] border border-dashed border-[var(--color-border)] rounded-md p-3 text-center">
-                テンプレートは全て複製済みです。
+                {tr("character.section.allCloned")}
               </div>
             );
           }

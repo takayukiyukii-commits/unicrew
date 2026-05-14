@@ -23,6 +23,7 @@ interface Props {
 // ローカルテーブルを再定義しない。新プロバイダ追加で毎回 ここを直さないため。
 import { colorOf } from "@/lib/providerCategories";
 import { PROVIDER_LABELS as PROVIDER_LABELS_CENTRAL } from "@/lib/types";
+import { useTranslation } from "@/lib/i18n";
 
 function providerBadge(p: Provider): { label: string; color: string } {
   return { label: PROVIDER_LABELS_CENTRAL[p], color: colorOf(p) };
@@ -40,6 +41,7 @@ export function SlashCommandPicker({
   onPick,
   disabled,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -139,7 +141,7 @@ export function SlashCommandPicker({
         type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
-        title="スラッシュコマンドを挿入"
+        title={t("slash.tooltip")}
         className={clsx(
           "h-9 px-2 inline-flex items-center gap-1 rounded-lg border text-[11.5px] transition",
           "border-[var(--color-border)] text-[var(--color-muted)] bg-white",
@@ -165,7 +167,7 @@ export function SlashCommandPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onInputKeyDown}
-              placeholder="コマンドを検索…（例：レビュー / クリア）"
+              placeholder={t("slash.searchPlaceholder")}
               className="w-full text-[12.5px] outline-none placeholder:text-[var(--color-muted)]"
             />
           </div>
@@ -173,7 +175,7 @@ export function SlashCommandPicker({
           <div ref={listRef} className="overflow-y-auto unicrew-scroll py-1">
             {filtered.flat.length === 0 ? (
               <div className="px-3 py-6 text-center text-[12px] text-[var(--color-muted)]">
-                一致するコマンドはありません
+                {t("slash.noMatch")}
               </div>
             ) : (
               CATEGORY_ORDER.map((cat) => {
@@ -243,9 +245,9 @@ export function SlashCommandPicker({
           </div>
 
           <div className="shrink-0 px-3 py-1.5 border-t border-[var(--color-border)] text-[10.5px] text-[var(--color-muted)] flex items-center gap-2">
-            <span>↑↓ で選択</span>
-            <span>Enter で挿入</span>
-            <span>Esc で閉じる</span>
+            <span>{t("slash.kbdSelect")}</span>
+            <span>{t("slash.kbdEnter")}</span>
+            <span>{t("slash.kbdEsc")}</span>
           </div>
         </div>
       )}

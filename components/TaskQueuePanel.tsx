@@ -26,6 +26,7 @@ import {
   updateTaskStatus,
   clearFinishedTasks,
 } from "@/lib/task-queue";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   /** 現在のスレッドID（タスクを紐づけるため） */
@@ -58,6 +59,7 @@ export function TaskQueuePanel({
   lastAssistantText,
   onClose,
 }: Props) {
+  const { t: tr } = useTranslation();
   const [tasks, setTasks] = useState<QueuedTask[]>([]);
   const [bulkInput, setBulkInput] = useState("");
   const [autoRun, setAutoRun] = useState(true);
@@ -186,14 +188,14 @@ export function TaskQueuePanel({
     <div className="border-t border-[var(--color-border)] bg-white">
       <div className="px-3 py-1.5 flex items-center gap-2 text-[11.5px] border-b border-[var(--color-border)] bg-[var(--color-surface)]/40">
         <ListChecks size={12} className="text-[var(--color-muted)] shrink-0" />
-        <span className="font-semibold">タスクキュー</span>
+        <span className="font-semibold">{tr("task.title")}</span>
         <span className="text-[var(--color-muted)]">
-          待機 {pendingCount} / 実行中 {runningCount}
+          {tr("task.counts", { pending: pendingCount, running: runningCount })}
           {failedCount > 0 && (
             <>
               {" / "}
               <span className="text-red-600 font-semibold">
-                失敗 {failedCount}
+                {tr("task.failedCount", { failed: failedCount })}
               </span>
             </>
           )}
@@ -204,17 +206,17 @@ export function TaskQueuePanel({
           <FilterBtn
             active={filter === "all"}
             onClick={() => setFilter("all")}
-            label="全部"
+            label={tr("task.filterAll")}
           />
           <FilterBtn
             active={filter === "active"}
             onClick={() => setFilter("active")}
-            label="アクティブ"
+            label={tr("task.filterActive")}
           />
           <FilterBtn
             active={filter === "failed"}
             onClick={() => setFilter("failed")}
-            label="失敗"
+            label={tr("task.filterFailed")}
             danger
           />
         </div>
@@ -226,13 +228,13 @@ export function TaskQueuePanel({
             onChange={(e) => setAutoRun(e.target.checked)}
             className="h-3 w-3"
           />
-          自動進行
+          {tr("task.autoRun")}
         </label>
         <button
           type="button"
           onClick={clearFinished}
           className="text-[10.5px] text-[var(--color-muted)] hover:text-red-500 inline-flex items-center gap-0.5"
-          title="完了済みタスクを消す（失敗ログは残る）"
+          title={tr("task.clearFinishedTitle")}
         >
           <Trash2 size={11} />
         </button>
@@ -240,8 +242,8 @@ export function TaskQueuePanel({
           type="button"
           onClick={onClose}
           className="p-0.5 rounded hover:bg-red-50 text-[var(--color-muted)] hover:text-red-500"
-          title="閉じる"
-          aria-label="閉じる"
+          title={tr("task.close")}
+          aria-label={tr("task.close")}
         >
           <X size={12} />
         </button>
@@ -251,23 +253,23 @@ export function TaskQueuePanel({
         {visibleTasks.length === 0 ? (
           <div className="text-[11.5px] text-[var(--color-muted)] py-2 text-center">
             {filter === "failed"
-              ? "失敗したタスクはありません。"
+              ? tr("task.emptyFailed")
               : threadTasks.length === 0
-              ? "タスクは空です。下の入力欄に複数行で書くと、1行＝1タスクとして並びます。"
-              : "条件に合うタスクはありません。"}
+              ? tr("task.empty")
+              : tr("task.emptyFiltered")}
           </div>
         ) : (
           <ul className="space-y-1">
-            {visibleTasks.map((t) => (
+            {visibleTasks.map((task) => (
               <TaskRow
-                key={t.id}
-                task={t}
-                onRun={() => runNow(t.id)}
-                onSkip={() => skip(t.id)}
-                onRemove={() => remove(t.id)}
-                onRetry={() => retry(t.id)}
-                onToggleError={() => toggleErrorExpanded(t.id)}
-                errorExpanded={expandedErrors.has(t.id)}
+                key={task.id}
+                task={task}
+                onRun={() => runNow(task.id)}
+                onSkip={() => skip(task.id)}
+                onRemove={() => remove(task.id)}
+                onRetry={() => retry(task.id)}
+                onToggleError={() => toggleErrorExpanded(task.id)}
+                errorExpanded={expandedErrors.has(task.id)}
                 disableRun={isStreaming}
               />
             ))}
@@ -280,10 +282,7 @@ export function TaskQueuePanel({
           value={bulkInput}
           onChange={(e) => setBulkInput(e.target.value)}
           rows={2}
-          placeholder="タスクを追加（1行＝1件）。例：
-- README.mdを読んでまとめて
-- テストを実行して結果を要約
-- ChatPaneのN-way対応を確認"
+          placeholder={tr("task.bulkPlaceholder")}
           className="flex-1 resize-none bg-white border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] outline-none focus:border-[var(--color-accent)]"
         />
         <button
@@ -291,10 +290,10 @@ export function TaskQueuePanel({
           onClick={addBulk}
           disabled={!threadId || !bulkInput.trim()}
           className="shrink-0 inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-[11.5px] font-medium disabled:opacity-30"
-          title="まとめて追加"
+          title={tr("task.addTitle")}
         >
           <Plus size={11} />
-          追加
+          {tr("task.add")}
         </button>
       </div>
     </div>
@@ -320,6 +319,7 @@ function TaskRow({
   errorExpanded: boolean;
   disableRun: boolean;
 }) {
+  const { t: tr } = useTranslation();
   const status: TaskStatus = task.status;
   const hasError = status === "failed" && !!task.error;
   return (
@@ -341,7 +341,7 @@ function TaskRow({
             status === "failed" && "text-red-700",
             hasError && "cursor-pointer hover:underline",
           )}
-          title={hasError ? "クリックでエラー全文を表示" : task.prompt}
+          title={hasError ? tr("task.expandErrorTitle") : task.prompt}
         >
           {task.label ?? task.prompt}
         </button>
@@ -354,7 +354,7 @@ function TaskRow({
               type="button"
               onClick={onRun}
               disabled={disableRun}
-              title="今すぐ実行"
+              title={tr("task.runNowTitle")}
               className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600 disabled:opacity-30"
             >
               <Play size={11} />
@@ -364,7 +364,7 @@ function TaskRow({
             <button
               type="button"
               onClick={onSkip}
-              title="スキップ"
+              title={tr("task.skipTitle")}
               className="p-0.5 rounded hover:bg-amber-50 text-amber-600"
             >
               <SkipForward size={11} />
@@ -374,7 +374,7 @@ function TaskRow({
             <button
               type="button"
               onClick={onRetry}
-              title="再実行（pendingに戻す）"
+              title={tr("task.retryTitle")}
               className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600"
             >
               <RotateCcw size={11} />
@@ -383,7 +383,7 @@ function TaskRow({
           <button
             type="button"
             onClick={onRemove}
-            title="削除"
+            title={tr("task.deleteTitle")}
             className="p-0.5 rounded hover:bg-red-50 text-red-500"
           >
             <X size={11} />

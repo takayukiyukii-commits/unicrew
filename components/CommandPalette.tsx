@@ -5,6 +5,7 @@ import { ChevronRight, Search } from "lucide-react";
 import clsx from "clsx";
 import { fuzzyFilter, type FuzzyMatch } from "@/lib/fuzzy";
 import { commandSearchText, type Command } from "@/lib/commands";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -41,6 +42,7 @@ function HighlightedLabel({
 }
 
 export function CommandPalette({ open, onClose, commands }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,7 +105,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
       role="dialog"
-      aria-label="コマンドパレット"
+      aria-label={t("palette.dialogLabel")}
     >
       <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-[var(--color-border)] overflow-hidden flex flex-col">
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--color-border)]">
@@ -131,7 +133,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
                 onClose();
               }
             }}
-            placeholder="コマンド・キャラ・ワークスペース・スレッドを検索…"
+            placeholder={t("palette.placeholder")}
             className="flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--color-muted)]"
           />
           <kbd className="hidden md:inline-block text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-muted)]">
@@ -145,7 +147,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
         >
           {filtered.length === 0 && (
             <div className="px-4 py-8 text-center text-[12px] text-[var(--color-muted)]">
-              該当するコマンドがありません
+              {t("palette.empty")}
             </div>
           )}
           {filtered.map(({ item, match }, idx) => {
@@ -208,10 +210,10 @@ export function CommandPalette({ open, onClose, commands }: Props) {
 
         <div className="flex items-center justify-between px-3 py-1.5 border-t border-[var(--color-border)] bg-[var(--color-surface)] text-[10.5px] text-[var(--color-muted)]">
           <div className="flex items-center gap-2">
-            <span>↑↓ で選択</span>
-            <span>Enter で実行</span>
+            <span>{t("palette.hint.select")}</span>
+            <span>{t("palette.hint.enter")}</span>
           </div>
-          <div>{filtered.length} 件</div>
+          <div>{t("palette.hint.count", { count: filtered.length })}</div>
         </div>
       </div>
     </div>

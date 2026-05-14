@@ -24,6 +24,7 @@ import {
   MOBILE_PUBLIC_URL,
 } from "@/lib/cloud-bridge";
 import { getLanIp } from "@/lib/tauri";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -55,6 +56,7 @@ export function MobileBridgeModal({
   onStartCloudPairing,
   onStopCloudPairing,
 }: Props) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>("cloud");
   const [token, setToken] = useState<string>("");
   const [copied, setCopied] = useState(false);
@@ -120,7 +122,7 @@ export function MobileBridgeModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      window.prompt("URLをコピー：", url);
+      window.prompt(t("mobile.lan.copyPrompt"), url);
     }
   };
 
@@ -129,12 +131,12 @@ export function MobileBridgeModal({
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col">
         <div className="shrink-0 px-5 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
           <Smartphone size={16} className="text-[var(--color-accent)]" />
-          <h2 className="font-bold text-[15px] flex-1">スマホ連携</h2>
+          <h2 className="font-bold text-[15px] flex-1">{t("mobile.title")}</h2>
           <button
             type="button"
             onClick={onClose}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            aria-label="閉じる"
+            aria-label={t("common.close")}
           >
             <X size={16} />
           </button>
@@ -152,7 +154,7 @@ export function MobileBridgeModal({
             }`}
           >
             <Cloud size={11} className="inline mr-1" />
-            QRですぐ使う（推奨）
+            {t("mobile.tabCloud")}
           </button>
           <button
             type="button"
@@ -164,7 +166,7 @@ export function MobileBridgeModal({
             }`}
           >
             <Wifi size={11} className="inline mr-1" />
-            同じ Wi-Fi（上級者向け）
+            {t("mobile.tabLan")}
           </button>
         </div>
 
@@ -180,15 +182,13 @@ export function MobileBridgeModal({
         {mode === "lan" && (
         <div className="px-5 py-4 space-y-3">
           <p className="text-[12.5px] text-[var(--color-muted)] leading-relaxed">
-            スマホとPCを <strong>同じ Wi-Fi</strong> に繋いだ状態で、
-            下記の URL をスマホブラウザで開くと PC の UNICREW にメッセージを
-            送れる「リモコン」になります。
+            {t("mobile.lan.introLine1")} <strong>{t("mobile.lan.introLine2")}</strong> {t("mobile.lan.introLine3")}
           </p>
 
           {/* ホスト名選択（LAN IP 自動検出 / 手動入力） */}
           <div className="rounded-md border border-[var(--color-border)] bg-white p-2.5 space-y-1.5">
             <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted)]">
-              スマホがアクセスする UNICREW のアドレス
+              {t("mobile.lan.addressLabel")}
             </div>
             <div className="flex flex-wrap gap-1">
               {candidates.map((c) => (
@@ -210,19 +210,19 @@ export function MobileBridgeModal({
               type="text"
               value={host}
               onChange={(e) => setHostAndPersist(e.target.value)}
-              placeholder="例: 192.168.1.10:1420（PC の LAN IP）"
+              placeholder={t("mobile.lan.hostPlaceholder")}
               className="w-full font-mono text-[11px] border border-[var(--color-border)] rounded px-2 py-1 outline-none focus:border-[var(--color-accent)]"
             />
             <div className="text-[10px] text-[var(--color-muted)]">
               {lanIp
-                ? `自動検出した PC の LAN IP: ${lanIp}`
-                : "LAN IP を取得中… Wi-Fi に接続されていれば自動で出ます"}
+                ? t("mobile.lan.lanIpDetected", { ip: lanIp })
+                : t("mobile.lan.lanIpLoading")}
             </div>
           </div>
 
           <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/40 p-2.5">
             <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted)] mb-1">
-              スマホ用 URL
+              {t("mobile.lan.urlLabel")}
             </div>
             <div className="font-mono text-[11px] break-all text-[var(--color-text)] mb-1.5">
               {url || "—"}
@@ -233,30 +233,30 @@ export function MobileBridgeModal({
               className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-accent)] text-white text-[11px] font-medium hover:opacity-90"
             >
               {copied ? <Check size={11} /> : <Copy size={11} />}
-              {copied ? "コピーしました" : "URL をコピー"}
+              {copied ? t("mobile.lan.copiedUrl") : t("mobile.lan.copyUrl")}
             </button>
           </div>
 
           <div className="rounded-md border border-amber-200 bg-amber-50/50 p-2.5 text-[11.5px] text-amber-900 leading-relaxed">
             <div className="font-semibold mb-1 flex items-center gap-1.5">
               <AlertTriangle size={12} aria-hidden="true" />
-              繋がらない時のチェック
+              {t("mobile.lan.troubleTitle")}
             </div>
             <ol className="list-decimal pl-4 space-y-1">
               <li>
-                スマホとPCが <strong>同じ Wi-Fi</strong> に接続されているか
+                {t("mobile.lan.trouble1a")} <strong>{t("mobile.lan.trouble1b")}</strong> {t("mobile.lan.trouble1c")}
               </li>
               <li>
-                UNICREW を <strong>起動したまま</strong>（dev サーバ稼働中）
+                {t("mobile.lan.trouble2a")} <strong>{t("mobile.lan.trouble2b")}</strong>{t("mobile.lan.trouble2c")}
               </li>
               <li>
-                URL のホスト名は <code className="font-mono">localhost</code> ではなく
-                <strong>PC の LAN IP</strong>（例:{" "}
-                <code className="font-mono">192.168.x.x:1420</code>）を使う
+                {t("mobile.lan.trouble3a")} <code className="font-mono">localhost</code> {t("mobile.lan.trouble3b")}
+                <strong>{t("mobile.lan.trouble3c")}</strong>{t("mobile.lan.trouble3d")}{" "}
+                <code className="font-mono">192.168.x.x:1420</code>{t("mobile.lan.trouble3e")}
               </li>
               <li>
-                Windows Firewall でポート 1420 が LAN 内に許可されているか。
-                <strong>管理者 PowerShell</strong> で次のコマンドを1度だけ実行：
+                {t("mobile.lan.trouble4a")}
+                <strong>{t("mobile.lan.trouble4b")}</strong>{t("mobile.lan.trouble4c")}
                 <pre className="mt-1 p-1.5 bg-amber-100 rounded font-mono text-[10.5px] overflow-x-auto whitespace-pre-wrap break-all">
 {`New-NetFirewallRule -DisplayName "UNICREW-1420" \`
   -Direction Inbound -Protocol TCP -LocalPort 1420 \`
@@ -264,16 +264,14 @@ export function MobileBridgeModal({
                 </pre>
               </li>
               <li>
-                ルーターによっては「AP アイソレーション（端末分離）」が有効で
-                スマホ↔PC通信が遮断されることがある。その場合はルーター設定で
-                同機能を OFF にする
+                {t("mobile.lan.trouble5")}
               </li>
             </ol>
           </div>
 
           <div className="rounded-md border border-[var(--color-border)] bg-white p-2.5">
             <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted)] mb-1">
-              認証トークン（変更すると古いスマホは再ログイン必要）
+              {t("mobile.lan.tokenLabel")}
             </div>
             <div className="font-mono text-[10px] break-all text-[var(--color-muted)]">
               {token}
@@ -283,7 +281,7 @@ export function MobileBridgeModal({
               onClick={regenerate}
               className="mt-1.5 text-[11px] text-red-600 hover:underline"
             >
-              トークンを再生成
+              {t("mobile.lan.regenerate")}
             </button>
           </div>
         </div>
@@ -311,6 +309,7 @@ function CloudPairingPanel({
   onStart: (code: string) => void;
   onStop: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
 
@@ -347,16 +346,15 @@ function CloudPairingPanel({
         <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-[12px] text-amber-900 leading-relaxed">
           <div className="font-semibold mb-1 flex items-center gap-1.5">
             <Settings size={12} aria-hidden="true" />
-            クラウドリレー未設定
+            {t("mobile.cloud.notReadyTitle")}
           </div>
-          UNICREW 配布版で外出先からスマホ連携するには、Supabase 中継プロジェクトを
-          1つ用意して環境変数に設定する必要があります。
+          {t("mobile.cloud.notReadyBody")}
           <pre className="mt-2 p-2 bg-amber-100 rounded font-mono text-[10.5px] overflow-x-auto">
 {`# repos/unicrew/.env.local
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
           </pre>
-          設定後 dev サーバ再起動で「クラウド経由」が使えるようになります。
+          {t("mobile.cloud.notReadyAfter")}
         </div>
       </div>
     );
@@ -379,15 +377,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      window.prompt("URLをコピー：", url);
+      window.prompt(t("mobile.lan.copyPrompt"), url);
     }
   };
 
   return (
     <div className="px-5 py-4 space-y-3">
       <p className="text-[12.5px] text-[var(--color-muted)] leading-relaxed">
-        スマホで <strong>下のQRコードを読み取る</strong>と、外出先・別の Wi-Fi
-        からでも、この PC の UNICREW にメッセージを送れます。
+        {t("mobile.cloud.introA")} <strong>{t("mobile.cloud.introB")}</strong>{t("mobile.cloud.introC")}
       </p>
 
       {cloudPairCode && (
@@ -398,23 +395,23 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={qrDataUrl}
-                alt="ペアリングQRコード"
+                alt={t("mobile.cloud.qrAlt")}
                 className="w-[240px] h-[240px]"
               />
             ) : (
               <div className="w-[240px] h-[240px] bg-[var(--color-surface)] flex items-center justify-center text-[12px] text-[var(--color-muted)]">
-                QR生成中…
+                {t("mobile.cloud.qrLoading")}
               </div>
             )}
             <div className="mt-3 text-center">
               <div className="text-[10.5px] text-emerald-700 font-semibold uppercase tracking-wide">
-                スマホのカメラで読み取り
+                {t("mobile.cloud.scanWithCamera")}
               </div>
               <div className="font-mono text-[18px] tracking-[0.25em] font-bold text-emerald-700 mt-0.5">
                 {formatPairCode(cloudPairCode)}
               </div>
               <div className="text-[10px] text-emerald-700/70 mt-0.5">
-                合言葉（24時間有効）
+                {t("mobile.cloud.passphraseHint")}
               </div>
             </div>
           </div>
@@ -422,7 +419,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
           {/* QR読めない人向けフォールバック（折り畳み） */}
           <details className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]/40 p-2.5 text-[11.5px]">
             <summary className="cursor-pointer text-[var(--color-muted)] hover:text-[var(--color-text)]">
-              QRが読めない場合：URLをLINE等で送る
+              {t("mobile.cloud.qrFallback")}
             </summary>
             <div className="mt-1.5 space-y-1.5">
               <div className="font-mono text-[10.5px] break-all text-[var(--color-text)]">
@@ -434,7 +431,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
                 className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-accent)] text-white text-[10.5px] font-medium hover:opacity-90"
               >
                 {copied ? <Check size={10} /> : <Copy size={10} />}
-                {copied ? "コピーしました" : "URL をコピー"}
+                {copied ? t("mobile.lan.copiedUrl") : t("mobile.lan.copyUrl")}
               </button>
             </div>
           </details>
@@ -447,20 +444,20 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
               className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)] text-[11.5px]"
             >
               <Power size={10} />
-              スマホ連携をやめる
+              {t("mobile.cloud.stop")}
             </button>
             <button
               type="button"
               onClick={start}
               className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)] text-[11.5px]"
-              title="合言葉を変える（古いスマホは再スキャン必要）"
+              title={t("mobile.cloud.regenerateTitle")}
             >
-              新しい合言葉
+              {t("mobile.cloud.regenerate")}
             </button>
           </div>
 
           <div className="text-[10.5px] text-[var(--color-muted)] leading-relaxed">
-            ※ UNICREW を <strong>起動したまま</strong>にしてください。閉じるとスマホから繋がりません。
+            {t("mobile.cloud.keepRunningA")} <strong>{t("mobile.cloud.keepRunningB")}</strong>{t("mobile.cloud.keepRunningC")}
           </div>
         </>
       )}
@@ -472,7 +469,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...`}
           className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[var(--color-accent)] text-white font-semibold text-[13px] hover:opacity-90"
         >
           <Cloud size={13} />
-          スマホ連携を開始（QRコードを表示）
+          {t("mobile.cloud.startCta")}
         </button>
       )}
     </div>

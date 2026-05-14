@@ -10,6 +10,8 @@ import { Walkthrough } from "@/components/Walkthrough";
 import { isWalkthroughDone, resetWalkthrough } from "@/lib/walkthrough";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import { resetWhatsNew, shouldShowWhatsNew, UNICREW_VERSION } from "@/lib/whatsnew";
+import { LanguagePickerModal } from "@/components/LanguagePickerModal";
+import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { TrustPromptModal } from "@/components/TrustPromptModal";
 import { isWorkspaceTrusted, trustWorkspace } from "@/lib/trust";
 import { openFileInEditorWindow } from "@/lib/editor-window";
@@ -71,7 +73,7 @@ import { CharacterPickerModal } from "@/components/CharacterPickerModal";
 import { CharacterEditModal } from "@/components/CharacterEditModal";
 import { PermissionPromptModal } from "@/components/PermissionPromptModal";
 import { WelcomeLanding } from "@/components/WelcomeLanding";
-import type { ConferencePreset } from "@/components/ConferencePresets";
+import { type ConferencePreset, presetName } from "@/components/ConferencePresets";
 import { FreeModeWizard } from "@/components/FreeModeWizard";
 import { ActivityVisibilityContext } from "@/components/ActivityContext";
 import { PaneResizer } from "@/components/PaneResizer";
@@ -374,6 +376,8 @@ function buildPeekOtherPanesContext(
 }
 
 export default function Page() {
+  // 既存コードに `t: Thread` パラメータが多数あるため、翻訳関数はエイリアス `tr` で受ける。
+  const { t: tr } = useTranslation();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   /**
@@ -471,6 +475,10 @@ export default function Page() {
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   /** What's New（バージョン更新時に 1 回だけ自動表示） */
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+  /** 初回起動言語ピッカー（locale未設定なら開く。Walkthroughより先） */
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
+  // <html lang> を現在のロケールに同期させる
+  useLocaleInit();
   /** Trust 確認モーダルの状態。開く時は path / resolve を入れる */
   const [trustPrompt, setTrustPrompt] = useState<{
     path: string;
@@ -536,8 +544,11 @@ export default function Page() {
       if (v === "1") setExplorerOpen(true);
       // 旧 unicrew.explorerWorkspace は廃止。残骸を一度だけ削除しておく。
       localStorage.removeItem("unicrew.explorerWorkspace");
-      // Walkthrough 完了済みでバージョンが上がっていたら What's New を出す
-      if (isWalkthroughDone() && shouldShowWhatsNew()) {
+      // 言語未設定なら言語ピッカーを最優先で表示（Walkthrough/WhatsNewより前）
+      if (isLocaleUnset()) {
+        setLanguagePickerOpen(true);
+      } else if (isWalkthroughDone() && shouldShowWhatsNew()) {
+        // Walkthrough 完了済みでバージョンが上がっていたら What's New を出す
         setWhatsNewOpen(true);
       }
     }
@@ -554,6 +565,8 @@ export default function Page() {
       } catch {
         /* noop */
       }
+      // 言語ピッカー表示中はオンボード判定をスキップ（閉じた時に onClose で再開する）
+      if (isLocaleUnset()) return;
       // 初回起動: Walkthrough 未完了なら Walkthrough を出して既存の設定モーダル誘導は出さない
       if (!isWalkthroughDone()) {
         setWalkthroughOpen(true);
@@ -1133,7 +1146,7 @@ export default function Page() {
           ...d.blocks,
           {
             kind: "text",
-            text: `**エラー**: ${event.message}\n\n認証状態とネットワーク接続を確認してください。`,
+            text: tr("page.error.generic", { message: event.message }),
           } as TextBlock,
         ],
       }));
@@ -1452,22 +1465,20 @@ export default function Page() {
 
   const handleCreate = async () => {
     if (!isTauri()) {
-      alert(
-        "ローカル機能（ファイル編集・コマンド実行）を使うには npm run tauri:dev でデスクトップアプリ起動が必要です。",
-      );
+      alert(tr("page.alert.tauriRequired"));
       return;
     }
     if (settings.authMode === "subscription") {
       const status = await claudeStatus();
       if (!status.installed || !status.logged_in) {
-        alert("Claude のセットアップが未完了です。設定から進めてください。");
+        alert(tr("page.alert.claudeSetupIncomplete"));
         setSettingsOpen(true);
         return;
       }
     } else {
       const key = await getApiKey();
       if (!key) {
-        alert("API キーが未設定です。設定から登録してください。");
+        alert(tr("page.alert.apiKeyMissing"));
         setSettingsOpen(true);
         return;
       }
@@ -1488,7 +1499,7 @@ export default function Page() {
    */
   const handleOpenSplitPane = () => {
     if (!isTauri()) {
-      alert("ローカル機能を使うには Tauri デスクトップ起動が必要です。");
+      alert(tr("page.alert.tauriRequiredShort"));
       return;
     }
     if (splitIds.length >= MAX_SPLIT_PANES) return;
@@ -1521,22 +1532,20 @@ export default function Page() {
    */
   const handleCreateInstant = async (slot: PaneSlot = "primary") => {
     if (!isTauri()) {
-      alert(
-        "ローカル機能を使うには npm run tauri:dev でデスクトップアプリ起動が必要です。",
-      );
+      alert(tr("page.alert.tauriRequired"));
       return;
     }
     if (settings.authMode === "subscription") {
       const status = await claudeStatus();
       if (!status.installed || !status.logged_in) {
-        alert("Claude のセットアップが未完了です。設定から進めてください。");
+        alert(tr("page.alert.claudeSetupIncomplete"));
         setSettingsOpen(true);
         return;
       }
     } else {
       const key = await getApiKey();
       if (!key) {
-        alert("API キーが未設定です。設定から登録してください。");
+        alert(tr("page.alert.apiKeyMissing"));
         setSettingsOpen(true);
         return;
       }
@@ -1574,9 +1583,7 @@ export default function Page() {
    */
   const handleCreateFromTeam = async (teamId: string) => {
     if (!isTauri()) {
-      alert(
-        "ローカル機能（ファイル編集・コマンド実行）を使うには npm run tauri:dev でデスクトップアプリ起動が必要です。",
-      );
+      alert(tr("page.alert.tauriRequired"));
       return;
     }
     const allTeams = [...loadUserTeams(), ...TEMPLATE_TEAMS];
@@ -1591,16 +1598,14 @@ export default function Page() {
     if (settings.authMode === "subscription") {
       const status = await claudeStatus();
       if (!status.installed || !status.logged_in) {
-        alert("Claude のセットアップが未完了です。設定から進めてください。");
+        alert(tr("page.alert.claudeSetupIncomplete"));
         setSettingsOpen(true);
         return;
       }
       if (usedProviders.has("codex")) {
         const cx = await codexStatus();
         if (!cx.installed || !cx.logged_in) {
-          alert(
-            "このチームには Codex も必要です。設定から Codex のインストール／ログインを完了してください。",
-          );
+          alert(tr("page.alert.teamNeedsCodex"));
           setSettingsOpen(true);
           return;
         }
@@ -1608,7 +1613,7 @@ export default function Page() {
     } else {
       const key = await getApiKey();
       if (!key) {
-        alert("API キーが未設定です。設定から登録してください。");
+        alert(tr("page.alert.apiKeyMissing"));
         setSettingsOpen(true);
         return;
       }
@@ -1647,9 +1652,7 @@ export default function Page() {
    */
   const handleApplyPreset = async (preset: ConferencePreset) => {
     if (!isTauri()) {
-      alert(
-        "ローカル機能（ファイル編集・コマンド実行）を使うには npm run tauri:dev でデスクトップアプリ起動が必要です。",
-      );
+      alert(tr("page.alert.tauriRequired"));
       return;
     }
     const needsClaude = preset.participants.some((p) => p.provider === "claude");
@@ -1658,9 +1661,7 @@ export default function Page() {
       if (needsClaude) {
         const status = await claudeStatus();
         if (!status.installed || !status.logged_in) {
-          alert(
-            "このプリセットは Claude を含みます。設定から Claude のセットアップを完了してください。",
-          );
+          alert(tr("page.alert.presetNeedsClaude"));
           setSettingsOpen(true);
           return;
         }
@@ -1668,9 +1669,7 @@ export default function Page() {
       if (needsCodex) {
         const cx = await codexStatus();
         if (!cx.installed || !cx.logged_in) {
-          alert(
-            "このプリセットは Codex を含みます。設定から Codex のセットアップを完了してください。",
-          );
+          alert(tr("page.alert.presetNeedsCodex"));
           setSettingsOpen(true);
           return;
         }
@@ -1680,7 +1679,7 @@ export default function Page() {
       if (preset.participants.some((p) => commercial.has(p.provider))) {
         const key = await getApiKey();
         if (!key) {
-          alert("API キーが未設定です。設定から登録してください。");
+          alert(tr("page.alert.apiKeyMissing"));
           setSettingsOpen(true);
           return;
         }
@@ -1706,9 +1705,7 @@ export default function Page() {
     for (const acp of acpProvidersInPreset) {
       const s = await acpCliStatus(acp);
       if (!s.installed) {
-        alert(
-          `このプリセットは ${acp} を含みますが、未インストールです。設定画面でインストールしてから再試行してください。`,
-        );
+        alert(tr("page.alert.presetAcpNotInstalled", { acp }));
         openSettingsForCategory("open_local");
         return;
       }
@@ -1726,7 +1723,7 @@ export default function Page() {
     const enriched: Thread = {
       ...t,
       participants: preset.participants,
-      title: preset.name,
+      title: presetName(preset),
     };
     setThreads((prev) => [enriched, ...prev]);
     setActiveId(enriched.id);
@@ -1766,9 +1763,7 @@ export default function Page() {
     if (splitMode) {
       const cx = await codexStatus();
       if (!cx.installed || !cx.logged_in) {
-        alert(
-          "並列モードには Codex のセットアップも必要です。設定からインストール／ログインしてください。",
-        );
+        alert(tr("page.alert.splitNeedsCodex"));
         setSettingsOpen(true);
         return;
       }
@@ -2012,7 +2007,7 @@ export default function Page() {
     const moderatorSlot = slots.find((s) => s.role === "moderator");
     const team = {
       id: "tmp",
-      name: target.title || "（無題チーム）",
+      name: target.title || tr("page.team.untitled"),
       description: "",
       emoji: "",
       defaultConference: target.conferenceMode,
@@ -2027,15 +2022,10 @@ export default function Page() {
     const json = exportTeamToJson(team);
     try {
       await navigator.clipboard.writeText(json);
-      alert(
-        "チームJSONをクリップボードにコピーしました。\n他のUNICREWユーザーに共有すると「JSONからチームをインポート…」で取り込めます。",
-      );
+      alert(tr("page.alert.teamJsonCopied"));
     } catch {
       // フォールバック：プロンプトでJSONを表示
-      window.prompt(
-        "クリップボードにコピーできませんでした。下記JSONを手動でコピーしてください：",
-        json,
-      );
+      window.prompt(tr("page.alert.teamJsonCopyFailed"), json);
     }
   };
 
@@ -2044,21 +2034,18 @@ export default function Page() {
    * 取り込み後はファイルメニューに即時反映。
    */
   const handleImportTeamJson = () => {
-    const json = window.prompt(
-      "共有されたチームJSONを貼り付けてください：",
-      "",
-    );
+    const json = window.prompt(tr("page.alert.teamJsonImportPrompt"), "");
     if (!json) return;
     try {
       const team = importTeamFromJson(json);
       const existing = loadUserTeams();
       saveUserTeams([team, ...existing]);
-      alert(
-        `チーム「${team.name}」をインポートしました。\nファイルメニューから新しい会話を開始できます。`,
-      );
+      alert(tr("page.alert.teamImported", { name: team.name }));
     } catch (e) {
       alert(
-        `インポートに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+        tr("page.alert.teamImportFailed", {
+          message: e instanceof Error ? e.message : String(e),
+        }),
       );
     }
   };
@@ -2501,7 +2488,10 @@ ${command}
           const errMsg = {
             id: nanoid(8),
             role: "assistant" as const,
-            content: `**起動エラー (${slot.provider})**: ${message}\n\n設定から認証状態を確認してください。`,
+            content: tr("page.assistant.startupError", {
+              provider: slot.provider,
+              message,
+            }),
             createdAt: Date.now(),
             provider: slot.provider,
             participantSlotId: slot.id,
@@ -2546,7 +2536,10 @@ ${command}
         const errMsg = {
           id: nanoid(8),
           role: "assistant" as const,
-          content: `**起動エラー (${slot.provider})**: ${message}\n\n設定から認証状態を確認してください。`,
+          content: tr("page.assistant.startupError", {
+            provider: slot.provider,
+            message,
+          }),
           createdAt: Date.now(),
           provider: slot.provider,
           participantSlotId: slot.id,
@@ -2651,8 +2644,7 @@ ${command}
         const noticeMsg = {
           id: nanoid(8),
           role: "assistant" as const,
-          content:
-            "**自動回復**: 前回の会話セッションが応答しなかったため、新規セッションで再起動します。",
+          content: tr("page.assistant.autoRecover"),
           createdAt: Date.now(),
           provider: slot.provider,
           participantSlotId: slot.id,
@@ -2839,9 +2831,9 @@ ${command}
     const list: Command[] = [
       {
         id: "thread.new",
-        label: "新しい会話",
-        category: "アクション",
-        description: "キャラクター選択を開いて新規スレッドを作る",
+        label: tr("palette.thread.new"),
+        category: tr("palette.category.action"),
+        description: tr("palette.thread.new.desc"),
         shortcut: "Ctrl+N",
         icon: Plus,
         keywords: ["new", "create", "thread", "あたらしい", "かいわ"],
@@ -2852,9 +2844,9 @@ ${command}
       },
       {
         id: "workspace.change",
-        label: "ワークスペースを開く / 切替",
-        category: "アクション",
-        description: activeThread?.workspace ?? "未選択",
+        label: tr("palette.workspace.change"),
+        category: tr("palette.category.action"),
+        description: activeThread?.workspace ?? tr("palette.workspace.unset"),
         icon: IconFolderOpen,
         keywords: ["folder", "ws", "workspace", "ふぉるだ"],
         run: () => {
@@ -2864,8 +2856,10 @@ ${command}
       },
       {
         id: "explorer.toggle",
-        label: explorerOpen ? "エクスプローラーを閉じる" : "エクスプローラーを開く",
-        category: "表示",
+        label: explorerOpen
+          ? tr("palette.explorer.close")
+          : tr("palette.explorer.open"),
+        category: tr("palette.category.view"),
         icon: IconFolderTree,
         keywords: ["explorer", "tree", "ファイル"],
         run: () => setExplorerOpen((v) => !v),
@@ -2874,9 +2868,9 @@ ${command}
         id: "split.toggle",
         label:
           splitIds.length > 0
-            ? `並列ペインを全て閉じる（現在 ${splitIds.length}）`
-            : "並列ペインを開く",
-        category: "表示",
+            ? tr("palette.split.closeAll", { count: splitIds.length })
+            : tr("palette.split.open"),
+        category: tr("palette.category.view"),
         icon: IconColumns2,
         keywords: ["split", "pane", "へいれつ"],
         run: () => {
@@ -2886,16 +2880,16 @@ ${command}
       },
       {
         id: "view.chat",
-        label: "会話表示に切替",
-        category: "表示",
+        label: tr("palette.view.chat"),
+        category: tr("palette.category.view"),
         icon: MessageSquare,
         run: () => setMainView("chat"),
         enabled: mainView !== "chat",
       },
       {
         id: "view.addons",
-        label: "機能の追加（プラグイン / スキル / MCP）",
-        category: "表示",
+        label: tr("palette.view.addons"),
+        category: tr("palette.category.view"),
         icon: IconPuzzle,
         keywords: ["plugin", "skill", "mcp", "addons"],
         run: () => setMainView("addons"),
@@ -2903,8 +2897,8 @@ ${command}
       },
       {
         id: "settings.open",
-        label: "設定を開く",
-        category: "アクション",
+        label: tr("palette.settings.open"),
+        category: tr("palette.category.action"),
         icon: IconSettings,
         shortcut: "Ctrl+,",
         keywords: ["settings", "config", "せってい"],
@@ -2912,32 +2906,34 @@ ${command}
       },
       {
         id: "uni-mcp.open",
-        label: "UNI 製品 MCP 一括接続",
-        category: "アクション",
+        label: tr("palette.uniMcp.open"),
+        category: tr("palette.category.action"),
         icon: Network,
         keywords: ["uni", "mcp", "connect"],
         run: () => setUniMcpOpen(true),
       },
       {
         id: "routines.open",
-        label: "ルーティーン（毎日定期実行）",
-        category: "アクション",
+        label: tr("palette.routines.open"),
+        category: tr("palette.category.action"),
         icon: CalendarClock,
         keywords: ["routine", "schedule", "cron", "ていきじっこう"],
         run: () => setRoutinesOpen(true),
       },
       {
         id: "mobile.open",
-        label: "スマホ連携（リモコン）",
-        category: "アクション",
+        label: tr("palette.mobile.open"),
+        category: tr("palette.category.action"),
         icon: Smartphone,
         keywords: ["mobile", "remote", "phone", "すまほ"],
         run: () => setMobileOpen(true),
       },
       {
         id: "queue.toggle",
-        label: taskQueueOpen ? "タスクキューを隠す" : "タスクキューを表示",
-        category: "表示",
+        label: taskQueueOpen
+          ? tr("palette.queue.hide")
+          : tr("palette.queue.show"),
+        category: tr("palette.category.view"),
         icon: ListChecks,
         keywords: ["task", "queue", "tasks"],
         run: () => setTaskQueueOpen((v) => !v),
@@ -2945,9 +2941,9 @@ ${command}
       {
         id: "beginner.toggle",
         label: settings.beginnerMode
-          ? "初心者モードを OFF にする"
-          : "初心者モードを ON にする",
-        category: "設定",
+          ? tr("palette.beginner.off")
+          : tr("palette.beginner.on"),
+        category: tr("palette.category.settings"),
         icon: Sparkles,
         keywords: ["beginner", "mode", "しょしんしゃ"],
         run: () => {
@@ -2963,8 +2959,8 @@ ${command}
       },
       {
         id: "abort.all",
-        label: "全スレッドを停止",
-        category: "アクション",
+        label: tr("palette.abort.all"),
+        category: tr("palette.category.action"),
         icon: CircleStop,
         shortcut: "Ctrl+Shift+C",
         keywords: ["stop", "abort", "ていし"],
@@ -2972,8 +2968,8 @@ ${command}
       },
       {
         id: "feedback.open",
-        label: "フィードバックを送る",
-        category: "ヘルプ",
+        label: tr("palette.feedback.open"),
+        category: tr("palette.category.help"),
         icon: HelpCircle,
         run: () => {
           setFeedbackVisible(true);
@@ -2983,9 +2979,9 @@ ${command}
       },
       {
         id: "walkthrough.replay",
-        label: "セットアップを再生（Walkthrough）",
-        category: "ヘルプ",
-        description: "Claude / Codex のログイン手順をもう一度やり直す",
+        label: tr("palette.walkthrough.replay"),
+        category: tr("palette.category.help"),
+        description: tr("palette.walkthrough.replay.desc"),
         icon: Sparkles,
         keywords: ["walkthrough", "tutorial", "onboarding", "オンボ"],
         run: () => {
@@ -2995,8 +2991,8 @@ ${command}
       },
       {
         id: "whatsnew.show",
-        label: `What's New を表示（v${UNICREW_VERSION}）`,
-        category: "ヘルプ",
+        label: tr("palette.whatsnew.show", { version: UNICREW_VERSION }),
+        category: tr("palette.category.help"),
         icon: Sparkles,
         keywords: ["whats new", "release", "リリース", "新機能"],
         run: () => {
@@ -3006,9 +3002,9 @@ ${command}
       },
       {
         id: "trust.list",
-        label: "信頼済フォルダを確認",
-        category: "ヘルプ",
-        description: "Workspace Trust で許可済のフォルダ一覧を表示",
+        label: tr("palette.trust.list"),
+        category: tr("palette.category.help"),
+        description: tr("palette.trust.list.desc"),
         icon: HelpCircle,
         keywords: ["trust", "trusted", "workspace", "信頼"],
         run: async () => {
@@ -3016,18 +3012,17 @@ ${command}
             m.listTrustedWorkspaces(),
           );
           if (list.length === 0) {
-            alert("信頼済フォルダはありません。");
+            alert(tr("page.alert.noTrustedFolders"));
           } else {
-            alert(`信頼済フォルダ:\n\n${list.join("\n")}`);
+            alert(tr("page.alert.trustedFoldersList", { list: list.join("\n") }));
           }
         },
       },
       {
         id: "otel.status",
-        label: "観測（OTel）の状態を確認",
-        category: "ヘルプ",
-        description:
-          "OpenTelemetry エンドポイントが設定されているか・送信状態を表示",
+        label: tr("palette.otel.status"),
+        category: tr("palette.category.help"),
+        description: tr("palette.otel.status.desc"),
         icon: HelpCircle,
         keywords: ["otel", "observability", "telemetry", "観測", "ログ"],
         run: async () => {
@@ -3035,17 +3030,20 @@ ${command}
             m.observabilityStatus(),
           );
           alert(
-            `OTel 観測性\n\n状態: ${s.active ? "有効" : "未設定"}\n` +
-              `endpoint: ${s.endpoint ?? "（未設定）"}\n\n${s.note}\n\n` +
-              `※ Phase 1: フックは動きますが、OTLP 実送信は依存追加後（次のリリース）に有効化されます。\n` +
-              `endpoint を設定するには env OTEL_EXPORTER_OTLP_ENDPOINT を入れて UNICREW を再起動してください。`,
+            tr("page.alert.otelStatus", {
+              state: s.active
+                ? tr("page.alert.otelActive")
+                : tr("page.alert.otelInactive"),
+              endpoint: s.endpoint ?? tr("page.alert.otelEndpointUnset"),
+              note: s.note,
+            }),
           );
         },
       },
       {
         id: "github.open",
-        label: "GitHub リポジトリを開く",
-        category: "ヘルプ",
+        label: tr("palette.github.open"),
+        category: tr("palette.category.help"),
         icon: Github,
         run: () =>
           window.open(
@@ -3055,8 +3053,8 @@ ${command}
       },
       {
         id: "issues.open",
-        label: "問題を報告（GitHub Issues）",
-        category: "ヘルプ",
+        label: tr("palette.issues.open"),
+        category: tr("palette.category.help"),
         icon: Bug,
         run: () =>
           window.open(
@@ -3071,8 +3069,8 @@ ${command}
     for (const team of teams) {
       list.push({
         id: `team.${team.id}`,
-        label: `チーム: ${team.name}`,
-        category: "チーム",
+        label: tr("palette.team.prefix", { name: team.name }),
+        category: tr("palette.category.team"),
         icon: Workflow,
         run: () => {
           setMainView("chat");
@@ -3087,8 +3085,8 @@ ${command}
       for (const ch of chars) {
         list.push({
           id: `char.${ch.id}`,
-          label: `キャラ切替: ${ch.name}`,
-          category: "キャラ",
+          label: tr("palette.character.prefix", { name: ch.name }),
+          category: tr("palette.category.character"),
           description: ch.roleTag,
           icon: IconUser,
           run: () => {
@@ -3099,18 +3097,18 @@ ${command}
     }
 
     // 既存スレッドへ移動
-    for (const t of threads) {
+    for (const th of threads) {
       list.push({
-        id: `thread.go.${t.id}`,
-        label: `スレッド: ${t.title}`,
-        category: "スレッド",
-        description: getCharacter(t.characterId)?.name ?? undefined,
+        id: `thread.go.${th.id}`,
+        label: tr("palette.thread.prefix", { title: th.title }),
+        category: tr("palette.category.thread"),
+        description: getCharacter(th.characterId)?.name ?? undefined,
         icon: MessageSquare,
         run: () => {
           setMainView("chat");
-          handleSidebarSelect(t.id);
+          handleSidebarSelect(th.id);
         },
-        enabled: t.id !== activeId,
+        enabled: th.id !== activeId,
       });
     }
 
@@ -3120,10 +3118,10 @@ ${command}
   const menuDefs: MenuDef[] = [
     {
       id: "file",
-      label: "ファイル",
+      label: tr("menu.file"),
       items: [
         {
-          label: "新しい会話",
+          label: tr("menu.file.new"),
           shortcut: "Ctrl+N",
           onSelect: () => {
             setMainView("chat");
@@ -3131,7 +3129,7 @@ ${command}
           },
         },
         {
-          label: "ワークスペースを開く…",
+          label: tr("menu.file.openWorkspace"),
           onSelect: () => {
             void handleChangeWorkspace();
           },
@@ -3147,25 +3145,25 @@ ${command}
         })),
         { divider: true },
         {
-          label: "JSONからチームをインポート…",
+          label: tr("menu.file.importTeamJson"),
           onSelect: () => handleImportTeamJson(),
         },
         { divider: true },
         {
-          label: "UNI 製品 MCP 一括接続…",
+          label: tr("menu.file.uniMcp"),
           onSelect: () => setUniMcpOpen(true),
         },
         {
-          label: "ルーティーン（毎日定期実行）…",
+          label: tr("menu.file.routines"),
           onSelect: () => setRoutinesOpen(true),
         },
         {
-          label: "スマホ連携（リモコン）…",
+          label: tr("menu.file.mobile"),
           onSelect: () => setMobileOpen(true),
         },
         { divider: true },
         {
-          label: "設定…",
+          label: tr("menu.file.settings"),
           shortcut: "Ctrl+,",
           onSelect: () => setSettingsOpen(true),
         },
@@ -3173,20 +3171,20 @@ ${command}
     },
     {
       id: "edit",
-      label: "編集",
+      label: tr("menu.edit"),
       items: [
         {
-          label: "コピー",
+          label: tr("menu.edit.copy"),
           shortcut: "Ctrl+C",
           onSelect: () => document.execCommand("copy"),
         },
         {
-          label: "貼り付け",
+          label: tr("menu.edit.paste"),
           shortcut: "Ctrl+V",
           onSelect: () => document.execCommand("paste"),
         },
         {
-          label: "すべて選択",
+          label: tr("menu.edit.selectAll"),
           shortcut: "Ctrl+A",
           onSelect: () => document.execCommand("selectAll"),
         },
@@ -3194,22 +3192,27 @@ ${command}
     },
     {
       id: "view",
-      label: "表示",
+      label: tr("menu.view"),
       items: [
         {
-          label: mainView === "chat" ? "会話表示（現在）" : "会話表示に切替",
+          label:
+            mainView === "chat"
+              ? tr("menu.view.chatCurrent")
+              : tr("menu.view.chatSwitch"),
           onSelect: () => setMainView("chat"),
         },
         {
           label:
-            mainView === "addons" ? "機能の追加（現在）" : "機能の追加を開く",
+            mainView === "addons"
+              ? tr("menu.view.addonsCurrent")
+              : tr("menu.view.addonsOpen"),
           onSelect: () => setMainView("addons"),
         },
         { divider: true },
         {
           label: settings.beginnerMode
-            ? "初心者モード ON（クリックで OFF）"
-            : "初心者モード OFF（クリックで ON）",
+            ? tr("menu.view.beginnerOn")
+            : tr("menu.view.beginnerOff"),
           onSelect: () => {
             const next = !(settings.beginnerMode ?? true);
             const updated = {
@@ -3225,13 +3228,13 @@ ${command}
     },
     {
       id: "window",
-      label: "ウィンドウ",
+      label: tr("menu.window"),
       items: [
         {
           label:
             splitIds.length > 0
-              ? `並列ペインを全て閉じる（現在 ${splitIds.length}）`
-              : "並列ペインを開く",
+              ? tr("palette.split.closeAll", { count: splitIds.length })
+              : tr("palette.split.open"),
           onSelect: () => {
             if (splitIds.length > 0) handleCloseSplitPane();
             else handleOpenSplitPane();
@@ -3239,13 +3242,13 @@ ${command}
         },
         {
           label: taskQueueOpen
-            ? "タスクキューを隠す"
-            : "タスクキューを表示",
+            ? tr("palette.queue.hide")
+            : tr("palette.queue.show"),
           onSelect: () => setTaskQueueOpen((v) => !v),
         },
         { divider: true },
         {
-          label: "全スレッドを停止",
+          label: tr("palette.abort.all"),
           shortcut: "Ctrl+Shift+C",
           onSelect: () => handleAbortAll(),
         },
@@ -3253,10 +3256,10 @@ ${command}
     },
     {
       id: "help",
-      label: "ヘルプ",
+      label: tr("menu.help"),
       items: [
         {
-          label: "フィードバックを送る…",
+          label: tr("menu.help.feedback"),
           onSelect: () => {
             setFeedbackVisible(true);
             markFeedbackShown();
@@ -3265,7 +3268,7 @@ ${command}
         },
         { divider: true },
         {
-          label: "GitHub リポジトリを開く",
+          label: tr("menu.help.github"),
           onSelect: () =>
             window.open(
               "https://github.com/takayukiyukii-commits/unicrew",
@@ -3273,7 +3276,7 @@ ${command}
             ),
         },
         {
-          label: "問題を報告（Issues）",
+          label: tr("menu.help.issues"),
           onSelect: () =>
             window.open(
               "https://github.com/takayukiyukii-commits/unicrew/issues",
@@ -3282,11 +3285,9 @@ ${command}
         },
         { divider: true },
         {
-          label: "バージョン情報",
+          label: tr("menu.help.version"),
           onSelect: () => {
-            alert(
-              "UNICREW v0.1.0\nあなた専属のAIチームを、5分で。\n\nClaude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。\n\n© 2026 ZUBOLAND / uniLinks",
-            );
+            alert(tr("page.alert.versionInfo"));
           },
         },
       ],
@@ -3351,12 +3352,12 @@ ${command}
             <div className="max-w-5xl mx-auto px-6 py-8">
               <header className="mb-6">
                 <h1 className="text-[22px] font-bold tracking-tight">
-                  機能の追加
+                  {tr("page.addons.title")}
                 </h1>
                 <p className="text-[13px] text-[var(--color-muted)] mt-1 leading-relaxed">
-                  Claude / Codex のプラグイン・スキル・MCP を一覧して、1クリックで追加できます。
+                  {tr("page.addons.subtitle1")}
                   <br />
-                  ローカルにある実物（installed_plugins.json / ~/.claude/skills/ / ~/.codex/config.toml）と marketplace 全件を表示します。
+                  {tr("page.addons.subtitle2")}
                 </p>
               </header>
               <AddonsSection
@@ -3401,7 +3402,7 @@ ${command}
               onClick={() => {
                 if (activeThread) setFocusedThreadId(activeThread.id);
               }}
-              title="クリックでこのペインを編集対象に指定"
+              title={tr("page.pane.focusHint")}
             >
               <ChatPane
                 thread={activeThread}
@@ -3479,7 +3480,7 @@ ${command}
                     : "ring-0 cursor-pointer"
                 }`}
                 onClick={() => setFocusedThreadId(t.id)}
-                title="クリックでこのペインを編集対象に指定"
+                title={tr("page.pane.focusHint")}
               >
                 <ChatPane
                   thread={t}
@@ -3521,7 +3522,7 @@ ${command}
               onClick={() => {
                 if (showSplit && activeThread) setFocusedThreadId(activeThread.id);
               }}
-              title={showSplit ? "クリックでこのペインを編集対象に指定" : undefined}
+              title={showSplit ? tr("page.pane.focusHint") : undefined}
             >
               <ChatPane
                 thread={activeThread}
@@ -3606,7 +3607,7 @@ ${command}
                       : "ring-0"
                   }`}
                   onClick={() => setFocusedThreadId(splitThread.id)}
-                  title="クリックでこのペインを編集対象に指定"
+                  title={tr("page.pane.focusHint")}
                 >
                   <ChatPane
                     thread={splitThread}
@@ -3706,10 +3707,10 @@ ${command}
         >
           <span className="font-semibold">
             {graphifyStatus.state === "updating"
-              ? "ナレッジ更新中…"
+              ? tr("page.graphify.updating")
               : graphifyStatus.state === "done"
-              ? "ナレッジ更新完了"
-              : "graphify 失敗"}
+              ? tr("page.graphify.done")
+              : tr("page.graphify.failed")}
           </span>
           {graphifyStatus.message && (
             <span className="text-[10.5px] opacity-80 truncate max-w-[300px]">
@@ -3745,6 +3746,18 @@ ${command}
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         commands={paletteCommands}
+      />
+      <LanguagePickerModal
+        open={languagePickerOpen}
+        onClose={() => {
+          setLanguagePickerOpen(false);
+          // 言語ピッカー閉じた後に既存の初回フロー（Walkthrough）へ
+          if (!isWalkthroughDone()) {
+            setWalkthroughOpen(true);
+          } else if (shouldShowWhatsNew()) {
+            setWhatsNewOpen(true);
+          }
+        }}
       />
       <Walkthrough
         open={walkthroughOpen}

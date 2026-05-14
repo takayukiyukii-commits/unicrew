@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Terminal, Check, X as XIcon, Loader2 } from "lucide-react";
 import type { Block, Message, ToolUseBlock } from "@/lib/types";
+import { useTranslation, t as translate } from "@/lib/i18n";
 
 interface Props {
   messages: Message[];
@@ -45,7 +46,7 @@ function summarize(toolName: string, input: Record<string, unknown>): string {
       return String(i.query ?? "");
     case "TodoWrite": {
       const todos = Array.isArray(i.todos) ? (i.todos as unknown[]) : [];
-      return `${todos.length} 件のタスク`;
+      return translate("activity.todoCount", { count: todos.length });
     }
     default:
       return JSON.stringify(i).slice(0, 160);
@@ -68,6 +69,7 @@ export function ActivityPanel({
   draftBlocks = [],
   maxHeightPx = 220,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(true);
 
   const entries: Entry[] = useMemo(() => {
@@ -117,16 +119,16 @@ export function ActivityPanel({
         className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5"
       >
         <Terminal size={12} className="text-emerald-400" />
-        <span className="font-semibold">ターミナル / アクティビティ</span>
+        <span className="font-semibold">{t("activity.title")}</span>
         <span className="text-slate-500 flex items-center gap-1">
-          <span>{entries.length} 件</span>
+          <span>{t("activity.entries", { count: entries.length })}</span>
           <span aria-hidden="true">・</span>
-          <Check size={11} className="inline" aria-label="完了" />
+          <Check size={11} className="inline" aria-label={t("activity.completedAria")} />
           <span>{completedCount}</span>
           {runningCount > 0 && (
             <>
               <span aria-hidden="true">・</span>
-              <Loader2 size={11} className="inline animate-spin" aria-label="実行中" />
+              <Loader2 size={11} className="inline animate-spin" aria-label={t("activity.runningAria")} />
               <span>{runningCount}</span>
             </>
           )}

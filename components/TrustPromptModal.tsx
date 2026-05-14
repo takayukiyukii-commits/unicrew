@@ -1,6 +1,7 @@
 "use client";
 
 import { ShieldAlert, FolderOpen, X, Lock, ShieldCheck } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -26,12 +27,13 @@ export function TrustPromptModal({
   onRestricted,
   onCancel,
 }: Props) {
+  const { t } = useTranslation();
   if (!open || !path) return null;
   return (
     <div
       className="fixed inset-0 z-[58] flex items-center justify-center bg-black/45 p-4"
       role="dialog"
-      aria-label="Workspace Trust"
+      aria-label={t("trust.dialogLabel")}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
@@ -41,13 +43,13 @@ export function TrustPromptModal({
           <div className="flex items-center gap-2">
             <ShieldAlert size={16} className="text-amber-600" />
             <div className="text-[14px] font-semibold">
-              このフォルダ内のファイルを信頼しますか？
+              {t("trust.title")}
             </div>
           </div>
           <button
             onClick={onCancel}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
-            title="キャンセル"
+            title={t("trust.cancelHint")}
           >
             <X size={14} />
           </button>
@@ -58,10 +60,9 @@ export function TrustPromptModal({
             <code className="text-[12px] truncate font-mono">{path}</code>
           </div>
           <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">
-            UNICREW は AI に「このフォルダで作業させる」ことができます。
-            知らないフォルダや、ダウンロードしたばかりのコードは念のため
-            <strong className="text-[var(--color-text)]"> 制限モード </strong>
-            で開いてください。
+            {t("trust.bodyA")}
+            <strong className="text-[var(--color-text)]"> {t("trust.bodyB")} </strong>
+            {t("trust.bodyC")}
           </p>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col gap-2">
@@ -70,20 +71,20 @@ export function TrustPromptModal({
             className="w-full flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 text-white py-2 text-[13px] font-medium hover:bg-emerald-700"
           >
             <ShieldCheck size={14} />
-            信頼する（このフォルダ）
+            {t("trust.trustCta")}
           </button>
           <button
             onClick={onRestricted}
             className="w-full flex items-center justify-center gap-1.5 rounded-md bg-white border border-[var(--color-border)] text-[var(--color-text)] py-2 text-[13px] hover:bg-[var(--color-surface)]"
           >
             <Lock size={14} />
-            制限モードで開く（書込みを促さない）
+            {t("trust.restrictedCta")}
           </button>
           <button
             onClick={onCancel}
             className="w-full text-[11.5px] text-[var(--color-muted)] hover:text-[var(--color-text)] py-1"
           >
-            キャンセル
+            {t("trust.cancelCta")}
           </button>
         </div>
       </div>

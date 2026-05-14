@@ -25,8 +25,17 @@ import type { Character, Provider } from "@/lib/types";
 import { PROVIDER_LABELS } from "@/lib/types";
 import { CategoryDot } from "@/lib/providerVisuals";
 import { CharacterAvatar } from "./CharacterAvatar";
+import { useTranslation } from "@/lib/i18n";
 
-const NORMAL_TEMPLATE_IDS = new Set(["tmpl-claude-normal", "tmpl-codex-normal"]);
+// 「normal」テンプレ群（素のCLIをそのまま起動するキャラ）。これらは自身の provider 固定で、
+// 上部の「どのAIで起動」タブの影響を受けない。タブの影響を受けるのは tmpl-auto 以下の人格テンプレ。
+const NORMAL_TEMPLATE_IDS = new Set([
+  "tmpl-claude-normal",
+  "tmpl-codex-normal",
+  "tmpl-opencode-normal",
+  "tmpl-qwen-normal",
+  "tmpl-kimi-normal",
+]);
 const isNormalTemplate = (t: Character) => NORMAL_TEMPLATE_IDS.has(t.id);
 
 /** AI タブで切替えるプロバイダの順番。Gemini は将来対応のため UI には出すがオプショナル。 */
@@ -68,6 +77,7 @@ export function CharacterPickerModal({
   onCreateNew,
   onCloneTemplate,
 }: Props) {
+  const { t: tr } = useTranslation();
   const [userChars, setUserChars] = useState<Character[]>([]);
   const [step, setStep] = useState<Step>("claude");
   const [firstClaudeId, setFirstClaudeId] = useState<string | null>(null);
@@ -122,16 +132,16 @@ export function CharacterPickerModal({
   };
 
   const headerTitle = !splitMode
-    ? "新しい会話"
+    ? tr("character.picker.newConversation")
     : step === "claude"
-      ? "🟠 Claude 側のキャラクター"
-      : "🟢 Codex 側のキャラクター";
+      ? tr("character.picker.claudeSideTitle")
+      : tr("character.picker.codexSideTitle");
 
   const headerSub = !splitMode
-    ? "モードを選んでそのまま開始 / もしくはキャラを選択（任意）"
+    ? tr("character.picker.singleSub")
     : step === "claude"
-      ? "並列モードではキャラクターを 2つ 選択してください ・ ステップ 1 / 2"
-      : "もう1つ選択してください ・ ステップ 2 / 2";
+      ? tr("character.picker.splitStep1Sub")
+      : tr("character.picker.splitStep2Sub");
 
   // splitモード中はクローン編集フローを通せないので「直接ピック」に切替
   const handleTemplateClick = (t: Character) => {
@@ -193,15 +203,15 @@ export function CharacterPickerModal({
             >
               <div className="text-[12.5px] font-semibold flex items-center gap-1.5">
                 <User size={13} aria-hidden="true" />
-                <span>単独モード</span>
+                <span>{tr("character.picker.singleMode")}</span>
                 {!splitMode && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white">
-                    選択中
+                    {tr("character.picker.selected")}
                   </span>
                 )}
               </div>
               <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5 leading-relaxed">
-                1人のキャラと会話。Claude 系キャラを選べば Claude 単独、Codex 系なら Codex 単独で動く。
+                {tr("character.picker.singleDesc")}
               </div>
             </button>
             <button
@@ -214,15 +224,15 @@ export function CharacterPickerModal({
               }`}
             >
               <div className="text-[12.5px] font-semibold flex items-center gap-1.5">
-                <span>🟠×🟢 並列モード</span>
+                <span>{tr("character.picker.splitMode")}</span>
                 {splitMode && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white">
-                    選択中
+                    {tr("character.picker.selected")}
                   </span>
                 )}
               </div>
               <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5 leading-relaxed">
-                Claude と Codex に別人格を割当て、左右で同時実行。CDO×CMO 議論など。
+                {tr("character.picker.splitDesc")}
               </div>
             </button>
           </div>
@@ -240,23 +250,22 @@ export function CharacterPickerModal({
               onChange={(e) => onConferenceModeChange(e.target.checked)}
               className="w-4 h-4"
             />
-            <span className="font-medium">会議モード（AI同士で議論）</span>
+            <span className="font-medium">{tr("character.picker.conferenceLabel")}</span>
             <span className="text-[var(--color-muted)] text-[11.5px]">
-              両AIが互いの回答を読んで批判・改善（最大3ラウンド、足りなければあとから延長可）
+              {tr("character.picker.conferenceHint")}
             </span>
           </label>
           {!splitMode && (
             <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed flex items-start gap-1.5">
               <Lightbulb size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
               <span>
-                Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
-                チャット画面右上の
+                {tr("character.picker.parallelTipA")}
                 <ClipboardList
                   size={11}
                   className="inline-block align-middle mx-1"
                   aria-hidden="true"
                 />
-                アイコンで右ペインに別スレッドを開けます。
+                {tr("character.picker.parallelTipB")}
               </span>
             </div>
           )}
@@ -266,12 +275,12 @@ export function CharacterPickerModal({
             <div className="flex items-center gap-1.5 mb-1.5 px-1">
               <Bot size={14} strokeWidth={1.5} className="text-[var(--color-accent)] shrink-0" aria-hidden="true" />
               <span className="text-[12px] font-semibold text-[var(--color-text)]">
-                このまま開始
+                {tr("character.picker.quickStart")}
               </span>
               <span className="text-[10.5px] text-[var(--color-muted)]">
                 {splitMode
-                  ? "(役割なし・素のClaude × 素のCodex)"
-                  : "(役割づけなし・素のCLI挙動)"}
+                  ? tr("character.picker.quickStartSubSplit")
+                  : tr("character.picker.quickStartSubSingle")}
               </span>
             </div>
             {splitMode ? (
@@ -283,7 +292,7 @@ export function CharacterPickerModal({
                 className="w-full flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[var(--color-accent)] hover:shadow-sm transition text-left"
               >
                 <span className="text-[12.5px] font-semibold text-[var(--color-accent)]">
-                  🟠×🟢 両方並列で開始
+                  {tr("character.picker.startBothParallel")}
                 </span>
                 <span className="ml-auto text-[var(--color-accent)]">→</span>
               </button>
@@ -295,7 +304,7 @@ export function CharacterPickerModal({
                   className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[#dd6b20] hover:shadow-sm transition text-left"
                 >
                   <span className="text-[12.5px] font-semibold text-[#dd6b20]">
-                    🟠 Claude 単独
+                    {tr("character.picker.startClaudeSolo")}
                   </span>
                   <span className="ml-auto text-[#dd6b20] opacity-70">→</span>
                 </button>
@@ -305,16 +314,15 @@ export function CharacterPickerModal({
                   className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-white px-3 py-2 hover:border-[#10a37f] hover:shadow-sm transition text-left"
                 >
                   <span className="text-[12.5px] font-semibold text-[#10a37f]">
-                    🟢 Codex 単独
+                    {tr("character.picker.startCodexSolo")}
                   </span>
                   <span className="ml-auto text-[#10a37f] opacity-70">→</span>
                 </button>
               </div>
             )}
             <p className="text-[11px] text-[var(--color-muted)] mt-1.5 px-1 leading-snug">
-              素の Claude Code / Codex CLI の挙動。プログラミング・調査・要約・自然な対話まで万能。
-              {splitMode &&
-                " 役割づけしたキャラを当てたい場合は下から2つ選んでください。"}
+              {tr("character.picker.quickStartFooter")}
+              {splitMode && tr("character.picker.quickStartFooterSplit")}
             </p>
           </div>
 
@@ -322,14 +330,13 @@ export function CharacterPickerModal({
             <div className="text-[11px] text-[var(--color-muted)] px-1 leading-relaxed flex items-start gap-1.5">
               <Lightbulb size={12} className="shrink-0 mt-0.5" aria-hidden="true" />
               <span>
-                Claude をたくさん並べて作業させたい場合は、単独モードでスレッドを作ってから、
-                チャット画面右上の
+                {tr("character.picker.parallelTipA")}
                 <ClipboardList
                   size={11}
                   className="inline-block align-middle mx-1"
                   aria-hidden="true"
                 />
-                アイコンで右ペインに別スレッドを開けます。
+                {tr("character.picker.parallelTipB")}
               </span>
             </div>
           )}
@@ -340,7 +347,7 @@ export function CharacterPickerModal({
           <div className="mx-5 mt-3 flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)]">
             <Check size={13} className="text-[var(--color-accent)] shrink-0" />
             <span className="text-[11.5px] text-[var(--color-muted)] shrink-0">
-              🟠 Claude:
+              {tr("character.picker.claudeBadge")}
             </span>
             <CharacterAvatar character={firstClaudeChar} size={20} />
             <span className="text-[12.5px] font-medium text-[var(--color-text)] truncate">
@@ -354,7 +361,7 @@ export function CharacterPickerModal({
               className="ml-auto inline-flex items-center gap-1 text-[11px] text-[var(--color-accent)] hover:underline shrink-0"
             >
               <ArrowLeft size={11} />
-              選び直す
+              {tr("character.picker.choose")}
             </button>
           </div>
         )}
@@ -366,9 +373,9 @@ export function CharacterPickerModal({
             <span className="px-2">
               {splitMode
                 ? step === "claude"
-                  ? "🟠 Claude 側のキャラを 1つ 選択（任意）"
-                  : "🟢 Codex 側のキャラを 1つ 選択（任意）"
-                : "もしくは下からキャラを選ぶ（任意）"}
+                  ? tr("character.picker.splitClaudeHeader")
+                  : tr("character.picker.splitCodexHeader")
+                : tr("character.picker.singleHeader")}
             </span>
             <span className="h-px flex-1 bg-[var(--color-border)]" />
           </div>
@@ -378,7 +385,7 @@ export function CharacterPickerModal({
             <section>
               <div className="text-[11px] font-semibold text-[var(--color-muted)] mb-2 uppercase tracking-wide flex items-center gap-1">
                 <Users size={11} />
-                マイキャラクター
+                {tr("character.picker.myCharacters")}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {userChars.map((c) => (
@@ -391,7 +398,7 @@ export function CharacterPickerModal({
                       <CharacterAvatar character={c} size={48} />
                       <div className="min-w-0">
                         <div className="font-semibold text-sm truncate">
-                          {c.name || "（名前未設定）"}
+                          {c.name || tr("character.section.nameless")}
                         </div>
                         <div className="text-[11px] text-[var(--color-muted)] truncate">
                           {c.roleTag || "—"}
@@ -416,19 +423,19 @@ export function CharacterPickerModal({
                 <Sparkles size={24} strokeWidth={1.5} aria-hidden="true" />
               </div>
               <h3 className="font-bold text-[14px] mb-1">
-                自分のキャラクターを作りましょう
+                {tr("character.picker.emptyTitle")}
               </h3>
               <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
-                名前・アバター画像・口調を自由に設定できます。
+                {tr("character.picker.emptyBodyLine1")}
                 <br />
-                ゼロから作るか、テンプレートを元にカスタマイズします。
+                {tr("character.picker.emptyBodyLine2")}
               </p>
               <button
                 onClick={onCreateNew}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
               >
                 <Plus size={13} />
-                ゼロから作る
+                {tr("character.picker.createFromScratch")}
               </button>
             </section>
           )}
@@ -438,7 +445,7 @@ export function CharacterPickerModal({
             <div className="flex items-center justify-between mb-2">
               <div className="text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide flex items-center gap-1">
                 <Sparkles size={11} />
-                {splitMode ? "テンプレート（直接選択）" : "テンプレートから複製"}
+                {splitMode ? tr("character.picker.templatesSplit") : tr("character.picker.templatesSingle")}
               </div>
               {!splitMode && userChars.length > 0 && (
                 <button
@@ -446,19 +453,19 @@ export function CharacterPickerModal({
                   className="flex items-center gap-1 px-2.5 py-1 text-[11px] border border-[var(--color-border)] rounded-md hover:bg-[var(--color-surface)]"
                 >
                   <Plus size={11} />
-                  ゼロから作る
+                  {tr("character.picker.createFromScratch")}
                 </button>
               )}
             </div>
             <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
               {splitMode
-                ? "並列モードではテンプレートをそのまま使います。編集したい場合は単独モードで複製してから戻ってきてください。"
-                : "選ぶと編集画面が開きます。名前・アバター・口調を自分用に変えて保存できます。"}
+                ? tr("character.picker.templatesIntroSplit")
+                : tr("character.picker.templatesIntroSingle")}
             </p>
             {/* AI タブ: 人格テンプレ（CEO/CDO 等）をどの AI で起動するかを切替える。 */}
             <div className="flex items-center gap-1.5 mb-2 flex-wrap">
               <span className="text-[10.5px] text-[var(--color-muted)] uppercase tracking-wide font-semibold">
-                どのAIで起動：
+                {tr("character.picker.launchAi")}
               </span>
               {TEMPLATE_PROVIDER_TABS.map((p) => {
                 const selected = templateProvider === p;
@@ -480,7 +487,7 @@ export function CharacterPickerModal({
                 );
               })}
               <span className="text-[10px] text-[var(--color-muted)] ml-1">
-                ※ ノーマル系はそれぞれの固定AIで起動します
+                {tr("character.picker.normalNote")}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -494,7 +501,7 @@ export function CharacterPickerModal({
                   key={t.id}
                   onClick={() => handleTemplateClick(t)}
                   className="flex items-center gap-2 border border-[var(--color-border)] rounded-md p-2 hover:bg-[var(--color-surface)] transition text-left"
-                  title={`${PROVIDER_LABELS[launchProvider]} で「${t.name}」として起動`}
+                  title={tr("character.picker.tooltip", { provider: PROVIDER_LABELS[launchProvider], name: t.name })}
                 >
                   <CharacterAvatar character={t} size={32} />
                   <div className="flex-1 min-w-0">

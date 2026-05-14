@@ -22,6 +22,7 @@ import {
   startCodexLogin,
 } from "@/lib/tauri";
 import { markWalkthroughDone } from "@/lib/walkthrough";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -50,6 +51,7 @@ const FRESH: StatusSnapshot = { installed: false, logged_in: false, loading: tru
  * Claude/Codex 状態は 1.5 秒間隔でポーリングして自動進行する。
  */
 export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<StepId>(1);
   const [claude, setClaude] = useState<StatusSnapshot>(FRESH);
   const [codex, setCodex] = useState<StatusSnapshot>(FRESH);
@@ -121,7 +123,7 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
     <div
       className="fixed inset-0 z-[55] flex items-center justify-center bg-black/45 p-4"
       role="dialog"
-      aria-label="UNICREW セットアップ"
+      aria-label={t("walkthrough.dialogLabel")}
     >
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-[var(--color-border)] overflow-hidden flex flex-col max-h-[90vh]">
         {/* ヘッダー */}
@@ -130,17 +132,17 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
             <Sparkles size={18} className="text-[var(--color-accent)]" />
             <div>
               <div className="text-[15px] font-bold tracking-tight">
-                ようこそ UNICREW へ
+                {t("walkthrough.title")}
               </div>
               <div className="text-[11.5px] text-[var(--color-muted)]">
-                3 ステップで AI を動かす準備をします
+                {t("walkthrough.subtitle")}
               </div>
             </div>
           </div>
           <button
             onClick={finish}
             className="p-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
-            title="閉じる（あとで設定 扱い）"
+            title={t("walkthrough.closeHint")}
           >
             <X size={16} />
           </button>
@@ -148,16 +150,16 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
 
         {/* ステッパー */}
         <div className="flex items-center gap-2 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-          <StepBadge n={1} active={step === 1} done={claudeReady} label="Claude" />
+          <StepBadge n={1} active={step === 1} done={claudeReady} label={t("walkthrough.step1Label")} />
           <Connector />
           <StepBadge
             n={2}
             active={step === 2}
             done={codexReady || skippedCodex}
-            label="Codex（任意）"
+            label={t("walkthrough.step2Label")}
           />
           <Connector />
-          <StepBadge n={3} active={step === 3} done={false} label="最初のキャラ" />
+          <StepBadge n={3} active={step === 3} done={false} label={t("walkthrough.step3Label")} />
         </div>
 
         {/* ステップ本体 */}
@@ -165,8 +167,8 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
           {step === 1 && (
             <ProviderStep
               icon={<Bot size={18} className="text-orange-600" />}
-              title="Step 1: Claude CLI を準備"
-              description="Anthropic 公式 CLI をインストールして、Claude にログインします。Pro / Max のサブスクリプションをそのまま使えます。"
+              title={t("walkthrough.step1Title")}
+              description={t("walkthrough.step1Body")}
               status={claude}
               busy={claudeBusy}
               onInstall={async () => {
@@ -190,8 +192,8 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
           {step === 2 && (
             <ProviderStep
               icon={<Cpu size={18} className="text-emerald-600" />}
-              title="Step 2: Codex CLI を準備（任意）"
-              description="OpenAI 公式 Codex CLI を入れると、議論モードや並列モードで Claude と Codex を同時に走らせられます。後でも追加可能。"
+              title={t("walkthrough.step2Title")}
+              description={t("walkthrough.step2Body")}
               status={codex}
               busy={codexBusy}
               onInstall={async () => {
@@ -210,7 +212,7 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
                   setCodexBusy("none");
                 }
               }}
-              skipLabel="Codex は後で（スキップ）"
+              skipLabel={t("walkthrough.step2Skip")}
               onSkip={() => setSkippedCodex(true)}
             />
           )}
@@ -218,11 +220,10 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
             <div className="space-y-4">
               <h3 className="text-[15px] font-semibold flex items-center gap-2">
                 <Sparkles size={15} className="text-[var(--color-accent)]" />
-                Step 3: 最初のキャラクターを選ぶ
+                {t("walkthrough.step3Title")}
               </h3>
               <p className="text-[12.5px] text-[var(--color-muted)] leading-relaxed">
-                UNICREW では「キャラクター」が AI の役割と人格をまとめます。
-                テンプレから 1 人選ぶか、コピーしてあなた専用に編集できます。
+                {t("walkthrough.step3Body")}
               </p>
               <button
                 onClick={() => {
@@ -232,14 +233,14 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
                 }}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] text-white py-2.5 text-[13px] font-medium hover:opacity-90 transition"
               >
-                キャラクター選択を開く
+                {t("walkthrough.openPicker")}
                 <ArrowRight size={14} />
               </button>
               <button
                 onClick={finish}
                 className="w-full text-[11.5px] text-[var(--color-muted)] hover:text-[var(--color-text)] py-1"
               >
-                あとで選ぶ（閉じる）
+                {t("walkthrough.skipPicker")}
               </button>
             </div>
           )}
@@ -247,16 +248,13 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
 
         {/* フッター */}
         <div className="px-6 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-[11.5px] text-[var(--color-muted)] bg-[var(--color-surface)]">
-          <span>
-            進捗は自動保存されます。設定 →
-            ヘルプから再表示できます。
-          </span>
+          <span>{t("walkthrough.footer")}</span>
           {step < 3 && (
             <button
               onClick={() => setStep((s) => (Math.min(3, s + 1) as StepId))}
               className="text-[var(--color-accent)] hover:underline"
             >
-              スキップして次へ →
+              {t("walkthrough.skipNext")}
             </button>
           )}
         </div>
@@ -329,6 +327,7 @@ function ProviderStep({
   skipLabel?: string;
   onSkip?: () => void;
 }) {
+  const { t } = useTranslation();
   const installed = status.installed;
   const loggedIn = status.logged_in;
   return (
@@ -343,30 +342,30 @@ function ProviderStep({
 
       <div className="space-y-2">
         <CheckRow
-          label="CLI をインストール済"
+          label={t("walkthrough.cliInstalled")}
           done={installed}
           loading={status.loading}
           actionLabel={
             busy === "installing"
-              ? "インストール中…"
+              ? t("walkthrough.cliInstalling")
               : installed
-                ? "インストール済"
-                : "インストール"
+                ? t("walkthrough.cliInstalledLabel")
+                : t("walkthrough.cliInstall")
           }
           actionDisabled={installed || busy !== "none"}
           actionBusy={busy === "installing"}
           onAction={onInstall}
         />
         <CheckRow
-          label="ログイン済"
+          label={t("walkthrough.loggedIn")}
           done={loggedIn}
           loading={status.loading}
           actionLabel={
             busy === "loggingIn"
-              ? "ブラウザでログイン中…"
+              ? t("walkthrough.loggingIn")
               : loggedIn
-                ? "ログイン済"
-                : "ログイン"
+                ? t("walkthrough.loggedIn")
+                : t("walkthrough.login")
           }
           actionDisabled={!installed || loggedIn || busy !== "none"}
           actionBusy={busy === "loggingIn"}

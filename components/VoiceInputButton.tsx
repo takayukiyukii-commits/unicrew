@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Loader2, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import { getOpenAiApiKey, transcribeAudio } from "@/lib/tauri";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   onTranscribed: (text: string) => void;
@@ -13,6 +14,7 @@ interface Props {
 type Stage = "idle" | "no-key" | "recording" | "transcribing" | "error";
 
 export function VoiceInputButton({ onTranscribed, disabled }: Props) {
+  const { t } = useTranslation();
   const [stage, setStage] = useState<Stage>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -50,9 +52,7 @@ export function VoiceInputButton({ onTranscribed, disabled }: Props) {
   const startRecording = async () => {
     setErrorMsg(null);
     if (stage === "no-key") {
-      setErrorMsg(
-        "OpenAI API キーが未設定です。設定 → 接続 → 音声入力 から登録してください。",
-      );
+      setErrorMsg(t("voice.noKey"));
       return;
     }
     try {
@@ -101,8 +101,8 @@ export function VoiceInputButton({ onTranscribed, disabled }: Props) {
     } catch (e) {
       setErrorMsg(
         e instanceof Error
-          ? `マイクへのアクセスが拒否されました: ${e.message}`
-          : "マイクへのアクセスに失敗しました",
+          ? `${t("voice.micDeniedPrefix")}${e.message}`
+          : t("voice.micFailed"),
       );
       setStage("error");
       setTimeout(() => {
@@ -138,12 +138,12 @@ export function VoiceInputButton({ onTranscribed, disabled }: Props) {
         disabled={disabled || isBusy}
         title={
           stage === "no-key"
-            ? "OpenAI API キーが未設定です（設定から登録してください）"
+            ? t("voice.noKeyTitle")
             : isRec
-              ? "録音停止して書き起こす"
+              ? t("voice.stopAndTranscribe")
               : isBusy
-                ? "書き起こし中…"
-                : "音声入力（マイク）"
+                ? t("voice.transcribing")
+                : t("voice.mic")
         }
         className={clsx(
           "relative w-9 h-9 rounded-md border flex items-center justify-center transition shrink-0",
@@ -171,7 +171,7 @@ export function VoiceInputButton({ onTranscribed, disabled }: Props) {
       </button>
       {isRec && (
         <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md text-[11px] bg-rose-500 text-white font-mono whitespace-nowrap shadow">
-          REC {String(Math.floor(elapsed / 60)).padStart(1, "0")}:
+          {t("voice.recPrefix")} {String(Math.floor(elapsed / 60)).padStart(1, "0")}:
           {String(elapsed % 60).padStart(2, "0")}
         </div>
       )}

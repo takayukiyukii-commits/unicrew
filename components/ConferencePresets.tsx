@@ -18,11 +18,14 @@ import { useState } from "react";
 import { Users, ChevronDown, Lock } from "lucide-react";
 import type { ParticipantSlot, Provider } from "@/lib/types";
 import { CategoryDot } from "@/lib/providerVisuals";
+import { useTranslation, t as tStatic } from "@/lib/i18n";
 
 export interface ConferencePreset {
   id: string;
-  name: string;
-  description: string;
+  /** 表示名の i18n キー（`preset.<id>.name`） */
+  nameKey: string;
+  /** 説明文の i18n キー（`preset.<id>.desc`） */
+  descKey: string;
   /** プリセットを構成する参加者リスト */
   participants: ParticipantSlot[];
   /** 参加に必要な provider 群（このうち未実装が1つでもあれば disabled） */
@@ -36,6 +39,16 @@ export interface ConferencePreset {
   comingSoon?: boolean;
 }
 
+/** 現在の locale で preset の表示名を解決（モジュール外から呼ぶ用） */
+export function presetName(preset: ConferencePreset): string {
+  return tStatic(preset.nameKey);
+}
+
+/** 現在の locale で preset の説明を解決（モジュール外から呼ぶ用） */
+export function presetDescription(preset: ConferencePreset): string {
+  return tStatic(preset.descKey);
+}
+
 /**
  * 全プリセット定義。
  * 上から順に「初心者向け → 上級者向け」。
@@ -43,8 +56,8 @@ export interface ConferencePreset {
 export const CONFERENCE_PRESETS: ConferencePreset[] = [
   {
     id: "preset-classic-3",
-    name: "定番3社議論",
-    description: "Claude / Codex / Gemini が三者三様の視点で意見を出し合う。最初に試すならこれ。",
+    nameKey: "preset.classic3.name",
+    descKey: "preset.classic3.desc",
     participants: [
       { id: "p1", provider: "claude", characterId: "tmpl-claude-normal" },
       { id: "p2", provider: "codex", characterId: "tmpl-codex-normal" },
@@ -55,9 +68,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-four-poles",
-    name: "4極議論（西側3社 × Qwen）",
-    description:
-      "Claude / Codex / Gemini に加え、Apache-2.0 OSS の Qwen Code（Alibaba）を第4極として投入。学習データの偏りが分散して議論が深くなる。Qwen は DASHSCOPE_API_KEY が必要。",
+    nameKey: "preset.fourPoles.name",
+    descKey: "preset.fourPoles.desc",
     participants: [
       { id: "p1", provider: "claude", characterId: "tmpl-claude-normal" },
       { id: "p2", provider: "codex", characterId: "tmpl-codex-normal" },
@@ -69,8 +81,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-code-duel",
-    name: "コードレビュー対決",
-    description: "Claude と Codex の2社で実装案を出し合い、相互レビューする。",
+    nameKey: "preset.codeDuel.name",
+    descKey: "preset.codeDuel.desc",
     participants: [
       { id: "p1", provider: "claude", characterId: "tmpl-claude-normal" },
       { id: "p2", provider: "codex", characterId: "tmpl-codex-normal" },
@@ -80,8 +92,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-uni-marketing",
-    name: "UNI 製品マーケ議論",
-    description: "CMO / CSO / CDO の3役で UNI シリーズの集客・販売・実装を多面検討。",
+    nameKey: "preset.uniMarketing.name",
+    descKey: "preset.uniMarketing.desc",
     participants: [
       { id: "p1", provider: "claude", characterId: "tmpl-cmo" },
       { id: "p2", provider: "claude", characterId: "tmpl-cso" },
@@ -92,8 +104,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-internal-c-suite",
-    name: "Claude 内部対話（C-suite）",
-    description: "Claude を3体並列、それぞれ CDO / CMO / CFO 役で組織会議を再現。",
+    nameKey: "preset.cSuite.name",
+    descKey: "preset.cSuite.desc",
     participants: [
       { id: "p1", provider: "claude", characterId: "tmpl-cdo" },
       { id: "p2", provider: "claude", characterId: "tmpl-cmo" },
@@ -104,9 +116,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-acp-trio",
-    name: "ACP 3社議論",
-    description:
-      "業界標準 ACP に対応する Goose / OpenCode / codex-acp が並列議論。Goose・OpenCode はローカル LLM 可、codex-acp は OPENAI_API_KEY 必須。",
+    nameKey: "preset.acpTrio.name",
+    descKey: "preset.acpTrio.desc",
     participants: [
       { id: "p1", provider: "goose", characterId: "tmpl-claude-normal" },
       { id: "p2", provider: "opencode", characterId: "tmpl-claude-normal" },
@@ -117,9 +128,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-acp-east-west",
-    name: "東西 ACP 議論（米中 OSS）",
-    description:
-      "西側 ACP の OpenCode（sst）と東側 ACP の Kimi（Moonshot AI）に Goose を加えた3エージェント。地域・学習データの違いが議論の幅を広げる。Kimi は事前 OAuth login 必須。",
+    nameKey: "preset.eastWest.name",
+    descKey: "preset.eastWest.desc",
     participants: [
       { id: "p1", provider: "opencode", characterId: "tmpl-opencode-normal" },
       { id: "p2", provider: "kimi", characterId: "tmpl-kimi-normal" },
@@ -130,9 +140,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-kiro-vs-codex",
-    name: "クラウド対決（AWS × OpenAI）",
-    description:
-      "AWS Bedrock backed の Kiro と OpenAI を直接叩く codex-acp、加えて中立な OpenCode を交えた3エージェント議論。",
+    nameKey: "preset.cloudDuel.name",
+    descKey: "preset.cloudDuel.desc",
     participants: [
       { id: "p1", provider: "kiro", characterId: "tmpl-claude-normal" },
       { id: "p2", provider: "codex-acp", characterId: "tmpl-codex-normal" },
@@ -143,9 +152,8 @@ export const CONFERENCE_PRESETS: ConferencePreset[] = [
   },
   {
     id: "preset-fully-free",
-    name: "完全無料議論",
-    description:
-      "OpenCode + ローカル Ollama × 3 人格 + Goose。API 課金 0 円で AI 議論できる究極モード。FreeMode Wizard でセットアップ済の環境で動く。",
+    nameKey: "preset.fullyFree.name",
+    descKey: "preset.fullyFree.desc",
     participants: [
       { id: "p1", provider: "opencode", characterId: "tmpl-opencode-normal" },
       { id: "p2", provider: "opencode", characterId: "tmpl-opencode-normal" },
@@ -194,6 +202,7 @@ export function ConferencePresets({
   availableProviders,
   hideComingSoon = false,
 }: Props) {
+  const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const isAvailable = (preset: ConferencePreset): boolean => {
@@ -210,7 +219,7 @@ export function ConferencePresets({
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--color-text)]">
         <Users size={14} />
-        議論モード — キャストを選ぶ
+        {t("preset.heading")}
       </div>
 
       <div className="space-y-2">
@@ -236,12 +245,12 @@ export function ConferencePresets({
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-semibold text-[12.5px] text-[var(--color-text)]">
-                  {preset.name}
+                  {t(preset.nameKey)}
                 </span>
                 {!enabled && (
                   <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-[var(--color-muted)]">
                     <Lock size={10} />
-                    準備中
+                    {t("preset.comingSoon")}
                   </span>
                 )}
                 <span className="ml-auto inline-flex items-center gap-1">
@@ -249,12 +258,12 @@ export function ConferencePresets({
                     <CategoryDot key={p.id} provider={p.provider} size={7} />
                   ))}
                   <span className="text-[10.5px] text-[var(--color-muted)] ml-1">
-                    {preset.participants.length} 人
+                    {t("preset.participants", { count: preset.participants.length })}
                   </span>
                 </span>
               </div>
               <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-                {preset.description}
+                {t(preset.descKey)}
               </p>
             </button>
           );
@@ -265,11 +274,10 @@ export function ConferencePresets({
       <details className="rounded-xl border border-[var(--color-border)] bg-white">
         <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[12px] text-[var(--color-muted)] hover:bg-[var(--color-surface)] rounded-xl">
           <ChevronDown size={12} />
-          カスタム選択（上級者向け）
+          {t("preset.customSummary")}
         </summary>
         <div className="px-3 pb-3 pt-1 text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-          各カテゴリから個別にプロバイダ・キャラクターを組み合わせる UI は Sprint 2 で実装予定です。
-          現時点ではプリセットからお選びください。
+          {t("preset.customBody")}
         </div>
       </details>
     </div>

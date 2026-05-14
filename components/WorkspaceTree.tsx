@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, FolderOpen } from "lucide-react";
 import { listDirectory, type DirEntry } from "@/lib/tauri";
+import { useTranslation } from "@/lib/i18n";
 
 interface NodeProps {
   entry: DirEntry;
@@ -11,6 +12,7 @@ interface NodeProps {
 }
 
 function TreeNode({ entry, depth, onSelectFile }: NodeProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +75,7 @@ function TreeNode({ entry, depth, onSelectFile }: NodeProps) {
               className="text-[11px] text-[var(--color-muted)] py-1"
               style={{ paddingLeft: 8 + (depth + 1) * 12 + 16 }}
             >
-              読み込み中…
+              {t("workspace.loading")}
             </div>
           )}
           {children?.map((c) => (
@@ -96,6 +98,7 @@ interface Props {
 }
 
 export function WorkspaceTree({ workspace, onSelectFile }: Props) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
 
   useEffect(() => {
@@ -111,7 +114,7 @@ export function WorkspaceTree({ workspace, onSelectFile }: Props) {
   if (!workspace) {
     return (
       <div className="px-3 py-2 text-[11px] text-[var(--color-muted)]">
-        ワークスペースが未選択。
+        {t("workspace.notSelected")}
       </div>
     );
   }
@@ -123,12 +126,12 @@ export function WorkspaceTree({ workspace, onSelectFile }: Props) {
       </div>
       {entries === null && (
         <div className="px-2 py-1 text-[11px] text-[var(--color-muted)]">
-          読み込み中…
+          {t("workspace.loading")}
         </div>
       )}
       {entries?.length === 0 && (
         <div className="px-2 py-1 text-[11px] text-[var(--color-muted)]">
-          空のフォルダです
+          {t("workspace.empty")}
         </div>
       )}
       {entries?.map((e) => (

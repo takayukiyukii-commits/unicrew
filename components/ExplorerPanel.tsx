@@ -3,6 +3,7 @@
 import { FolderOpen, Lock, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { WorkspaceTree } from "./WorkspaceTree";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   workspace: string | null;
@@ -27,6 +28,7 @@ export function ExplorerPanel({
   onSelectFile,
   restricted = false,
 }: Props) {
+  const { t } = useTranslation();
   // 再描画キーを増やすことで WorkspaceTree の useEffect を再走させる
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -34,14 +36,14 @@ export function ExplorerPanel({
     <aside className="w-64 shrink-0 border-r border-[var(--color-border)] bg-white flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
         <div className="text-[11px] uppercase tracking-wider font-semibold text-[var(--color-muted)]">
-          エクスプローラー
+          {t("explorer.title")}
         </div>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => setRefreshKey((k) => k + 1)}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
-            title="再読み込み"
+            title={t("explorer.refresh")}
           >
             <RefreshCw size={12} />
           </button>
@@ -49,7 +51,7 @@ export function ExplorerPanel({
             type="button"
             onClick={onClose}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
-            title="閉じる"
+            title={t("explorer.close")}
           >
             <X size={13} />
           </button>
@@ -60,16 +62,16 @@ export function ExplorerPanel({
         type="button"
         onClick={onPickWorkspace}
         className="mx-3 my-2 flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-white py-1.5 text-[12px] text-[var(--color-text)]"
-        title="表示するワークスペースフォルダを選択"
+        title={t("explorer.pickWorkspaceTitle")}
       >
         <FolderOpen size={13} />
-        {workspace ? "ワークスペース変更" : "フォルダを開く"}
+        {workspace ? t("explorer.changeWorkspace") : t("explorer.openFolder")}
       </button>
 
       {restricted && (
         <div className="mx-3 mb-2 px-2 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-[10.5px] text-amber-800 flex items-center gap-1.5">
           <Lock size={11} className="shrink-0" />
-          <span>制限モード（書込みを促しません）</span>
+          <span>{t("explorer.restricted")}</span>
         </div>
       )}
       <div className="flex-1 min-h-0 overflow-y-auto unicrew-scroll">
@@ -81,8 +83,9 @@ export function ExplorerPanel({
       </div>
 
       <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-[10.5px] text-[var(--color-muted)] leading-snug">
-        ファイルをクリックすると別ウィンドウのエディタで開きます。
-        2つ目以降は同じウィンドウにタブで追加されます。
+        {t("explorer.footerLine1")}
+        <br />
+        {t("explorer.footerLine2")}
       </div>
     </aside>
   );

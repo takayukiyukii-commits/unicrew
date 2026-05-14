@@ -68,6 +68,7 @@ import {
   CATEGORY_DESCRIPTIONS,
   type ProviderCategory,
 } from "@/lib/providerCategories";
+import { useTranslation, type Locale } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -103,6 +104,7 @@ export function SettingsModal({
   forceOpenCategory,
   forceOpenAccordionKey,
 }: Props) {
+  const { locale, t: tr, setLocale: applyLocale } = useTranslation();
   const [authMode, setAuthMode] = useState<AuthMode>(settings.authMode);
   const [showActivity, setShowActivity] = useState<boolean>(
     settings.showActivity ?? true,
@@ -221,12 +223,12 @@ export function SettingsModal({
         // 完了後にバージョン再取得
         await refreshStatus();
       } catch (e) {
-        setUpdateLine(`エラー: ${e}`);
+        setUpdateLine(`${tr("settings.error")}${e}`);
       } finally {
         setUpdatingCli(null);
       }
     },
-    [refreshStatus],
+    [refreshStatus, tr],
   );
 
   useEffect(() => {
@@ -446,10 +448,11 @@ export function SettingsModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border)]">
-          <h2 className="font-bold text-[15px]">設定</h2>
+          <h2 className="font-bold text-[15px]">{tr("settings.title")}</h2>
           <button
             onClick={onClose}
             className="p-1 hover:bg-[var(--color-surface)] rounded transition"
+            aria-label={tr("common.close")}
           >
             <X size={18} />
           </button>
@@ -457,10 +460,38 @@ export function SettingsModal({
 
         <div className="p-5 space-y-5 overflow-y-auto">
           <section>
-            <h3 className="font-semibold text-sm mb-2">認証方法</h3>
+            <h3 className="font-semibold text-sm mb-2">{tr("settings.language")}</h3>
             <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
-              UNICREW は Claude のサブスクリプション契約（Pro/Max）でも、
-              開発者向けの API キーでも動かせます。
+              {tr("settings.languageHint")}
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {(["ja", "en"] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => applyLocale(l as Locale)}
+                  className={clsx(
+                    "border rounded-xl p-3 text-left transition",
+                    locale === l
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                      : "border-[var(--color-border)] hover:bg-[var(--color-surface)]",
+                  )}
+                >
+                  <div className="font-semibold text-[13px]">
+                    {l === "ja" ? tr("settings.languageJa") : tr("settings.languageEn")}
+                  </div>
+                  <div className="text-[11px] text-[var(--color-muted)] mt-0.5">
+                    {l === "ja" ? tr("settings.languageSubJa") : tr("settings.languageSubEn")}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-sm mb-2">{tr("settings.auth.heading")}</h3>
+            <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
+              {tr("settings.auth.intro")}
             </p>
 
             <div className="grid grid-cols-2 gap-2">
@@ -476,14 +507,14 @@ export function SettingsModal({
                 <div className="flex items-center gap-2 mb-1">
                   <Sparkles size={15} className="text-[var(--color-accent)]" />
                   <span className="font-semibold text-[13px]">
-                    Claude Pro/Max でログイン
+                    {tr("settings.auth.subscriptionTitle")}
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white font-medium">
-                    推奨
+                    {tr("settings.auth.recommendedBadge")}
                   </span>
                 </div>
                 <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-                  既に契約中の Claude プランで動きます。追加課金なし。
+                  {tr("settings.auth.subscriptionDesc")}
                 </p>
               </button>
 
@@ -499,11 +530,11 @@ export function SettingsModal({
                 <div className="flex items-center gap-2 mb-1">
                   <Key size={15} className="text-[var(--color-text)]" />
                   <span className="font-semibold text-[13px]">
-                    API キーで使う
+                    {tr("settings.auth.apikeyTitle")}
                   </span>
                 </div>
                 <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-                  従量課金。組織アカウント・チーム共有向け。
+                  {tr("settings.auth.apikeyDesc")}
                 </p>
               </button>
             </div>
@@ -511,7 +542,7 @@ export function SettingsModal({
 
           {/* ── 接続済みエージェント（カテゴリ accordion） ── */}
           <div className="text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide pt-2">
-            接続済みエージェント
+            {tr("settings.connectedAgents")}
           </div>
 
           {authMode === "subscription" && (
@@ -522,37 +553,37 @@ export function SettingsModal({
               defaultOpen={!status?.installed || !status?.logged_in}
             >
               <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold text-[12.5px]">Claude（公式 CLI）</h4>
+                <h4 className="font-semibold text-[12.5px]">{tr("settings.claude.title")}</h4>
                 <button
                   onClick={refreshStatus}
                   disabled={refreshing}
                   className="text-[11px] text-[var(--color-accent)] hover:underline disabled:opacity-50"
                 >
-                  再確認
+                  {tr("settings.recheck")}
                 </button>
               </div>
 
               {!status ? (
                 <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
                   <Loader2 size={14} className="animate-spin" />
-                  確認中…
+                  {tr("common.checking")}
                 </div>
               ) : (
                 <>
                   <StatusRow
-                    label="Claude Code"
+                    label={tr("settings.statusLabelClaudeCode")}
                     ok={status.installed}
-                    detail={status.version ?? "未インストール"}
+                    detail={status.version ?? tr("settings.notInstalled")}
                   />
                   <StatusRow
-                    label="ログイン状態"
+                    label={tr("settings.statusLabelLogin")}
                     ok={status.logged_in}
                     detail={
                       status.logged_in
-                        ? "ログイン済み"
+                        ? tr("settings.loggedInStatus")
                         : status.installed
-                          ? "未ログイン"
-                          : "Claude のインストールが必要"
+                          ? tr("settings.notLoggedIn")
+                          : tr("settings.claudeInstallRequired")
                     }
                   />
                   {versions?.claude.update_available && (
@@ -568,15 +599,14 @@ export function SettingsModal({
                   {!status.installed && installStage === "idle" && (
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-                        UNICREW が裏で Claude Code を自動インストールします。
-                        ターミナルは開きません。インストールには2〜3分かかります。
+                        {tr("settings.claude.installIntro")}
                       </p>
                       <button
                         onClick={startInstall}
                         className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
                       >
                         <Download size={13} />
-                        Claude Code を自動インストール
+                        {tr("settings.claude.installCta")}
                       </button>
                     </div>
                   )}
@@ -585,7 +615,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <div className="flex items-center gap-2 text-[12px] text-[var(--color-text)] mb-1.5">
                         <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
-                        <span>インストール中… (2〜3分かかります)</span>
+                        <span>{tr("settings.claude.installing")}</span>
                       </div>
                       <div className="bg-white border border-[var(--color-border)] rounded p-2 font-mono text-[10.5px] text-[var(--color-muted)] truncate max-w-full">
                         {installLine || "..."}
@@ -597,7 +627,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                         <CheckCircle2 size={14} />
-                        インストール完了。続けてログインしてください。
+                        {tr("settings.claude.installDone")}
                       </div>
                     </div>
                   )}
@@ -615,15 +645,14 @@ export function SettingsModal({
                   {status.installed && !status.logged_in && loginStage === "idle" && (
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-                        ボタンを押すとブラウザが自動で開きます。
-                        Claude にサインインするだけで完了します。
+                        {tr("settings.claude.loginIntro")}
                       </p>
                       <button
                         onClick={startLogin}
                         className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
                       >
                         <LogIn size={13} />
-                        Claude にログイン
+                        {tr("settings.claude.loginCta")}
                       </button>
                     </div>
                   )}
@@ -634,14 +663,14 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)] space-y-2">
                       <div className="flex items-center gap-2 text-[12px] text-[var(--color-text)]">
                         <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
-                        {loginStage === "starting" && "Claude を準備中…"}
+                        {loginStage === "starting" && tr("settings.claude.preparing")}
                         {loginStage === "waiting_browser" &&
-                          "ブラウザでサインインしてください…"}
-                        {loginStage === "polling" && "ログイン完了を確認中…"}
+                          tr("settings.claude.waitBrowser")}
+                        {loginStage === "polling" && tr("settings.claude.confirmingLogin")}
                       </div>
                       {loginUrl && (
                         <div className="text-[11px] text-[var(--color-muted)] break-all">
-                          ブラウザが開かない場合はこの URL を直接開いてください：
+                          {tr("settings.claude.openUrlHint")}
                           <br />
                           <a
                             href={loginUrl}
@@ -660,7 +689,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                         <CheckCircle2 size={14} />
-                        ログイン完了。さっそく使えます。
+                        {tr("settings.claude.loginDone")}
                       </div>
                     </div>
                   )}
@@ -669,7 +698,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <div className="flex items-center gap-2 text-[12px] text-red-600">
                         <AlertCircle size={14} />
-                        ログインに失敗しました。もう一度お試しください。
+                        {tr("settings.claude.loginFailed")}
                       </div>
                     </div>
                   )}
@@ -678,7 +707,7 @@ export function SettingsModal({
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <p className="text-[11.5px] text-emerald-600 leading-relaxed flex items-center gap-1.5">
                         <CheckCircle2 size={13} />
-                        準備OK。Claude のサブスクリプションで動作します。
+                        {tr("settings.claude.ready")}
                       </p>
                     </div>
                   )}
@@ -695,36 +724,35 @@ export function SettingsModal({
             defaultOpen={false}
           >
             <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-[12.5px]">Codex（公式 CLI）</h4>
+              <h4 className="font-semibold text-[12.5px]">{tr("settings.codex.title")}</h4>
               <button
                 onClick={refreshStatus}
                 disabled={refreshing}
                 className="text-[11px] text-[var(--color-accent)] hover:underline disabled:opacity-50"
               >
-                再確認
+                {tr("settings.recheck")}
               </button>
             </div>
             <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
-              ChatGPT Plus/Pro/Business をお持ちなら、Codex も繋いで使えます（Claude と切替・並列可）。
-              不要なら未接続のままで問題ありません。
+              {tr("settings.codex.intro")}
             </p>
 
             {cxStatus && (
               <>
                 <StatusRow
-                  label="Codex CLI"
+                  label={tr("settings.statusLabelCodexCli")}
                   ok={cxStatus.installed}
-                  detail={cxStatus.version ?? "未インストール"}
+                  detail={cxStatus.version ?? tr("settings.notInstalled")}
                 />
                 <StatusRow
-                  label="ログイン状態"
+                  label={tr("settings.statusLabelLogin")}
                   ok={cxStatus.logged_in}
                   detail={
                     cxStatus.logged_in
-                      ? "ログイン済み"
+                      ? tr("settings.loggedInStatus")
                       : cxStatus.installed
-                        ? "未ログイン"
-                        : "Codex CLI のインストールが必要"
+                        ? tr("settings.notLoggedIn")
+                        : tr("settings.codexInstallRequired")
                   }
                 />
                 {versions?.codex.update_available && (
@@ -740,14 +768,14 @@ export function SettingsModal({
                 {!cxStatus.installed && cxInstallStage === "idle" && (
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-                      npm 経由で公式 CLI をインストールします。ターミナルは開きません。
+                      {tr("settings.codex.installIntro")}
                     </p>
                     <button
                       onClick={startCxInstall}
                       className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
                     >
                       <Download size={13} />
-                      Codex CLI を自動インストール
+                      {tr("settings.codex.installCta")}
                     </button>
                   </div>
                 )}
@@ -755,7 +783,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-[var(--color-text)] mb-1.5">
                       <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
-                      <span>Codex をインストール中…</span>
+                      <span>{tr("settings.codex.installing")}</span>
                     </div>
                     <div className="bg-white border border-[var(--color-border)] rounded p-2 font-mono text-[10.5px] text-[var(--color-muted)] truncate max-w-full">
                       {cxInstallLine || "..."}
@@ -766,7 +794,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                       <CheckCircle2 size={14} />
-                      インストール完了。続けてログインしてください。
+                      {tr("settings.codex.installDone")}
                     </div>
                   </div>
                 )}
@@ -785,14 +813,14 @@ export function SettingsModal({
                   cxLoginStage === "idle" && (
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-                        ボタンを押すとブラウザが開き、ChatGPT サインインで完了します。
+                        {tr("settings.codex.loginIntro")}
                       </p>
                       <button
                         onClick={startCxLogin}
                         className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
                       >
                         <LogIn size={13} />
-                        ChatGPT でログイン
+                        {tr("settings.codex.loginCta")}
                       </button>
                     </div>
                   )}
@@ -802,14 +830,14 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)] space-y-2">
                     <div className="flex items-center gap-2 text-[12px] text-[var(--color-text)]">
                       <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
-                      {cxLoginStage === "starting" && "Codex を準備中…"}
+                      {cxLoginStage === "starting" && tr("settings.codex.preparing")}
                       {cxLoginStage === "waiting_browser" &&
-                        "ブラウザでサインインしてください…"}
-                      {cxLoginStage === "polling" && "ログイン完了を確認中…"}
+                        tr("settings.codex.waitBrowser")}
+                      {cxLoginStage === "polling" && tr("settings.codex.confirmingLogin")}
                     </div>
                     {cxLoginUrl && (
                       <div className="text-[11px] text-[var(--color-muted)] break-all">
-                        ブラウザが開かない場合：
+                        {tr("settings.codex.openUrlHint")}
                         <br />
                         <a
                           href={cxLoginUrl}
@@ -827,7 +855,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-emerald-600">
                       <CheckCircle2 size={14} />
-                      Codex ログイン完了
+                      {tr("settings.codex.loginDone")}
                     </div>
                   </div>
                 )}
@@ -835,7 +863,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-red-600">
                       <AlertCircle size={14} />
-                      ログインに失敗しました。
+                      {tr("settings.codex.loginFailed")}
                     </div>
                   </div>
                 )}
@@ -853,38 +881,37 @@ export function SettingsModal({
             defaultOpen={false}
           >
             <div className="flex items-center justify-between mb-2">
-              <h4 className="font-semibold text-[12.5px]">Gemini（公式 CLI）</h4>
+              <h4 className="font-semibold text-[12.5px]">{tr("settings.gemini.title")}</h4>
               <button
                 onClick={refreshStatus}
                 disabled={refreshing}
                 className="text-[11px] text-[var(--color-accent)] hover:underline disabled:opacity-50"
               >
-                再確認
+                {tr("settings.recheck")}
               </button>
             </div>
             <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-2">
-              Google 公式の <span className="font-mono">@google/gemini-cli</span> が必要です。
-              インストール後は CLI 内で OAuth ログインするか、環境変数 <span className="font-mono">GEMINI_API_KEY</span> をセットすると使えます。
+              {tr("settings.gemini.intro1")}<span className="font-mono">@google/gemini-cli</span>{tr("settings.gemini.intro2")}<span className="font-mono">GEMINI_API_KEY</span>{tr("settings.gemini.intro3")}
             </p>
 
             {gmStatus && (
               <>
                 <StatusRow
-                  label="Gemini CLI"
+                  label={tr("settings.statusLabelGeminiCli")}
                   ok={gmStatus.installed}
-                  detail={gmStatus.version ?? "未インストール"}
+                  detail={gmStatus.version ?? tr("settings.notInstalled")}
                 />
                 <StatusRow
-                  label="認証状態"
+                  label={tr("settings.statusLabelAuth")}
                   ok={gmStatus.logged_in || gmStatus.has_api_key_env}
                   detail={
                     gmStatus.logged_in
-                      ? "OAuth ログイン済み"
+                      ? tr("settings.gemini.oauthLoggedIn")
                       : gmStatus.has_api_key_env
-                        ? "GEMINI_API_KEY 環境変数あり"
+                        ? tr("settings.gemini.envKeyDetected")
                         : gmStatus.installed
-                          ? "未認証（OAuth ログインまたは GEMINI_API_KEY が必要）"
-                          : "Gemini CLI のインストールが必要"
+                          ? tr("settings.gemini.notAuthenticated")
+                          : tr("settings.geminiInstallRequired")
                   }
                 />
 
@@ -892,14 +919,14 @@ export function SettingsModal({
                 {!gmStatus.installed && gmInstallStage === "idle" && (
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
-                      npm 経由で公式 CLI をインストールします。ターミナルは開きません。
+                      {tr("settings.gemini.installIntro")}
                     </p>
                     <button
                       onClick={startGmInstall}
                       className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] bg-[var(--color-accent)] text-white rounded-md hover:opacity-90 font-medium"
                     >
                       <Download size={13} />
-                      Gemini CLI をインストール
+                      {tr("settings.gemini.installCta")}
                     </button>
                   </div>
                 )}
@@ -907,7 +934,7 @@ export function SettingsModal({
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)] mb-1">
                       <Loader2 size={13} className="animate-spin" />
-                      インストール中…
+                      {tr("settings.gemini.installing")}
                     </div>
                     <div className="text-[10.5px] text-[var(--color-muted)] font-mono truncate">
                       {gmInstallLine}
@@ -917,24 +944,24 @@ export function SettingsModal({
                 {gmInstallStage === "done" && (
                   <div className="pt-2 border-t border-[var(--color-border)] text-[12px] text-emerald-600 flex items-center gap-1.5">
                     <CheckCircle2 size={13} />
-                    インストール完了。次は CLI 内で OAuth ログインまたは APIキーを設定してください。
+                    {tr("settings.gemini.installDone")}
                   </div>
                 )}
                 {gmInstallStage === "failed" && (
                   <div className="pt-2 border-t border-[var(--color-border)] text-[12px] text-red-600 flex items-center gap-1.5">
                     <AlertCircle size={13} />
-                    インストールに失敗しました。npm が PATH にあるか確認してください。
+                    {tr("settings.gemini.installFailed")}
                   </div>
                 )}
                 {gmStatus.installed && !gmStatus.logged_in && !gmStatus.has_api_key_env && (
                   <div className="pt-2 border-t border-[var(--color-border)] text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-                    認証方法は2通りあります:
+                    {tr("settings.gemini.authMethodsHint")}
                     <ul className="list-disc pl-4 mt-1 space-y-0.5">
                       <li>
-                        <span className="font-mono">gemini</span> を一度ターミナルから実行 → OAuth ログイン（無料枠あり）
+                        <span className="font-mono">gemini</span>{tr("settings.gemini.authMethod1Post")}
                       </li>
                       <li>
-                        AI Studio で <span className="font-mono">GEMINI_API_KEY</span> を発行 → OS 環境変数にセット
+                        {tr("settings.gemini.authMethod2Pre")}<span className="font-mono">GEMINI_API_KEY</span>{tr("settings.gemini.authMethod2Post")}
                       </li>
                     </ul>
                   </div>
@@ -944,7 +971,7 @@ export function SettingsModal({
             {!gmStatus && (
               <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
                 <Loader2 size={14} className="animate-spin" />
-                確認中…
+                {tr("common.checking")}
               </div>
             )}
           </CategoryAccordion>
@@ -964,8 +991,7 @@ export function SettingsModal({
               {
                 provider: "goose",
                 label: "Goose",
-                description:
-                  "Block 製 OSS。ACP プロトコル対応。Claude/OpenAI/Ollama 等を BYOK or ローカルで動かせる。Windows は winget 公式無しのため手動配置：GitHub Releases から goose-x86_64-pc-windows-msvc.zip を解凍し、goose.exe を %LOCALAPPDATA%\\Programs\\Goose\\goose.exe に置く（配置に詰まったら結城さん→AI に依頼で OK）。",
+                description: tr("settings.acp.goose.desc"),
                 installHelpUrl:
                   "https://github.com/block/goose/releases/latest",
                 kind: "manual",
@@ -973,24 +999,21 @@ export function SettingsModal({
               {
                 provider: "opencode",
                 label: "OpenCode",
-                description:
-                  "sst 製 OSS（MIT）。75+ プロバイダ対応、Ollama 経由で完全無料起動が可能。",
+                description: tr("settings.acp.opencode.desc"),
                 installHelpUrl: "https://opencode.ai/docs/install/",
                 kind: "auto",
               },
               {
                 provider: "ollama",
                 label: "Ollama",
-                description:
-                  "ローカル LLM ランタイム。これがあれば API キーゼロで OpenCode/Goose を動かせる。",
+                description: tr("settings.acp.ollama.desc"),
                 installHelpUrl: "https://ollama.com/download",
                 kind: "auto",
               },
               {
                 provider: "codex-acp",
                 label: "Codex-ACP",
-                description:
-                  "Zed Industries 製 OSS（Apache-2.0）。codex を ACP 経由で動かす。インストールは npm 経由、実行時に環境変数 OPENAI_API_KEY が必要。",
+                description: tr("settings.acp.codexAcp.desc"),
                 installHelpUrl:
                   "https://github.com/zed-industries/codex-acp",
                 kind: "auto",
@@ -998,24 +1021,21 @@ export function SettingsModal({
               {
                 provider: "kiro",
                 label: "Kiro CLI",
-                description:
-                  "AWS 製。AWS Bedrock backed。AWS Builder ID と認証情報が必要（前提が複雑なため、配置や認証に詰まったら AI に丸投げ可）。",
+                description: tr("settings.acp.kiro.desc"),
                 installHelpUrl: "https://kiro.dev/",
                 kind: "manual",
               },
               {
                 provider: "qwen",
                 label: "Qwen Code",
-                description:
-                  "Alibaba QwenLM 製 OSS（Apache-2.0、Claude Code fork）。npm 経由でインストール、実行時に環境変数 DASHSCOPE_API_KEY（Alibaba Cloud Model Studio）が必要。",
+                description: tr("settings.acp.qwen.desc"),
                 installHelpUrl: "https://github.com/QwenLM/qwen-code",
                 kind: "auto",
               },
               {
                 provider: "kimi",
                 label: "Kimi Code CLI",
-                description:
-                  "Moonshot AI 製。ACP ネイティブサポート（kimi acp）。Python 3.12+ と uv が必要なため手動配置：公式インストールスクリプト（code.kimi.com）か `uv tool install kimi-cli`。認証は CLI 側で `/login` を実行（OAuth）。",
+                description: tr("settings.acp.kimi.desc"),
                 installHelpUrl: "https://github.com/moonshotai/kimi-cli",
                 kind: "manual",
               },
@@ -1036,10 +1056,9 @@ export function SettingsModal({
                 }
               >
                 <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed mb-3">
-                  API キー不要・完全無料で動かせる OSS エージェントとローカル LLM ランタイム。
-                  Goose / OpenCode / Ollama の 3 つ揃えると{" "}
-                  <strong>Ollama → OpenCode → UNICREW</strong>{" "}
-                  の無料起動経路が完成します。Codex-ACP / Kiro は議論プリセット用の手動インストール枠です。
+                  {tr("settings.acp.intro")}
+                  <strong>Ollama → OpenCode → UNICREW</strong>
+                  {tr("settings.acp.introMid")}
                 </p>
                 <div className="space-y-2">
                   {acpRows.map((r) => {
@@ -1060,17 +1079,17 @@ export function SettingsModal({
                           {installed ? (
                             <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-600">
                               <CheckCircle2 size={12} />
-                              {version ?? "インストール済み"}
+                              {version ?? tr("settings.acp.installedShort")}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--color-muted)]">
                               <AlertCircle size={12} />
-                              未インストール
+                              {tr("settings.acp.notInstalledShort")}
                             </span>
                           )}
                           {r.kind === "manual" && (
                             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-[var(--color-muted)]">
-                              手動のみ
+                              {tr("settings.acp.manualOnly")}
                             </span>
                           )}
                           <a
@@ -1079,7 +1098,7 @@ export function SettingsModal({
                             rel="noopener noreferrer"
                             className="ml-auto inline-flex items-center gap-1 text-[10.5px] text-[var(--color-accent)] hover:underline"
                           >
-                            {r.kind === "manual" ? "インストール手順" : "手動手順"}
+                            {r.kind === "manual" ? tr("settings.acp.installSteps") : tr("settings.acp.manualSteps")}
                             <ExternalLink size={10} />
                           </a>
                         </div>
@@ -1105,22 +1124,22 @@ export function SettingsModal({
                               )}
                               {installed
                                 ? running
-                                  ? "更新中…"
-                                  : "再インストール"
+                                  ? tr("settings.acp.updating")
+                                  : tr("settings.acp.reinstall")
                                 : running
-                                  ? "インストール中…"
-                                  : "自動インストール"}
+                                  ? tr("settings.acp.installingShort")
+                                  : tr("settings.acp.autoInstall")}
                             </button>
                             {s.stage === "done" && (
                               <span className="text-[10.5px] text-emerald-600 inline-flex items-center gap-1">
                                 <CheckCircle2 size={12} />
-                                完了
+                                {tr("settings.acp.done")}
                               </span>
                             )}
                             {s.stage === "failed" && (
                               <span className="text-[10.5px] text-rose-600 inline-flex items-center gap-1">
                                 <AlertCircle size={12} />
-                                失敗
+                                {tr("settings.acp.failed")}
                               </span>
                             )}
                           </div>
@@ -1137,8 +1156,7 @@ export function SettingsModal({
                   })}
                 </div>
                 <p className="text-[10.5px] text-[var(--color-muted)] italic mt-3">
-                  ※ Windows は winget / 全 OS は npm 経由。macOS/Linux の Goose・Ollama は「手動手順」リンクから。
-                  Codex-ACP は OPENAI_API_KEY、Kiro は AWS Builder ID + 認証が前提です。
+                  {tr("settings.acp.footnote")}
                 </p>
               </CategoryAccordion>
             );
@@ -1146,10 +1164,9 @@ export function SettingsModal({
 
           {authMode === "apikey" && (
             <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
-              <h4 className="font-semibold text-[13px]">Anthropic API キー</h4>
+              <h4 className="font-semibold text-[13px]">{tr("settings.apikey.heading")}</h4>
               <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">
-                キーは OS の Keychain（Windows: Credential Manager / macOS: Keychain）に
-                保存されます。アプリ設定ファイルには平文で保存されません。
+                {tr("settings.apikey.intro")}
               </p>
               <div className="flex items-center gap-2">
                 <div className="flex-1 relative">
@@ -1175,18 +1192,16 @@ export function SettingsModal({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent)] hover:underline"
               >
-                Anthropic Console でAPIキーを取得
+                {tr("settings.apikey.cta")}
                 <ExternalLink size={11} />
               </a>
             </section>
           )}
 
           <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
-            <h4 className="font-semibold text-[13px]">音声入力（任意）</h4>
+            <h4 className="font-semibold text-[13px]">{tr("settings.openaiKey.heading")}</h4>
             <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">
-              マイクボタンで日本語を話すと OpenAI Whisper が書き起こします。
-              キーは OS Keychain に保管され、UNICREW 以外には送信されません。
-              空欄でも他機能は動作します（音声入力だけ無効化）。
+              {tr("settings.openaiKey.intro")}
             </p>
             <div className="flex items-center gap-2">
               <div className="flex-1 relative">
@@ -1212,7 +1227,7 @@ export function SettingsModal({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent)] hover:underline"
             >
-              OpenAI Platform で API キーを取得
+              {tr("settings.openaiKey.cta")}
               <ExternalLink size={11} />
             </a>
           </section>
@@ -1226,7 +1241,7 @@ export function SettingsModal({
           />
 
           <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
-            <h4 className="font-semibold text-[13px]">表示モード</h4>
+            <h4 className="font-semibold text-[13px]">{tr("settings.display.heading")}</h4>
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -1236,11 +1251,10 @@ export function SettingsModal({
               />
               <span className="flex-1">
                 <span className="font-medium">
-                  初心者モード（CLI 用語を完全に隠す・既定）
+                  {tr("settings.display.beginnerTitle")}
                 </span>
                 <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
-                  AI は「コマンド」「ターミナル」等の専門用語を一切使わず、成果物ベースで報告します。
-                  ツール実行の詳細表示も自動で隠されます。<strong>OFF にすると開発者向け表示</strong>になり、ファイル編集・コマンド実行のバブル / ターミナル風パネルが見えるようになります。
+                  {tr("settings.display.beginnerBody1")}<strong>{tr("settings.display.beginnerBodyStrong")}</strong>{tr("settings.display.beginnerBody2")}
                 </span>
               </span>
             </label>
@@ -1259,12 +1273,10 @@ export function SettingsModal({
               />
               <span className="flex-1">
                 <span className="font-medium">
-                  起動時にアドオンの最新版を自動チェック（既定 ON）
+                  {tr("settings.display.autoCheckTitle")}
                 </span>
                 <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
-                  Claude / Codex 本体、Claude プラグイン、git 連携されたスキル・Codex marketplace の最新版を <strong>1 日 1 回</strong> 確認します。
-                  更新があると「機能の追加」ページ上部にバナーが出るので、ボタンで適用できます。
-                  OFF にすると「機能の追加 → アップデート確認」ボタンを押した時だけ走ります。
+                  {tr("settings.display.autoCheckBody1")}<strong>{tr("settings.display.autoCheckBody1Strong")}</strong>{tr("settings.display.autoCheckBody2")}
                 </span>
               </span>
             </label>
@@ -1284,13 +1296,10 @@ export function SettingsModal({
               />
               <span className="flex-1">
                 <span className="font-medium">
-                  検出した更新をバックグラウンドで自動適用（オプトイン・既定 OFF）
+                  {tr("settings.display.autoApplyTitle")}
                 </span>
                 <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
-                  ON にすると、起動時の自動チェックで検出した更新を <strong>確認なしで適用</strong> します。
-                  Claude / Codex 本体は npm 経由で書き換わるため、本番運用に乗せる前に
-                  「機能の追加」ページの自動チェックを 1〜2 回見て安全性を確認してから ON 推奨。
-                  上の「起動時の自動チェック」が OFF だと一緒に無効化されます。
+                  {tr("settings.display.autoApplyBody1")}<strong>{tr("settings.display.autoApplyBody1Strong")}</strong>{tr("settings.display.autoApplyBody2")}
                 </span>
               </span>
             </label>
@@ -1305,51 +1314,38 @@ export function SettingsModal({
 
           <section className="border-t border-[var(--color-border)] pt-4 text-[12px] text-[var(--color-muted)] leading-relaxed">
             <div className="font-semibold text-[var(--color-text)] mb-1">
-              UNICREW について
+              {tr("settings.about.heading")}
             </div>
             <p className="leading-relaxed mb-2">
-              UNICREW は <strong>完全無料</strong> で配布しています。Claude
-              Pro/Max・ChatGPT
-              Plus/Pro のサブスクリプションでそのまま動かせるので、追加の API
-              課金もありません。本命の uniLinks SaaS 群（UNICORE / UNICARTE
-              / UNIDESK ほか）と組み合わせると最大の効果を発揮します。
+              {tr("settings.about.body1Pre")}<strong>{tr("settings.about.body1Strong")}</strong>{tr("settings.about.body1Post")}
             </p>
             <div className="font-semibold text-[var(--color-text)] mb-1 mt-2">
-              開発中のもの
+              {tr("settings.about.inDevHeading")}
             </div>
             <ul className="list-disc pl-4 space-y-0.5">
-              <li>機能の追加: 1クリックインストール / 上級者向けカスタム追加（Phase C）</li>
-              <li>UNI Series ハブ（販売開始タイミングで開放）</li>
-              <li>配布版のコード署名（警告なしのインストール体験）</li>
+              <li>{tr("settings.about.inDev1")}</li>
+              <li>{tr("settings.about.inDev2")}</li>
+              <li>{tr("settings.about.inDev3")}</li>
             </ul>
 
             <div className="font-semibold text-[var(--color-text)] mb-1 mt-4">
-              法的注意
+              {tr("settings.about.legalHeading")}
             </div>
             <p className="leading-relaxed text-[11px]">
-              UNICREW は <strong>Anthropic, PBC</strong> および{" "}
-              <strong>OpenAI, Inc.</strong>{" "}
-              とは無関係の独立したクライアントアプリです。Anthropic / OpenAI
-              の公式ロゴ画像は一切使用していません。
-              UNICREW は両社の公式 CLI（claude / codex）を subprocess
-              として呼び出すランチャーで、サブスクリプションの OAuth
-              トークンには一切触れません（CLI が自前で管理）。
+              {tr("settings.about.legalBody1Pre")}<strong>Anthropic, PBC</strong>{tr("settings.about.legalBody1Mid")}<strong>OpenAI, Inc.</strong>{tr("settings.about.legalBody1Post")}
             </p>
             <ul className="list-disc pl-4 space-y-0.5 mt-1 text-[11px]">
-              <li>Claude / Anthropic は Anthropic, PBC の商標</li>
-              <li>ChatGPT / Codex / GPT は OpenAI, Inc. の商標</li>
-              <li>Gemini は Google LLC の商標</li>
+              <li>{tr("settings.about.trademark1")}</li>
+              <li>{tr("settings.about.trademark2")}</li>
+              <li>{tr("settings.about.trademark3")}</li>
             </ul>
 
             <div className="font-semibold text-[var(--color-text)] mb-1 mt-4">
-              利用 OSS（Apache-2.0）
+              {tr("settings.about.ossHeading")}
             </div>
             <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
               <li>
-                <strong>agent-client-protocol</strong>（Zed 主導の業界標準 ACP）
-                — Goose / OpenCode / Codex-acp / Kiro 等の ACP 対応エージェントとの通信に使用。
-                Copyright 2025 Zed Industries, Inc. and contributors. ライセンス全文は
-                インストール先の <span className="font-mono">THIRD_PARTY_LICENSES/agent-client-protocol/NOTICE.md</span> を参照。
+                <strong>agent-client-protocol</strong>{tr("settings.about.ossBody1")}<span className="font-mono">THIRD_PARTY_LICENSES/agent-client-protocol/NOTICE.md</span>{tr("settings.about.ossBody2")}
               </li>
             </ul>
           </section>
@@ -1360,13 +1356,13 @@ export function SettingsModal({
             onClick={onClose}
             className="px-4 py-2 text-sm rounded-md hover:bg-white transition"
           >
-            キャンセル
+            {tr("settings.footer.cancel")}
           </button>
           <button
             onClick={save}
             className="px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:opacity-90 transition"
           >
-            保存
+            {tr("settings.footer.save")}
           </button>
         </div>
       </div>
@@ -1402,6 +1398,7 @@ function CategoryAccordion({
   forceOpenSignal?: number;
   children: React.ReactNode;
 }) {
+  const { t: tr } = useTranslation();
   const allConnected = totalCount > 0 && connectedCount === totalCount;
   const partial = connectedCount > 0 && connectedCount < totalCount;
   const empty = totalCount === 0;
@@ -1445,10 +1442,10 @@ function CategoryAccordion({
           )}
         >
           {empty
-            ? "Coming soon"
+            ? tr("settings.categoryEmpty")
             : allConnected
-              ? "接続済み"
-              : `${connectedCount} / ${totalCount} 接続`}
+              ? tr("settings.categoryAllConnected")
+              : tr("settings.categoryPartial", { connected: connectedCount, total: totalCount })}
         </span>
         <span className="text-[var(--color-muted)] group-open:rotate-180 transition-transform">
           ▾
@@ -1498,11 +1495,18 @@ function InstallFailedFallback({
   lastLine: string;
   helpUrl: string;
 }) {
+  const { t: tr } = useTranslation();
   const [copied, setCopied] = useState(false);
   const os = detectOs();
   const command = manualInstallCommand(product, os);
   const osLabel =
-    os === "windows" ? "Windows" : os === "mac" ? "macOS" : os === "linux" ? "Linux" : "OS不明";
+    os === "windows" ? "Windows" : os === "mac" ? "macOS" : os === "linux" ? "Linux" : tr("settings.installFail.osUnknown");
+  const shellLabel =
+    os === "mac"
+      ? tr("settings.installFail.shellTerminal")
+      : os === "windows"
+        ? tr("settings.installFail.shellPowershell")
+        : tr("settings.installFail.shellGeneric");
 
   const copyCommand = async () => {
     try {
@@ -1515,15 +1519,15 @@ function InstallFailedFallback({
   };
 
   const sendSupport = () => {
-    const subject = `[UNICREW] ${productLabel} 自動インストール失敗`;
+    const subject = tr("settings.installFail.mailSubject", { productLabel });
     const body =
-      `${productLabel} の自動インストールが失敗しました。サポートをお願いします。\n\n` +
-      `【試した手順】\n自動インストールボタンを押下\n\n` +
-      `【手動コマンド（${osLabel}）】\n${command}\n\n` +
-      `【最後のログ】\n${lastLine || "(ログ取得なし)"}\n\n` +
-      `【環境】\nOS: ${osLabel}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : ""}\nUNICREW: 0.1.0\n\n` +
+      `${tr("settings.installFail.mailIntro", { productLabel })}\n\n` +
+      `${tr("settings.installFail.mailTriedHeader")}\n${tr("settings.installFail.mailTriedBody")}\n\n` +
+      `${tr("settings.installFail.mailCmdHeader", { os: osLabel })}\n${command}\n\n` +
+      `${tr("settings.installFail.mailLogHeader")}\n${lastLine || tr("settings.installFail.mailLogEmpty")}\n\n` +
+      `${tr("settings.installFail.mailEnvHeader")}\nOS: ${osLabel}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : ""}\nUNICREW: 0.1.0\n\n` +
       `――――――――――――――――――――\n` +
-      `※ このメールに画面のスクリーンショットを添付していただけると解決が早いです。\n`;
+      `${tr("settings.installFail.mailScreenshotNote")}\n`;
     const url = `mailto:support@uni-core.jp?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = url;
   };
@@ -1533,13 +1537,13 @@ function InstallFailedFallback({
       <div className="flex items-start gap-2 text-[12px] text-red-600">
         <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
         <span className="leading-relaxed">
-          自動インストールに失敗しました。下のいずれかの方法で続行できます。
+          {tr("settings.installFail.banner")}
         </span>
       </div>
 
       <div className="space-y-1.5">
         <div className="text-[11px] text-[var(--color-muted)] font-medium">
-          ① 手動コマンドで入れる（{osLabel}用）
+          {tr("settings.installFail.manualHeader", { os: osLabel })}
         </div>
         <div className="bg-white border border-[var(--color-border)] rounded p-2 flex items-start gap-2">
           <span className="flex-1 font-mono text-[11px] text-[var(--color-text)] break-all select-all leading-relaxed">
@@ -1549,24 +1553,23 @@ function InstallFailedFallback({
             type="button"
             onClick={copyCommand}
             className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] rounded border border-[var(--color-border)] hover:bg-[var(--color-surface)] text-[var(--color-text)]"
-            title="クリップボードにコピー"
+            title={tr("settings.installFail.copyTitle")}
           >
             {copied ? (
               <>
                 <Check size={11} className="text-emerald-500" />
-                コピー済
+                {tr("settings.installFail.copied")}
               </>
             ) : (
               <>
                 <Copy size={11} />
-                コピー
+                {tr("settings.installFail.copy")}
               </>
             )}
           </button>
         </div>
         <div className="text-[10.5px] text-[var(--color-muted)] leading-relaxed">
-          コマンド画面（{os === "mac" ? "ターミナル" : os === "windows" ? "PowerShell" : "シェル"}）
-          を開いて貼り付け→Enter で実行してください。
+          {tr("settings.installFail.manualHint", { shell: shellLabel })}
         </div>
       </div>
 
@@ -1577,7 +1580,7 @@ function InstallFailedFallback({
           className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11.5px] bg-white border border-[var(--color-border)] rounded-md hover:bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
         >
           <Mail size={12} />
-          ② サポートに送る
+          {tr("settings.installFail.sendSupport")}
         </button>
         <a
           href={helpUrl}
@@ -1586,7 +1589,7 @@ function InstallFailedFallback({
           className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11.5px] bg-white border border-[var(--color-border)] rounded-md hover:bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
         >
           <HelpCircle size={12} />
-          ③ ヘルプを見る
+          {tr("settings.installFail.openHelp")}
           <ExternalLink size={10} className="text-[var(--color-muted)]" />
         </a>
       </div>
@@ -1634,12 +1637,13 @@ function CliUpdateBanner({
   line: string;
   onUpdate: () => void;
 }) {
+  const { t: tr } = useTranslation();
   return (
     <div className="border border-amber-300 bg-amber-50 rounded-md px-3 py-2 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[12px] text-amber-800">
           <AlertCircle size={13} />
-          <span className="font-medium">{info.name} の更新あり</span>
+          <span className="font-medium">{tr("settings.cliUpdate.title", { name: info.name })}</span>
           <span className="font-mono text-[11px] text-amber-700">
             {info.current ?? "—"} → {info.latest ?? "—"}
           </span>
@@ -1653,12 +1657,12 @@ function CliUpdateBanner({
           {busy ? (
             <>
               <Loader2 size={11} className="animate-spin" />
-              更新中…
+              {tr("settings.cliUpdate.updating")}
             </>
           ) : (
             <>
               <Download size={11} />
-              今すぐ更新
+              {tr("settings.cliUpdate.updateNow")}
             </>
           )}
         </button>
@@ -1703,6 +1707,7 @@ function UserProfileSection({
   accentColor: string;
   onChange: (patch: Partial<AppSettings>) => void;
 }) {
+  const { t: tr } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [dragHot, setDragHot] = useState(false);
   const handlePickAvatar = async () => {
@@ -1728,7 +1733,7 @@ function UserProfileSection({
   const handleDropFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       // png/jpg/webp/gif/svg 以外は弾く（Rust 側でも弾くが UI 側のフィードバックを早く返す）
-      alert("画像ファイルをドロップしてください（PNG / JPG / WebP / GIF / SVG）");
+      alert(tr("settings.profile.imageInvalid"));
       return;
     }
     setBusy(true);
@@ -1742,7 +1747,7 @@ function UserProfileSection({
       }
     } catch (e) {
       alert(
-        "画像の保存に失敗しました: " +
+        tr("settings.profile.imageSaveFailed") +
           (e instanceof Error ? e.message : String(e)),
       );
     } finally {
@@ -1751,10 +1756,9 @@ function UserProfileSection({
   };
   return (
     <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
-      <h4 className="font-semibold text-[13px]">あなたのプロフィール</h4>
+      <h4 className="font-semibold text-[13px]">{tr("settings.profile.heading")}</h4>
       <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-        チャット画面でユーザー側に表示されるアバターと名前を変更できます。
-        画像アップロードを優先、無ければ 1 文字＋背景色を表示します。
+        {tr("settings.profile.intro")}
       </p>
       <div className="flex items-center gap-4">
         <div
@@ -1780,31 +1784,31 @@ function UserProfileSection({
               ? "ring-2 ring-[var(--color-accent)] ring-offset-2"
               : ""
           }`}
-          title="画像をドラッグ&ドロップでも変更できます"
+          title={tr("settings.profile.dragHint")}
         >
           <UserAvatar
             avatarPath={avatarPath}
             emoji={emoji}
             accentColor={accentColor}
-            fallbackText={displayName.trim().charAt(0) || "あ"}
+            fallbackText={displayName.trim().charAt(0) || tr("settings.userNameInitial")}
             size={64}
           />
           {dragHot && (
             <div className="absolute inset-0 rounded-full bg-[var(--color-accent)]/20 flex items-center justify-center text-[10px] text-[var(--color-accent)] font-semibold pointer-events-none">
-              Drop
+              {tr("settings.dropLabel")}
             </div>
           )}
         </div>
         <div className="flex-1 min-w-0 space-y-2">
           <label className="block">
             <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
-              表示名
+              {tr("settings.profile.displayName")}
             </span>
             <input
               type="text"
               value={displayName}
               onChange={(e) => onChange({ userDisplayName: e.target.value })}
-              placeholder="あなた"
+              placeholder={tr("settings.profile.namePlaceholder")}
               className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[13px] bg-white outline-none focus:border-[var(--color-accent)]"
             />
           </label>
@@ -1815,7 +1819,7 @@ function UserProfileSection({
               disabled={busy}
               className="px-2.5 py-1 text-[11.5px] rounded-md border border-[var(--color-border)] hover:bg-[var(--color-surface)] disabled:opacity-50"
             >
-              画像を選ぶ
+              {tr("settings.profile.pickImage")}
             </button>
             {avatarPath && (
               <button
@@ -1823,11 +1827,11 @@ function UserProfileSection({
                 onClick={handleClearAvatar}
                 className="px-2.5 py-1 text-[11.5px] rounded-md border border-[var(--color-border)] hover:bg-red-50 text-red-600"
               >
-                画像を外す
+                {tr("settings.profile.clearImage")}
               </button>
             )}
             <span className="text-[10.5px] text-[var(--color-muted)]">
-              またはアバターに画像をドロップ
+              {tr("settings.profile.dropHint")}
             </span>
           </div>
         </div>
@@ -1836,7 +1840,7 @@ function UserProfileSection({
         <div className="grid grid-cols-2 gap-3 pt-1">
           <label className="block">
             <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
-              1 文字 / 絵文字（画像が無い時に表示）
+              {tr("settings.profile.glyphLabel")}
             </span>
             <input
               type="text"
@@ -1845,13 +1849,13 @@ function UserProfileSection({
                 onChange({ userEmoji: e.target.value.slice(0, 4) })
               }
               maxLength={4}
-              placeholder="あ"
+              placeholder={tr("settings.profile.glyphPlaceholder")}
               className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[13px] bg-white outline-none focus:border-[var(--color-accent)] text-center"
             />
           </label>
           <div>
             <span className="block text-[11px] text-[var(--color-muted)] mb-0.5">
-              背景色
+              {tr("settings.profile.bgColor")}
             </span>
             <div className="flex flex-wrap gap-1.5">
               {USER_ACCENT_PRESETS.map((c) => (
@@ -1865,7 +1869,7 @@ function UserProfileSection({
                       : "border-white hover:scale-110"
                   }`}
                   style={{ background: c }}
-                  aria-label={`背景色 ${c}`}
+                  aria-label={tr("settings.profile.bgColorLabel", { color: c })}
                   title={c}
                 />
               ))}
@@ -1894,6 +1898,7 @@ function UnicrewSelfUpdateSection({
 }: {
   currentVersion: string;
 }) {
+  const { t: tr } = useTranslation();
   const [info, setInfo] = useState<UnicrewUpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -1907,7 +1912,7 @@ function UnicrewSelfUpdateSection({
       const r = await checkUnicrewUpdate();
       setInfo(r);
       if (r && !r.available) {
-        setProgress("最新版を使用中です。");
+        setProgress(tr("settings.selfUpdate.upToDate"));
       }
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
@@ -1920,27 +1925,24 @@ function UnicrewSelfUpdateSection({
     if (!info || !info.available) return;
     setInstalling(true);
     setErrorMsg(null);
-    setProgress("ダウンロード開始…");
+    setProgress(tr("settings.selfUpdate.downloadStart"));
     try {
       // DownloadEvent の型は { event: "Started"|"Progress"|"Finished", data?: any }
       await downloadAndInstallUnicrewUpdate(info.__token, (ev) => {
         const e = ev as { event?: string; data?: { chunkLength?: number; contentLength?: number } };
         if (e?.event === "Started") {
-          setProgress(
-            `ダウンロード開始: ${
-              e.data?.contentLength
-                ? Math.round(e.data.contentLength / 1024 / 1024) + "MB"
-                : "サイズ不明"
-            }`,
-          );
+          const size = e.data?.contentLength
+            ? Math.round(e.data.contentLength / 1024 / 1024) + "MB"
+            : tr("settings.selfUpdate.sizeUnknown");
+          setProgress(tr("settings.selfUpdate.downloadStartedSize", { size }));
         } else if (e?.event === "Progress") {
-          setProgress("ダウンロード中…");
+          setProgress(tr("settings.selfUpdate.downloading"));
         } else if (e?.event === "Finished") {
-          setProgress("ダウンロード完了、インストール中…");
+          setProgress(tr("settings.selfUpdate.downloadDone"));
         }
       });
       // ここまで来たら relaunch されているので普通は到達しない
-      setProgress("適用完了。再起動します。");
+      setProgress(tr("settings.selfUpdate.applied"));
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1951,15 +1953,13 @@ function UnicrewSelfUpdateSection({
   return (
     <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
       <h4 className="font-semibold text-[13px] flex items-center gap-1.5">
-        UNICREW 本体のアップデート
+        {tr("settings.selfUpdate.heading")}
         <span className="text-[10.5px] font-mono text-[var(--color-muted)]">
           v{currentVersion}
         </span>
       </h4>
       <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-        ZUBOLAND が GitHub Releases に公開する署名済みインストーラを取得して、UNICREW を最新版に置き換えます。
-        署名は Ed25519（minisign 互換）で検証されるため、第三者が差し替えたバイナリは弾かれます。
-        ダウンロード完了後、自動でアプリが再起動します。
+        {tr("settings.selfUpdate.intro")}
       </p>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -1971,10 +1971,10 @@ function UnicrewSelfUpdateSection({
           {checking ? (
             <>
               <Loader2 size={11} className="animate-spin" />
-              確認中…
+              {tr("settings.selfUpdate.checking")}
             </>
           ) : (
-            "最新版を確認"
+            tr("settings.selfUpdate.checkLatest")
           )}
         </button>
         {info?.available && (
@@ -1987,10 +1987,10 @@ function UnicrewSelfUpdateSection({
             {installing ? (
               <>
                 <Loader2 size={11} className="animate-spin" />
-                インストール中…
+                {tr("settings.selfUpdate.installing")}
               </>
             ) : (
-              <>v{info.version} に更新して再起動</>
+              <>{tr("settings.selfUpdate.installCta", { version: info.version })}</>
             )}
           </button>
         )}
@@ -1998,7 +1998,7 @@ function UnicrewSelfUpdateSection({
       {info?.available && info.body && (
         <details className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">
           <summary className="cursor-pointer text-[var(--color-text)] font-medium">
-            v{info.version} の変更内容を表示
+            {tr("settings.selfUpdate.showChangelog", { version: info.version })}
           </summary>
           <pre className="mt-1 whitespace-pre-wrap text-[11px] bg-[var(--color-surface)] rounded-md p-2 max-h-64 overflow-auto">
             {info.body}
@@ -2012,7 +2012,7 @@ function UnicrewSelfUpdateSection({
       )}
       {errorMsg && (
         <div className="text-[11.5px] text-red-600 leading-relaxed">
-          エラー: {errorMsg}
+          {tr("settings.selfUpdate.error")}{errorMsg}
         </div>
       )}
     </section>

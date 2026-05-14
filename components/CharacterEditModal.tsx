@@ -11,6 +11,7 @@ import type { Character, ModelId, Provider } from "@/lib/types";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { deleteAvatar, pickAndSaveAvatar } from "@/lib/tauri";
 import clsx from "clsx";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -27,6 +28,7 @@ export function CharacterEditModal({
   onSave,
   onDelete,
 }: Props) {
+  const { t } = useTranslation();
   const [c, setC] = useState<Character>(blankCharacter());
   const [uploading, setUploading] = useState(false);
 
@@ -73,7 +75,7 @@ export function CharacterEditModal({
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-border)]">
           <h2 className="font-bold text-[15px]">
-            {initial ? "キャラクターを編集" : "新しいキャラクターを作る"}
+            {initial ? t("character.editTitle") : t("character.newTitle")}
           </h2>
           <button
             onClick={onClose}
@@ -95,7 +97,7 @@ export function CharacterEditModal({
                   className="flex items-center gap-1 px-2 py-1 text-[11px] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface)] disabled:opacity-50"
                 >
                   <Upload size={11} />
-                  画像
+                  {t("character.avatarUpload")}
                 </button>
                 {c.avatarPath && (
                   <button
@@ -103,7 +105,7 @@ export function CharacterEditModal({
                     className="flex items-center gap-1 px-2 py-1 text-[11px] border border-[var(--color-border)] rounded hover:bg-red-50 text-red-500"
                   >
                     <Trash2 size={11} />
-                    削除
+                    {t("character.avatarRemove")}
                   </button>
                 )}
               </div>
@@ -112,34 +114,34 @@ export function CharacterEditModal({
             <div className="flex-1 space-y-3 min-w-0">
               <div>
                 <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1 uppercase tracking-wide">
-                  名前 <span className="text-red-500">*</span>
+                  {t("character.nameLabel")} <span className="text-red-500">*</span>
                 </label>
                 <input
                   value={c.name}
                   onChange={(e) => setField("name", e.target.value)}
-                  placeholder="例：桐生／ミナ／Alex"
+                  placeholder={t("character.namePlaceholder")}
                   className="w-full border border-[var(--color-border)] rounded-md px-3 py-2 text-sm"
                 />
               </div>
               <div>
                 <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1 uppercase tracking-wide">
-                  役割タグ
+                  {t("character.roleLabel")}
                 </label>
                 <input
                   value={c.roleTag}
                   onChange={(e) => setField("roleTag", e.target.value)}
-                  placeholder="例：エンジニア／秘書／ライター"
+                  placeholder={t("character.rolePlaceholder")}
                   className="w-full border border-[var(--color-border)] rounded-md px-3 py-2 text-sm"
                 />
               </div>
               <div>
                 <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1 uppercase tracking-wide">
-                  ひと言紹介
+                  {t("character.descLabel")}
                 </label>
                 <input
                   value={c.description}
                   onChange={(e) => setField("description", e.target.value)}
-                  placeholder="ヘッダーに表示される短い紹介"
+                  placeholder={t("character.descPlaceholder")}
                   className="w-full border border-[var(--color-border)] rounded-md px-3 py-2 text-sm"
                 />
               </div>
@@ -150,15 +152,15 @@ export function CharacterEditModal({
           <section className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-                アイコン（画像が無い時のフォールバック）
+                {t("character.iconLabel")}
               </label>
               <div className="text-[11.5px] text-[var(--color-muted)] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md p-2 leading-relaxed">
-                テンプレートから複製した場合は組み込みアイコン（lucide ラインアート）が自動で割り当てられます。画像をアップロードした場合はそちらが優先されます。
+                {t("character.iconHint")}
               </div>
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-                テーマカラー
+                {t("character.accentLabel")}
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {ACCENT_COLORS.map((color) => (
@@ -182,7 +184,7 @@ export function CharacterEditModal({
           {/* Personality */}
           <section>
             <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-              人格・口調
+              {t("character.personalityLabel")}
             </label>
             <div className="grid grid-cols-3 gap-1.5 mb-2">
               {PERSONALITIES.map((p) => (
@@ -206,7 +208,7 @@ export function CharacterEditModal({
                   {personality.label}：{personality.description}
                 </div>
                 <div className="italic">
-                  例：「{personality.exampleLine}」
+                  {t("character.personalityExample", { line: personality.exampleLine })}
                 </div>
               </div>
             )}
@@ -215,7 +217,7 @@ export function CharacterEditModal({
           {/* Provider */}
           <section>
             <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-              既定プロバイダ
+              {t("character.providerLabel")}
             </label>
             <div className="grid grid-cols-2 gap-1.5 mb-1">
               {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
@@ -240,14 +242,14 @@ export function CharacterEditModal({
               ))}
             </div>
             <p className="text-[10.5px] text-[var(--color-muted)]">
-              スレッドで「並列モード」を使うと、ここの設定に関わらずClaude と Codex の両方が同時に走ります。
+              {t("character.providerHint")}
             </p>
           </section>
 
           {/* Model */}
           <section>
             <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-              既定モデル（Claude時のみ）
+              {t("character.modelLabel")}
             </label>
             <div className="relative">
               <select
@@ -278,18 +280,18 @@ export function CharacterEditModal({
                   size={14}
                   className="transition group-open:rotate-180"
                 />
-                上級者向け：役割の追加指示（systemPrompt）
+                {t("character.advancedSummary")}
               </summary>
               <div className="mt-2">
                 <textarea
                   value={c.systemPrompt}
                   onChange={(e) => setField("systemPrompt", e.target.value)}
                   rows={6}
-                  placeholder="このキャラの専門・思考の癖・避けたい事などを自由記述。空欄でもOK。"
+                  placeholder={t("character.systemPromptPlaceholder")}
                   className="w-full border border-[var(--color-border)] rounded-md px-3 py-2 text-[12.5px] font-mono leading-relaxed"
                 />
                 <p className="text-[11px] text-[var(--color-muted)] mt-1">
-                  ここに書いた指示と上で選んだ「人格・口調」が両方Claude Code に渡されます。
+                  {t("character.systemPromptHint")}
                 </p>
               </div>
             </details>
@@ -303,7 +305,7 @@ export function CharacterEditModal({
                 onClick={() => {
                   if (
                     confirm(
-                      `「${initial.name}」を削除しますか？このキャラを使った会話履歴は残ります。`,
+                      t("character.confirmDelete", { name: initial.name }),
                     )
                   ) {
                     onDelete(initial);
@@ -312,7 +314,7 @@ export function CharacterEditModal({
                 className="flex items-center gap-1 px-3 py-2 text-sm rounded-md text-red-600 hover:bg-red-50"
               >
                 <Trash2 size={13} />
-                削除
+                {t("character.delete")}
               </button>
             )}
           </div>
@@ -323,14 +325,14 @@ export function CharacterEditModal({
                 className="flex items-center gap-1 px-3 py-2 text-sm rounded-md hover:bg-white"
               >
                 <RotateCcw size={13} />
-                リセット
+                {t("character.reset")}
               </button>
             )}
             <button
               onClick={onClose}
               className="px-4 py-2 text-sm rounded-md hover:bg-white transition"
             >
-              キャンセル
+              {t("character.cancel")}
             </button>
             <button
               onClick={() => {
@@ -340,7 +342,7 @@ export function CharacterEditModal({
               disabled={!isValid}
               className="px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition"
             >
-              {initial && !initial.isTemplate ? "更新" : "作成"}
+              {initial && !initial.isTemplate ? t("character.update") : t("character.create")}
             </button>
           </div>
         </div>

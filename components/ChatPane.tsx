@@ -43,6 +43,7 @@ import { CharacterAvatar } from "./CharacterAvatar";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import type { SlashCommandDef } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
+import { useTranslation } from "@/lib/i18n";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -142,6 +143,7 @@ export function ChatPane({
   onSuggestNewThread,
   userProfile,
 }: Props) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -240,11 +242,9 @@ export function ChatPane({
               <Bot size={28} strokeWidth={1.5} className="text-[var(--color-muted)]" />
             </div>
           </div>
-          <h2 className="text-xl font-bold mb-2">UNICREW へようこそ</h2>
-          <p className="text-sm text-[var(--color-muted)] max-w-md">
-            左の「新しい会話」から始めましょう。
-            <br />
-            キャラクターを選んでフォルダを開くと、ローカルで開発・編集ができます。
+          <h2 className="text-xl font-bold mb-2">{t("chat.welcomeTitle")}</h2>
+          <p className="text-sm text-[var(--color-muted)] max-w-md whitespace-pre-line">
+            {t("chat.welcomeBody")}
           </p>
         </div>
       </main>
@@ -264,14 +264,14 @@ export function ChatPane({
           <span className="flex items-center gap-1 text-[11px] text-[var(--color-muted)] truncate">
             <span className="truncate">
               {character.name}
-              <span aria-hidden="true">（</span>
+              <span aria-hidden="true">{t("chat.parallelOpenParen")}</span>
               <CategoryDot provider={character.provider} size={7} className="mr-0.5" />
               <span>{PROVIDER_LABELS[character.provider]}</span>
-              <span aria-hidden="true">）</span>
+              <span aria-hidden="true">{t("chat.parallelCloseParen")}</span>
             </span>
             {personality && (
               <>
-                <span className="text-[var(--color-border)]">／</span>
+                <span className="text-[var(--color-border)]">{t("chat.personalitySep")}</span>
                 <span>{personality.label}</span>
               </>
             )}
@@ -291,20 +291,20 @@ export function ChatPane({
               }`}
               title={
                 peekActive
-                  ? "他ペインの直近会話を [参考情報] として AI に渡しています。クリックでOFF"
-                  : "他ペインの直近会話を AI に見せて送信する（クリックでON）"
+                  ? t("chat.peekActiveTitle")
+                  : t("chat.peekInactiveTitle")
               }
               aria-pressed={peekActive}
             >
-              {peekActive ? "他ペイン参照中" : "他ペイン参照"}
+              {peekActive ? t("chat.peekActive") : t("chat.peekInactive")}
             </button>
           )}
           {onSplit && (
             <button
               onClick={onSplit}
               className="p-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)] transition"
-              title="右に新しいスレッドを開く（並列ペイン）"
-              aria-label="右に新しいスレッドを開く"
+              title={t("chat.splitOpenTitle")}
+              aria-label={t("chat.splitOpenAria")}
             >
               <Columns2 size={14} />
             </button>
@@ -313,8 +313,8 @@ export function ChatPane({
             <button
               onClick={onCloseSplit}
               className="p-1.5 rounded hover:bg-red-50 text-[var(--color-muted)] hover:text-red-500 transition"
-              title="このペインを閉じる"
-              aria-label="このペインを閉じる"
+              title={t("chat.closePaneTitle")}
+              aria-label={t("chat.closePaneAria")}
             >
               <X size={14} />
             </button>
@@ -334,20 +334,20 @@ export function ChatPane({
           {isParallel && (
             <span className="flex items-center gap-1 ml-auto px-1.5 py-0.5 bg-[var(--color-accent-soft)] text-[var(--color-accent)] rounded font-medium">
               <Split size={11} />
-              並列モード（{slots.length}-way：
+              {t("chat.parallelMode")}{t("chat.parallelOpenParen")}{t("chat.parallelWay").replace("{count}", String(slots.length))}{t("chat.parallelColon")}
               {slots.map((s, idx) => (
                 <span key={s.id} className="inline-flex items-center gap-1">
-                  {idx > 0 && <span className="mx-1 text-[var(--color-muted)]">×</span>}
+                  {idx > 0 && <span className="mx-1 text-[var(--color-muted)]">{t("chat.parallelSep")}</span>}
                   <CategoryDot provider={s.provider} size={7} />
                   <span>{PROVIDER_LABELS[s.provider]}</span>
                 </span>
               ))}
-              ）
+              {t("chat.parallelCloseParen")}
             </span>
           )}
           {thread.conferenceMode && (
             <span className="flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded font-medium border border-amber-200">
-              会議モード（最大{thread.conferenceMaxRounds}ラウンド）
+              {t("chat.conferenceMode").replace("{count}", String(thread.conferenceMaxRounds))}
             </span>
           )}
         </div>
@@ -363,7 +363,9 @@ export function ChatPane({
               <CharacterAvatar character={character} size={56} />
             </div>
             <div className="font-medium text-[var(--color-text)] mb-1">
-              {character?.name ?? "Claude"} と話せます
+              {character?.name
+                ? t("chat.canTalkWith").replace("{name}", character.name)
+                : t("chat.canTalkWithDefault")}
             </div>
             <div>{character?.description ?? ""}</div>
           </div>
@@ -419,13 +421,13 @@ export function ChatPane({
           <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-amber-50/60 flex items-center gap-2 text-[12px]">
             <MessageCircle size={13} className="text-amber-600 shrink-0" />
             <span className="text-amber-900">
-              議論をもう1ラウンド続けますか？
+              {t("chat.continueConferenceQuestion")}
             </span>
             <button
               onClick={onContinueConference}
               className="ml-auto px-3 py-1.5 rounded-md bg-amber-600 text-white text-[11.5px] font-medium hover:opacity-90 shrink-0"
             >
-              議論を続ける
+              {t("chat.continueConference")}
             </button>
           </div>
         );
@@ -440,22 +442,21 @@ export function ChatPane({
           <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-sky-50/70 flex items-center gap-2 text-[12px]">
             <Sparkles size={13} className="text-sky-600 shrink-0" />
             <span className="text-sky-900 leading-snug">
-              会話が <span className="font-mono font-semibold">
+              {t("chat.longChatTurnsPrefix")}<span className="font-mono font-semibold">
                 {thread.messages.length}
-              </span>{" "}
-              ターンになりました。トークン消費を抑えるために、新しいスレッドを開いて続きを進めるのがおすすめです。
+              </span>{t("chat.longChatTurnsSuffix")}
             </span>
             <button
               onClick={onSuggestNewThread}
               className="ml-auto px-3 py-1.5 rounded-md bg-sky-600 text-white text-[11.5px] font-medium hover:opacity-90 shrink-0"
             >
-              新しいスレッドを開く
+              {t("chat.openNewThread")}
             </button>
             <button
               onClick={() => setLongChatDismissedFor(thread.id)}
-              title="このスレッドでは表示しない"
+              title={t("chat.dontShowAgainHere")}
               className="shrink-0 p-1 rounded text-sky-700 hover:bg-sky-100"
-              aria-label="閉じる"
+              aria-label={t("chat.close")}
             >
               <X size={12} />
             </button>
@@ -482,7 +483,11 @@ export function ChatPane({
                 send();
               }
             }}
-            placeholder={`${character?.name ?? "Claude"} にメッセージ…  (⌘/Ctrl + Enter で送信)`}
+            placeholder={
+              character?.name
+                ? t("chat.inputPlaceholder").replace("{name}", character.name)
+                : t("chat.inputPlaceholderDefault")
+            }
             rows={1}
             className="flex-1 resize-none bg-transparent outline-none text-sm py-2 leading-relaxed max-h-[200px]"
           />
@@ -503,8 +508,8 @@ export function ChatPane({
               onClick={onAbort}
               title={
                 anyDraftStuck
-                  ? "応答が止まっています。クリックで強制停止"
-                  : "Esc または Ctrl+C で停止"
+                  ? t("chat.abortStuckTitle")
+                  : t("chat.abortNormalTitle")
               }
               className={`shrink-0 px-3 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5 ${
                 anyDraftStuck
@@ -513,7 +518,7 @@ export function ChatPane({
               }`}
             >
               <Square size={14} fill="currentColor" />
-              {anyDraftStuck ? "強制停止" : "停止"}
+              {anyDraftStuck ? t("chat.abortStuckLabel") : t("chat.abortNormalLabel")}
               <span className="hidden md:inline text-[10px] opacity-80 font-mono">
                 Esc
               </span>
@@ -525,12 +530,12 @@ export function ChatPane({
               className="shrink-0 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1.5"
             >
               <Send size={14} />
-              送信
+              {t("chat.send")}
             </button>
           )}
         </div>
         <div className="max-w-4xl mx-auto mt-2 text-[11px] text-[var(--color-muted)] text-center">
-          UNICREW は β 版です。AI の応答とツール実行は誤りを含むことがあります。
+          {t("chat.betaNotice")}
         </div>
       </div>
     </main>
@@ -546,6 +551,7 @@ function PermissionModeBadge({
   mode: PermissionMode;
   onToggle?: () => void;
 }) {
+  const { t } = useTranslation();
   const isPlan = mode === "plan";
   // Plan モードは「読み取り専用で動作中」の注意喚起として色を強める。
   const tone = isPlan
@@ -559,8 +565,8 @@ function PermissionModeBadge({
       type={onToggle ? "button" : undefined}
       title={
         isPlan
-          ? "プランモード：AI は読み取り・分析のみ。Shift+Tab で自動編集に戻す"
-          : "自動編集モード：AI のファイル編集と実行を自動許可。Shift+Tab でプランモードに切替"
+          ? t("chat.permissionPlanTitle")
+          : t("chat.permissionAcceptTitle")
       }
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition ${tone} ${
         onToggle ? "cursor-pointer" : "cursor-default"
@@ -825,6 +831,7 @@ function NwayResponsesRow({
   /** この行が「次ラウンド先出し」の空行か。ヘッダにスピナー＋"応答待ち" を表示する。 */
   pendingNextRound?: boolean;
 }) {
+  const { t } = useTranslation();
   const cols = Math.min(Math.max(slots.length, 1), 6);
   const moderatorMsg = moderatorSlotId
     ? bySlot.get(moderatorSlotId)
@@ -838,13 +845,13 @@ function NwayResponsesRow({
         <div className="px-4 py-1 text-[10.5px] uppercase tracking-wide text-[var(--color-muted)] bg-[var(--color-surface)]/40 border-b border-[var(--color-border)] flex items-center gap-1.5">
           <span>
             {round === 0
-              ? "ラウンド 1：初回回答"
-              : `ラウンド ${round + 1}：相互レビュー`}
+              ? t("chat.roundFirst")
+              : t("chat.roundReview").replace("{n}", String(round + 1))}
           </span>
           {pendingNextRound && (
             <span className="flex items-center gap-1 text-[var(--color-accent)] normal-case tracking-normal">
               <Loader2 size={11} className="animate-spin" aria-hidden="true" />
-              <span>応答待ち…</span>
+              <span>{t("chat.waitingResponse")}</span>
             </span>
           )}
         </div>
@@ -893,6 +900,7 @@ function SlotColumn({
   /** message/draft とも null だが、このラウンドはストリーミング中で「待機中」のとき true */
   isPending?: boolean;
 }) {
+  const { t } = useTranslation();
   const color = PROVIDER_COLORS[slot.provider];
   const label = PROVIDER_LABELS[slot.provider];
   return (
@@ -905,16 +913,16 @@ function SlotColumn({
             <CharacterAvatar character={character} size={16} />
             <span
               className="truncate text-[var(--color-text)] font-semibold"
-              title={`${character.name}（${label}）${character.roleTag ? "・" + character.roleTag : ""}`}
+              title={`${character.name}${t("chat.parallelOpenParen")}${label}${t("chat.parallelCloseParen")}${character.roleTag ? t("chat.providerCharSep") + character.roleTag : ""}`}
             >
               {character.name}
               <span className="text-[var(--color-muted)] font-normal">
-                （
+                {t("chat.parallelOpenParen")}
               </span>
               <CategoryDot provider={slot.provider} size={7} className="mr-0.5" />
               <span style={{ color }}>{label}</span>
               <span className="text-[var(--color-muted)] font-normal">
-                ）
+                {t("chat.parallelCloseParen")}
               </span>
             </span>
           </>
@@ -938,11 +946,11 @@ function SlotColumn({
               className="animate-spin text-[var(--color-accent)] shrink-0"
               aria-hidden="true"
             />
-            <span>{character?.name ?? "—"} の応答を待っています…</span>
+            <span>{t("chat.slotWaiting").replace("{name}", character?.name ?? t("chat.slotPlaceholder"))}</span>
           </div>
         ) : (
           <div className="text-[12px] text-[var(--color-muted)] italic">
-            {character?.name ?? "—"} はまだ応答していません
+            {t("chat.slotNotReplied").replace("{name}", character?.name ?? t("chat.slotPlaceholder"))}
           </div>
         )}
       </div>
@@ -964,6 +972,7 @@ function ModeratorPanel({
   message: Message | null;
   draft: ActiveDraftLite | null;
 }) {
+  const { t } = useTranslation();
   const text =
     message?.content ??
     draft?.blocks
@@ -995,7 +1004,7 @@ function ModeratorPanel({
     <div className="border-t border-amber-200 bg-amber-50/50 px-4 py-2.5 text-[12.5px]">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800 mb-1.5">
         <MessageCircle size={11} />
-        {hasMinutes ? "議論クロージング・議事録" : "中立審判の総括"}
+        {hasMinutes ? t("chat.moderatorMinutesTitle") : t("chat.moderatorSummaryTitle")}
         {draft && <StreamingStatus draft={draft} variant="row" />}
         {parsed && hasMinutes && message && (
           <MinutesActions parsed={parsed} createdAt={message.createdAt} />
@@ -1005,13 +1014,13 @@ function ModeratorPanel({
         <div className="space-y-1.5 text-amber-950">
           {typeof parsed.agreementScore === "number" && (
             <div>
-              <span className="text-amber-700 font-semibold">合意度: </span>
+              <span className="text-amber-700 font-semibold">{t("chat.agreementScore")}</span>
               <span className="font-mono">{parsed.agreementScore}/100</span>
             </div>
           )}
           {parsed.openIssues && parsed.openIssues.length > 0 && (
             <div>
-              <span className="text-amber-700 font-semibold">残論点: </span>
+              <span className="text-amber-700 font-semibold">{t("chat.openIssues")}</span>
               <ul className="list-disc pl-5 mt-0.5">
                 {parsed.openIssues.map((issue, i) => (
                   <li key={i}>{issue}</li>
@@ -1021,7 +1030,7 @@ function ModeratorPanel({
           )}
           {parsed.recommendedActions && parsed.recommendedActions.length > 0 && (
             <div>
-              <span className="text-amber-700 font-semibold">推奨アクション: </span>
+              <span className="text-amber-700 font-semibold">{t("chat.recommendedActions")}</span>
               <ul className="list-disc pl-5 mt-0.5">
                 {parsed.recommendedActions.map((act, i) => (
                   <li key={i}>{act}</li>
@@ -1048,16 +1057,17 @@ function ModeratorPanel({
 }
 
 function MinutesView({ minutes }: { minutes: ModeratorMinutes }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 pt-2 border-t border-amber-200/70 space-y-2">
       {minutes.decisions && minutes.decisions.length > 0 && (
-        <MinutesSection title="決定事項" items={minutes.decisions} />
+        <MinutesSection title={t("chat.minutesDecisions")} items={minutes.decisions} />
       )}
       {minutes.tasks && minutes.tasks.length > 0 && (
-        <MinutesSection title="タスク" items={minutes.tasks} />
+        <MinutesSection title={t("chat.minutesTasks")} items={minutes.tasks} />
       )}
       {minutes.parking && minutes.parking.length > 0 && (
-        <MinutesSection title="保留事項" items={minutes.parking} />
+        <MinutesSection title={t("chat.minutesParking")} items={minutes.parking} />
       )}
     </div>
   );
@@ -1094,6 +1104,7 @@ function MinutesActions({
   parsed: ModeratorJudgement;
   createdAt: number;
 }) {
+  const { t } = useTranslation();
   const buildMarkdown = (): string => {
     const date = new Date(createdAt);
     const ts = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
@@ -1103,39 +1114,39 @@ function MinutesActions({
       date.getHours(),
     ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
     const lines: string[] = [];
-    lines.push(`# 議事録（UNICREW）`);
+    lines.push(t("chat.minutesMdHeading"));
     lines.push(``);
-    lines.push(`- 作成日時: ${ts}`);
+    lines.push(t("chat.minutesMdCreated").replace("{ts}", ts));
     if (typeof parsed.agreementScore === "number") {
-      lines.push(`- 最終合意度: ${parsed.agreementScore}/100`);
+      lines.push(t("chat.minutesMdAgreement").replace("{score}", String(parsed.agreementScore)));
     }
     lines.push(``);
     if (parsed.summary) {
-      lines.push(`## 総括`);
+      lines.push(t("chat.minutesMdSummary"));
       lines.push(``);
       lines.push(parsed.summary);
       lines.push(``);
     }
     if (parsed.minutes?.decisions && parsed.minutes.decisions.length > 0) {
-      lines.push(`## 決定事項`);
+      lines.push(t("chat.minutesMdDecisions"));
       lines.push(``);
       for (const d of parsed.minutes.decisions) lines.push(`- ${d}`);
       lines.push(``);
     }
     if (parsed.minutes?.tasks && parsed.minutes.tasks.length > 0) {
-      lines.push(`## タスク`);
+      lines.push(t("chat.minutesMdTasks"));
       lines.push(``);
-      for (const t of parsed.minutes.tasks) lines.push(`- [ ] ${t}`);
+      for (const task of parsed.minutes.tasks) lines.push(`- [ ] ${task}`);
       lines.push(``);
     }
     if (parsed.minutes?.parking && parsed.minutes.parking.length > 0) {
-      lines.push(`## 保留事項`);
+      lines.push(t("chat.minutesMdParking"));
       lines.push(``);
       for (const p of parsed.minutes.parking) lines.push(`- ${p}`);
       lines.push(``);
     }
     if (parsed.openIssues && parsed.openIssues.length > 0) {
-      lines.push(`## 残論点`);
+      lines.push(t("chat.minutesMdOpenIssues"));
       lines.push(``);
       for (const i of parsed.openIssues) lines.push(`- ${i}`);
       lines.push(``);
@@ -1144,7 +1155,7 @@ function MinutesActions({
       parsed.recommendedActions &&
       parsed.recommendedActions.length > 0
     ) {
-      lines.push(`## 推奨アクション`);
+      lines.push(t("chat.minutesMdActions"));
       lines.push(``);
       for (const a of parsed.recommendedActions) lines.push(`- ${a}`);
       lines.push(``);
@@ -1174,7 +1185,7 @@ function MinutesActions({
     const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const date = new Date(createdAt);
-    const fname = `議事録_${date.getFullYear()}${String(
+    const fname = `${t("chat.minutesFileNamePrefix")}_${date.getFullYear()}${String(
       date.getMonth() + 1,
     ).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}_${String(
       date.getHours(),
@@ -1194,17 +1205,17 @@ function MinutesActions({
         type="button"
         onClick={handleCopy}
         className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 hover:bg-amber-200"
-        title="議事録をMarkdownでコピー"
+        title={t("chat.minutesCopyTitle")}
       >
-        コピー
+        {t("chat.minutesCopy")}
       </button>
       <button
         type="button"
         onClick={handleDownload}
         className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-600 text-white hover:opacity-90"
-        title="議事録を.mdファイルでダウンロード"
+        title={t("chat.minutesDownloadTitle")}
       >
-        .md保存
+        {t("chat.minutesDownload")}
       </button>
     </span>
   );
@@ -1240,6 +1251,7 @@ function StreamingStatus({
   draft: ActiveDraftLite;
   variant?: "inline" | "row";
 }) {
+  const { t } = useTranslation();
   // 経過時間ライブ更新用ティック
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -1252,7 +1264,11 @@ function StreamingStatus({
   const hasFirstText = draft.firstTextAt !== null;
   const inactiveMs = Math.max(0, now - draft.lastEventAt);
   const stuck = inactiveMs > INACTIVITY_HINT_MS;
-  const label = stuck ? "応答止まってる？" : hasFirstText ? "応答中" : "考え中";
+  const label = stuck
+    ? t("chat.streamingStuck")
+    : hasFirstText
+      ? t("chat.streamingResponding")
+      : t("chat.streamingThinking");
   const thinkingMs =
     draft.firstTextAt !== null
       ? Math.max(0, draft.firstTextAt - draft.startedAt)
@@ -1260,16 +1276,16 @@ function StreamingStatus({
 
   const segments: string[] = [formatElapsed(elapsedMs)];
   if (draft.outputTokens > 0) {
-    segments.push(`↓ ${formatTokens(draft.outputTokens)} tokens`);
+    segments.push(t("chat.streamingTokens").replace("{tokens}", formatTokens(draft.outputTokens)));
   }
   if (thinkingMs !== null) {
-    segments.push(`thought for ${formatThinking(thinkingMs)}`);
+    segments.push(t("chat.streamingThought").replace("{dur}", formatThinking(thinkingMs)));
   }
   if (stuck) {
     // 「最後の反応から何秒沈黙してるか」を表示。下の停止ボタンの存在に
     // ユーザーが気付くための、控えめな注意喚起。
     const sec = Math.round(inactiveMs / 1000);
-    segments.push(`${sec}秒沈黙`);
+    segments.push(t("chat.streamingSilentSec").replace("{sec}", String(sec)));
   }
 
   const isRow = variant === "row";
@@ -1288,7 +1304,7 @@ function StreamingStatus({
       aria-busy="true"
       title={
         stuck
-          ? "AI 側の応答が止まっている可能性があります。画面下の「停止」ボタンでこのターンを終わらせてやり直せます。"
+          ? t("chat.streamingStuckTitle")
           : undefined
       }
     >
@@ -1342,6 +1358,7 @@ function DraftBubble({
   draft: ActiveDraftLite;
   character: ReturnType<typeof getCharacter>;
 }) {
+  const { t } = useTranslation();
   const { blocks } = draft;
   return (
     <div className="flex gap-3 px-6 py-4 bg-[var(--color-surface)]/60">
@@ -1349,7 +1366,7 @@ function DraftBubble({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <span className="text-sm font-semibold">
-            {character?.name ?? "Claude"}
+            {character?.name ?? t("chat.defaultAssistant")}
           </span>
           <StreamingStatus draft={draft} />
         </div>

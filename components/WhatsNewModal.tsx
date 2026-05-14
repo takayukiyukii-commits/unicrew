@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Sparkles, X } from "lucide-react";
 import { fetchWhatsNew, markWhatsNewSeen, UNICREW_VERSION } from "@/lib/whatsnew";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function WhatsNewModal({ open, onClose }: Props) {
+  const { t } = useTranslation();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -43,7 +45,7 @@ export function WhatsNewModal({ open, onClose }: Props) {
     <div
       className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 p-4"
       role="dialog"
-      aria-label="What's New"
+      aria-label={t("whatsNew.dialogLabel")}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}
@@ -54,17 +56,17 @@ export function WhatsNewModal({ open, onClose }: Props) {
             <Sparkles size={18} className="text-[var(--color-accent)]" />
             <div>
               <div className="text-[15px] font-bold tracking-tight">
-                UNICREW v{UNICREW_VERSION} の新機能
+                {t("whatsNew.title", { version: UNICREW_VERSION })}
               </div>
               <div className="text-[11.5px] text-[var(--color-muted)]">
-                何が変わったかを 1 ページにまとめました
+                {t("whatsNew.subtitle")}
               </div>
             </div>
           </div>
           <button
             onClick={close}
             className="p-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
-            title="閉じる"
+            title={t("whatsNew.closeHint")}
           >
             <X size={16} />
           </button>
@@ -73,12 +75,12 @@ export function WhatsNewModal({ open, onClose }: Props) {
         <div className="flex-1 min-h-0 overflow-y-auto unicrew-scroll px-6 py-4">
           {loading && (
             <div className="text-[12px] text-[var(--color-muted)] py-6 text-center">
-              読み込み中…
+              {t("whatsNew.loading")}
             </div>
           )}
           {!loading && !content && (
             <div className="text-[12px] text-[var(--color-muted)] py-6 text-center">
-              リリースノートが見つかりませんでした。
+              {t("whatsNew.notFound")}
             </div>
           )}
           {!loading && content && (
@@ -93,7 +95,7 @@ export function WhatsNewModal({ open, onClose }: Props) {
             onClick={close}
             className="px-3 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-[12.5px] font-medium hover:opacity-90"
           >
-            読んだ・閉じる
+            {t("whatsNew.closeCta")}
           </button>
         </div>
       </div>

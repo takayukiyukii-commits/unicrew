@@ -25,6 +25,7 @@ import {
   removeCodexMcp,
   type AddonItem,
 } from "@/lib/tauri";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -64,6 +65,7 @@ function saveKeys(keys: KeysMap) {
 }
 
 export function UniMcpModal({ open, onClose }: Props) {
+  const { t } = useTranslation();
   const [keys, setKeysState] = useState<KeysMap>({});
   const [installedClaude, setInstalledClaude] = useState<Set<string>>(new Set());
   const [installedCodex, setInstalledCodex] = useState<Set<string>>(new Set());
@@ -158,7 +160,7 @@ export function UniMcpModal({ open, onClose }: Props) {
   const connectOne = async (e: UniMcpEndpoint) => {
     if (!canConnect(e)) return;
     if (!isTauri()) {
-      setError("MCP接続は Tauri デスクトップアプリ起動時のみ可能です。");
+      setError(t("mcp.errTauriOnly"));
       return;
     }
     setBusy((s) => new Set(s).add(e.id));
@@ -168,7 +170,7 @@ export function UniMcpModal({ open, onClose }: Props) {
       await refreshInstalled();
     } catch (err) {
       setError(
-        `${e.name} の接続に失敗: ${err instanceof Error ? err.message : String(err)}`,
+        t("mcp.errConnect", { name: e.name, error: err instanceof Error ? err.message : String(err) }),
       );
     } finally {
       setBusy((s) => {
@@ -188,7 +190,7 @@ export function UniMcpModal({ open, onClose }: Props) {
       await refreshInstalled();
     } catch (err) {
       setError(
-        `${e.name} の切断に失敗: ${err instanceof Error ? err.message : String(err)}`,
+        t("mcp.errDisconnect", { name: e.name, error: err instanceof Error ? err.message : String(err) }),
       );
     } finally {
       setBusy((s) => {
@@ -210,7 +212,7 @@ export function UniMcpModal({ open, onClose }: Props) {
           await addForTarget(e);
         } catch (err) {
           setError(
-            `${e.name}: ${err instanceof Error ? err.message : String(err)}`,
+            t("mcp.errConnect", { name: e.name, error: err instanceof Error ? err.message : String(err) }),
           );
         }
       }
@@ -253,47 +255,45 @@ export function UniMcpModal({ open, onClose }: Props) {
         <div className="shrink-0 px-5 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
           <PlugZap size={16} className="text-[var(--color-accent)]" />
           <h2 className="font-bold text-[15px] flex-1">
-            UNI 製品 MCP 一括接続
+            {t("mcp.title")}
           </h2>
           <span className="text-[11px] text-[var(--color-muted)]">
-            接続中 {installedCount} / {UNI_MCP_ENDPOINTS.length}
+            {t("mcp.count", { installed: installedCount, total: UNI_MCP_ENDPOINTS.length })}
           </span>
           <button
             type="button"
             onClick={onClose}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            aria-label="閉じる"
+            aria-label={t("common.close")}
           >
             <X size={16} />
           </button>
         </div>
 
         <div className="px-5 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)]/40 text-[12px] text-[var(--color-muted)] leading-relaxed">
-          各製品の <code className="font-mono">/api-keys</code> から発行した APIキーを
-          貼り付けて「接続」を押すと、選んだ AI（Claude / Codex / 両方）から直接 UNI 製品の
-          データにアクセスできるようになります。一度接続すれば以降は再起動しても保持されます。
+          {t("mcp.introA")} <code className="font-mono">/api-keys</code> {t("mcp.introB")}
         </div>
 
         <div className="px-5 py-2 border-b border-[var(--color-border)] flex items-center gap-2 text-[12px]">
           <span className="text-[11px] text-[var(--color-muted)] font-medium">
-            接続先:
+            {t("mcp.targetLabel")}
           </span>
-          {(["claude", "codex", "both"] as const).map((t) => (
+          {(["claude", "codex", "both"] as const).map((kind) => (
             <button
-              key={t}
+              key={kind}
               type="button"
-              onClick={() => setTarget(t)}
+              onClick={() => setTarget(kind)}
               className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium border transition ${
-                target === t
+                target === kind
                   ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
                   : "bg-white text-[var(--color-muted)] border-[var(--color-border)] hover:bg-[var(--color-surface)]"
               }`}
             >
-              {t === "claude" ? "🟠 Claude" : t === "codex" ? "🟢 Codex" : "両方"}
+              {kind === "claude" ? "🟠 Claude" : kind === "codex" ? "🟢 Codex" : t("mcp.targetBoth")}
             </button>
           ))}
           <span className="ml-auto text-[10.5px] text-[var(--color-muted)]">
-            Claude {installedClaude.size} / Codex {installedCodex.size}
+            {t("mcp.targetCounts", { claude: installedClaude.size, codex: installedCodex.size })}
           </span>
         </div>
 
@@ -309,7 +309,7 @@ export function UniMcpModal({ open, onClose }: Props) {
             ) : (
               <Plug size={12} />
             )}
-            鍵が入っているものを全部接続（{connectableCount}件）
+            {t("mcp.connectAll", { count: connectableCount })}
           </button>
           <button
             type="button"
@@ -318,7 +318,7 @@ export function UniMcpModal({ open, onClose }: Props) {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)] disabled:opacity-30"
           >
             <X size={12} />
-            全切断
+            {t("mcp.disconnectAll")}
           </button>
           <a
             href="https://drop.uni-core.jp/mcp"
@@ -326,7 +326,7 @@ export function UniMcpModal({ open, onClose }: Props) {
             rel="noreferrer"
             className="ml-auto inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
           >
-            UNIDROP カタログ
+            {t("mcp.catalog")}
             <ExternalLink size={11} />
           </a>
         </div>
@@ -370,7 +370,7 @@ export function UniMcpModal({ open, onClose }: Props) {
                     rel="noreferrer"
                     className="ml-auto text-[10.5px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-0.5"
                   >
-                    APIキー発行
+                    {t("mcp.apiKeyIssue")}
                     <ExternalLink size={9} />
                   </a>
                 </div>
@@ -383,13 +383,13 @@ export function UniMcpModal({ open, onClose }: Props) {
                       type="password"
                       value={keys[e.id] ?? ""}
                       onChange={(ev) => setKey(e.id, ev.target.value)}
-                      placeholder={`APIキー（${e.keyPrefix}）`}
+                      placeholder={t("mcp.keyPlaceholder", { prefix: e.keyPrefix })}
                       className="flex-1 border border-[var(--color-border)] rounded px-2 py-1 text-[11.5px] outline-none focus:border-[var(--color-accent)] font-mono"
                     />
                   )}
                   {e.noAuth && (
                     <span className="flex-1 text-[11px] text-[var(--color-muted)] italic">
-                      認証不要
+                      {t("mcp.noAuth")}
                     </span>
                   )}
                   {isOn ? (
@@ -404,7 +404,7 @@ export function UniMcpModal({ open, onClose }: Props) {
                       ) : (
                         <X size={11} />
                       )}
-                      切断
+                      {t("mcp.disconnect")}
                     </button>
                   ) : (
                     <button
@@ -418,7 +418,7 @@ export function UniMcpModal({ open, onClose }: Props) {
                       ) : (
                         <Plug size={11} />
                       )}
-                      接続
+                      {t("mcp.connect")}
                     </button>
                   )}
                 </div>

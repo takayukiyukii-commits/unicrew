@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { avatarSrc } from "@/lib/tauri";
 import clsx from "clsx";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   avatarPath?: string | null;
@@ -26,11 +27,14 @@ export function UserAvatar({
   avatarPath,
   emoji,
   accentColor,
-  fallbackText = "あ",
+  fallbackText,
   size = 36,
   className,
-  title = "あなた",
+  title,
 }: Props) {
+  const { t } = useTranslation();
+  const resolvedFallback = fallbackText ?? t("character.avatar.youInitial");
+  const resolvedTitle = title ?? t("character.avatar.you");
   const [imgUrl, setImgUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,19 +71,19 @@ export function UserAvatar({
         color: imgUrl ? undefined : "#fff",
         fontSize: size * 0.5,
       }}
-      title={title}
+      title={resolvedTitle}
     >
       {imgUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={imgUrl}
-          alt={title}
+          alt={resolvedTitle}
           className="w-full h-full object-cover"
         />
       ) : showEmoji ? (
         <span>{emoji}</span>
       ) : (
-        <span>{fallbackText}</span>
+        <span>{resolvedFallback}</span>
       )}
     </div>
   );

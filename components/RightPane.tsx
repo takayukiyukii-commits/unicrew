@@ -28,6 +28,7 @@ import {
 import { effectiveParticipants } from "@/lib/participants";
 import { getPersonality } from "@/lib/personalities";
 import { CharacterAvatar } from "./CharacterAvatar";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   thread: Thread | null;
@@ -79,6 +80,7 @@ export function RightPane({
   onChangeModel,
   onChangePersistentMemory,
 }: Props) {
+  const { t } = useTranslation();
   const character = thread ? getCharacter(thread.characterId) : undefined;
   const personality = character ? getPersonality(character.personalityId ?? "") : null;
   const slots: ParticipantSlot[] = thread ? effectiveParticipants(thread) : [];
@@ -104,18 +106,18 @@ export function RightPane({
     <aside className="w-72 shrink-0 border-l border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col overflow-y-auto">
       {!thread ? (
         <div className="p-6 text-xs text-[var(--color-muted)]">
-          会話を開始すると、ここにキャラクター情報とモデル設定が表示されます。
+          {t("rightPane.startConversationHint")}
         </div>
       ) : (
         <div className="p-5 space-y-5">
           {isFocusedFromSplit && (
             <div className="rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] px-3 py-2 text-[11.5px] text-[var(--color-accent)] leading-snug">
-              <span className="font-semibold">並列ペイン編集中</span>
+              <span className="font-semibold">{t("rightPane.splitEditingLabel")}</span>
               <span className="text-[var(--color-muted)]">
-                ：「{thread.title || "（無題）"}」
+                {t("rightPane.splitEditingSep")}{thread.title || t("rightPane.splitEditingUntitled")}{t("rightPane.splitEditingClose")}
               </span>
               <div className="text-[10.5px] text-[var(--color-muted)] mt-0.5">
-                以下の変更はクリック中のペインだけに反映されます。別のペインを編集したい時はそのペインをクリック。
+                {t("rightPane.splitEditingHint")}
               </div>
             </div>
           )}
@@ -146,7 +148,7 @@ export function RightPane({
           {!isParallel && (
             <div className="space-y-1.5">
               <label className="block text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide">
-                キャラクター
+                {t("rightPane.characterLabel")}
               </label>
               <CharacterSelect
                 value={thread.characterId}
@@ -157,7 +159,7 @@ export function RightPane({
                 <ProviderToggle
                   current={character.provider}
                   onChange={onChangeCharacterProvider}
-                  hint="このキャラを動かす AI を切替（テンプレはクローンして保存）"
+                  hint={t("rightPane.providerHintCharacter")}
                 />
               )}
             </div>
@@ -168,10 +170,10 @@ export function RightPane({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="block text-[11px] font-semibold text-[var(--color-muted)] uppercase tracking-wide">
-                  参加者（{participantCount}人）
+                  {t("rightPane.participantsLabel").replace("{count}", String(participantCount))}
                   {hasModerator && (
                     <span className="ml-1 text-amber-700 normal-case font-medium">
-                      ＋審判
+                      {t("rightPane.withModerator")}
                     </span>
                   )}
                 </label>
@@ -232,10 +234,10 @@ export function RightPane({
                   type="button"
                   onClick={onExportTeamJson}
                   className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 mt-1 rounded-md border border-dashed border-sky-200 text-[11.5px] text-sky-700 hover:bg-sky-50 transition"
-                  title="この構成を JSON でクリップボードにコピー（共有用）"
+                  title={t("rightPane.exportTeamJsonTitle")}
                 >
                   <Save size={11} />
-                  JSONでコピー（チーム共有）
+                  {t("rightPane.exportTeamJson")}
                 </button>
               )}
             </div>
@@ -244,10 +246,10 @@ export function RightPane({
           {showModelSection && (
             <div>
               <label className="block text-[11px] font-semibold text-[var(--color-muted)] mb-1.5 uppercase tracking-wide">
-                モデル
+                {t("rightPane.modelLabel")}
                 {isParallel && (
                   <span className="ml-1.5 normal-case font-normal text-[10px] text-[var(--color-muted)]">
-                    （Claude スロットのみに適用）
+                    {t("rightPane.modelClaudeOnly")}
                   </span>
                 )}
               </label>
@@ -285,17 +287,17 @@ export function RightPane({
 
           <div className="pt-3 border-t border-[var(--color-border)] text-[11px] text-[var(--color-muted)] leading-relaxed">
             <div className="font-semibold mb-1 text-[var(--color-text)]">
-              この画面でできること
+              {t("rightPane.canDoTitle")}
             </div>
             <ul className="list-disc pl-4 space-y-0.5">
-              <li>キャラ切替で口調と専門が変わる</li>
+              <li>{t("rightPane.canDoCharSwitch")}</li>
               {thread.splitMode && (
-                <li>並列モードでは Claude / Codex に別人格を割り当て可能</li>
+                <li>{t("rightPane.canDoSplit")}</li>
               )}
               {showModelSection && (
-                <li>モデルは応答の質と速度のトレードオフ</li>
+                <li>{t("rightPane.canDoModel")}</li>
               )}
-              <li>ワークスペースは作業対象のフォルダ</li>
+              <li>{t("rightPane.canDoWorkspace")}</li>
             </ul>
           </div>
         </div>
@@ -313,6 +315,7 @@ function CharacterSelect({
   onChange: (id: string) => void;
   userChars: Character[];
 }) {
+  const { t } = useTranslation();
   return (
     <div className="relative">
       <select
@@ -321,19 +324,19 @@ function CharacterSelect({
         className="w-full appearance-none border border-[var(--color-border)] rounded-md px-3 py-2 text-sm bg-white pr-8"
       >
         {userChars.length > 0 && (
-          <optgroup label="マイキャラクター">
+          <optgroup label={t("rightPane.charOptgroupUser")}>
             {userChars.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name || "（名前未設定）"}
-                {c.roleTag ? `（${c.roleTag}）` : ""}
+                {c.name || t("rightPane.charUnnamed")}
+                {c.roleTag ? `${t("chat.parallelOpenParen")}${c.roleTag}${t("chat.parallelCloseParen")}` : ""}
               </option>
             ))}
           </optgroup>
         )}
-        <optgroup label="テンプレート">
+        <optgroup label={t("rightPane.charOptgroupTemplate")}>
           {TEMPLATE_CHARACTERS.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}（{c.roleTag}）
+              {c.name}{t("chat.parallelOpenParen")}{c.roleTag}{t("chat.parallelCloseParen")}
             </option>
           ))}
         </optgroup>
@@ -368,6 +371,7 @@ function ParticipantCard({
   onChangeProvider?: (provider: Provider) => void;
   onRemove?: () => void;
 }) {
+  const { t } = useTranslation();
   const isModerator = slot.role === "moderator";
   // プロバイダ色は lib/providerCategories の CATEGORY_COLORS に集約済み（4 色）。
   // 個別色テーブルを再定義しない。新プロバイダ追加時に毎回ここを直すと UI 崩壊する。
@@ -391,7 +395,7 @@ function ParticipantCard({
           className="text-[10.5px] font-semibold uppercase tracking-wide shrink-0"
           style={{ color: isModerator ? "#b45309" : accent }}
         >
-          {isModerator ? "中立審判" : PROVIDER_LABELS[slot.provider]}
+          {isModerator ? t("rightPane.moderator") : PROVIDER_LABELS[slot.provider]}
         </span>
         {character && (
           <CharacterAvatar character={character} size={20} />
@@ -401,15 +405,15 @@ function ParticipantCard({
             {character.name}
           </span>
         ) : (
-          <span className="text-[11.5px] text-[var(--color-muted)]">未設定</span>
+          <span className="text-[11.5px] text-[var(--color-muted)]">{t("rightPane.notSet")}</span>
         )}
         {onRemove && (
           <button
             type="button"
             onClick={onRemove}
             className="ml-auto p-0.5 rounded hover:bg-red-50 text-[var(--color-muted)] hover:text-red-500 shrink-0"
-            title="この参加者を削除"
-            aria-label="この参加者を削除"
+            title={t("rightPane.removeParticipantTitle")}
+            aria-label={t("rightPane.removeParticipantAria")}
           >
             <X size={12} />
           </button>
@@ -427,7 +431,7 @@ function ParticipantCard({
           <ProviderToggle
             current={slot.provider}
             onChange={onChangeProvider}
-            hint="このスロットを動かす AI を切替"
+            hint={t("rightPane.providerHintSlot")}
             compact
           />
         </div>
@@ -451,6 +455,7 @@ function ProviderToggle({
   hint?: string;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const providers: Provider[] = ["claude", "codex", "gemini"];
   return (
     <div className="space-y-1">
@@ -460,7 +465,7 @@ function ProviderToggle({
             compact ? "" : "mr-1"
           }`}
         >
-          AI
+          {t("rightPane.providerLabelShort")}
         </span>
         {providers.map((p) => {
           const selected = current === p;
@@ -502,6 +507,7 @@ function SaveAsTeamButton({
 }: {
   onSave: (meta: { name: string; description: string; emoji: string }) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -514,7 +520,7 @@ function SaveAsTeamButton({
         className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11.5px] text-emerald-700 hover:bg-emerald-50 transition"
       >
         <Save size={11} />
-        この構成をチームとして保存
+        {t("rightPane.saveAsTeamLabel")}
       </button>
       {open && (
         <div className="px-2 py-2 space-y-1.5 border-t border-emerald-200 bg-emerald-50/40">
@@ -522,14 +528,14 @@ function SaveAsTeamButton({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="チーム名（例：UNI企画レビュー会）"
+            placeholder={t("rightPane.teamNamePlaceholder")}
             className="w-full border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
           />
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
-            placeholder="どんなときに使うか（任意）"
+            placeholder={t("rightPane.teamDescPlaceholder")}
             className="w-full resize-none border border-[var(--color-border)] rounded-md px-2 py-1 text-[11.5px] bg-white outline-none focus:border-[var(--color-accent)]"
           />
           <div className="flex gap-1.5">
@@ -542,7 +548,7 @@ function SaveAsTeamButton({
               }}
               className="flex-1 px-2 py-1 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-muted)] hover:bg-white"
             >
-              キャンセル
+              {t("rightPane.cancel")}
             </button>
             <button
               type="button"
@@ -561,7 +567,7 @@ function SaveAsTeamButton({
               disabled={!name.trim()}
               className="flex-1 px-2 py-1 rounded text-[11px] text-white font-medium bg-emerald-600 disabled:opacity-40"
             >
-              保存
+              {t("rightPane.save")}
             </button>
           </div>
         </div>
@@ -585,6 +591,7 @@ function AddParticipantMenu({
   userChars: Character[];
   role: "participant" | "moderator";
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<Provider>("claude");
   const [selectedCharId, setSelectedCharId] = useState<string>(
@@ -605,13 +612,13 @@ function AddParticipantMenu({
         }`}
       >
         {isModerator ? <Gavel size={11} /> : <UserPlus size={11} />}
-        {isModerator ? "中立審判を追加" : "参加者を追加"}
+        {isModerator ? t("rightPane.addModerator") : t("rightPane.addParticipant")}
       </button>
       {open && (
         <div className="px-2 py-2 space-y-1.5 border-t border-[var(--color-border)] bg-[var(--color-surface)]/40">
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-[var(--color-muted)] mb-0.5">
-              AI（プロバイダ）
+              {t("rightPane.providerSelectLabel")}
             </label>
             <div className="relative">
               <select
@@ -621,9 +628,9 @@ function AddParticipantMenu({
                 }
                 className="w-full appearance-none border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white pr-7"
               >
-                <option value="claude">🟠 Claude</option>
-                <option value="codex">🟢 Codex</option>
-                <option value="gemini">🔵 Gemini（gemini-cli 必須）</option>
+                <option value="claude">{t("rightPane.providerOptionClaude")}</option>
+                <option value="codex">{t("rightPane.providerOptionCodex")}</option>
+                <option value="gemini">{t("rightPane.providerOptionGemini")}</option>
               </select>
               <ChevronDown
                 size={11}
@@ -633,7 +640,7 @@ function AddParticipantMenu({
           </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-[var(--color-muted)] mb-0.5">
-              キャラクター
+              {t("rightPane.characterLabel")}
             </label>
             <CharacterSelect
               value={selectedCharId}
@@ -647,7 +654,7 @@ function AddParticipantMenu({
               onClick={() => setOpen(false)}
               className="flex-1 px-2 py-1 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-muted)] hover:bg-white"
             >
-              キャンセル
+              {t("rightPane.cancel")}
             </button>
             <button
               type="button"
@@ -665,7 +672,7 @@ function AddParticipantMenu({
                 isModerator ? "bg-amber-600" : "bg-[var(--color-accent)]"
               }`}
             >
-              追加
+              {t("rightPane.add")}
             </button>
           </div>
         </div>
@@ -689,6 +696,7 @@ function PersistentMemorySection({
   value: string;
   onChange: (memo: string) => void;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(value.length > 0);
   useEffect(() => {
@@ -709,10 +717,10 @@ function PersistentMemorySection({
       >
         <span className="flex items-center gap-1.5">
           <BookMarked size={11} />
-          覚えてほしいこと
+          {t("rightPane.memoryTitle")}
           {value.length > 0 && (
             <span className="ml-1 normal-case font-normal text-[10px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] px-1 py-0.5 rounded">
-              ON
+              {t("rightPane.memoryOn")}
             </span>
           )}
         </span>
@@ -727,17 +735,15 @@ function PersistentMemorySection({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={4}
-            placeholder={
-              "例:\n- ユーザー名は結城\n- TypeScript 4 space インデント\n- 完了報告は箇条書き 3 行以内"
-            }
+            placeholder={t("rightPane.memoryPlaceholder")}
             className="w-full resize-y border border-[var(--color-border)] rounded-md px-2 py-1.5 text-[12px] bg-white outline-none focus:border-[var(--color-accent)] font-mono leading-relaxed min-h-[80px]"
           />
           <div className="flex items-center gap-2 text-[10.5px] text-[var(--color-muted)]">
             <span className={tooLong ? "text-red-500 font-medium" : ""}>
-              {charCount} / 4000
+              {charCount}{t("rightPane.memoryCountSuffix")}
             </span>
             <span className="ml-auto">
-              {dirty ? "未保存" : "保存済"}
+              {dirty ? t("rightPane.memoryUnsaved") : t("rightPane.memorySaved")}
             </span>
           </div>
           <div className="flex gap-1.5">
@@ -747,7 +753,7 @@ function PersistentMemorySection({
               disabled={!dirty}
               className="flex-1 px-2 py-1 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-muted)] hover:bg-white disabled:opacity-40"
             >
-              元に戻す
+              {t("rightPane.memoryRevert")}
             </button>
             <button
               type="button"
@@ -755,11 +761,11 @@ function PersistentMemorySection({
               disabled={!dirty || tooLong}
               className="flex-1 px-2 py-1 rounded text-[11px] text-white font-medium bg-[var(--color-accent)] disabled:opacity-40"
             >
-              保存
+              {t("rightPane.memorySave")}
             </button>
           </div>
           <p className="text-[10px] leading-relaxed text-[var(--color-muted)]">
-            毎回の送信時に AI へ前置きとして渡されます。再起動後も保持。
+            {t("rightPane.memoryFooter")}
           </p>
         </div>
       )}

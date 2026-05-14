@@ -62,6 +62,7 @@ import {
 } from "@/lib/addons";
 import { describePlugin, type Locale } from "@/lib/plugin-descriptions";
 import { PluginAvatar } from "./PluginAvatar";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   workspace?: string | null;
@@ -87,75 +88,72 @@ type TabId =
 
 interface TabDef {
   id: TabId;
-  label: string;
+  /** i18n key for label */
+  labelKey: string;
   source: AddonSource;
   kind: AddonItem["kind"];
   icon: typeof Blocks;
-  emptyHint: string;
+  /** i18n key for empty hint */
+  emptyHintKey: string;
 }
 
 const TABS: TabDef[] = [
   {
     id: "claude-plugin",
-    label: "Claude プラグイン",
+    labelKey: "addons.tab.claudePlugin",
     source: "claude",
     kind: "plugin",
     icon: Plug,
-    emptyHint:
-      "まだ Claude プラグインは入っていません。下の「おすすめ」から1クリックで追加できます。",
+    emptyHintKey: "addons.empty.claudePlugin",
   },
   {
     id: "claude-skill",
-    label: "Claude スキル",
+    labelKey: "addons.tab.claudeSkill",
     source: "claude",
     kind: "skill",
     icon: Sparkles,
-    emptyHint:
-      "~/.claude/skills/ にスキルが見つかりません。プラグインを入れると一緒に追加されることもあります。",
+    emptyHintKey: "addons.empty.claudeSkill",
   },
   {
     id: "claude-mcp",
-    label: "Claude MCP",
+    labelKey: "addons.tab.claudeMcp",
     source: "claude",
     kind: "mcp",
     icon: Blocks,
-    emptyHint:
-      "MCP サーバーは未登録です。Notion / Slack / GitHub 等の外部サービスを Claude から操作したい場合に追加します。",
+    emptyHintKey: "addons.empty.claudeMcp",
   },
   {
     id: "codex-plugin",
-    label: "Codex プラグイン",
+    labelKey: "addons.tab.codexPlugin",
     source: "codex",
     kind: "plugin",
     icon: Code2,
-    emptyHint:
-      "Codex 公式バンドル以外を入れたい場合は、上級者モードで marketplace を追加できます。",
+    emptyHintKey: "addons.empty.codexPlugin",
   },
   {
     id: "codex-skill",
-    label: "Codex スキル",
+    labelKey: "addons.tab.codexSkill",
     source: "codex",
     kind: "skill",
     icon: BookOpen,
-    emptyHint: "~/.codex/skills/ にスキルが見つかりません。",
+    emptyHintKey: "addons.empty.codexSkill",
   },
   {
     id: "codex-mcp",
-    label: "Codex MCP",
+    labelKey: "addons.tab.codexMcp",
     source: "codex",
     kind: "mcp",
     icon: Blocks,
-    emptyHint:
-      "Codex の MCP サーバーは未登録です。GitHub / Slack 等の外部サービスを Codex から操作したい場合に追加します。",
+    emptyHintKey: "addons.empty.codexMcp",
   },
   // UNI Series は別構造（Coming Soon カタログ表示）。kind/source は plugin/claude のダミー。
   {
     id: "uni-series",
-    label: "UNI Series",
+    labelKey: "addons.tab.uniSeries",
     source: "claude",
     kind: "plugin",
     icon: Puzzle,
-    emptyHint: "",
+    emptyHintKey: "",
   },
 ];
 
@@ -166,6 +164,7 @@ export function AddonsSection({
   autoCheckAddonUpdates = true,
   autoApplyAddonUpdates = false,
 }: Props) {
+  const { locale, t: tr, setLocale: applyLocale } = useTranslation();
   const [active, setActive] = useState<TabId>("claude-plugin");
   const [installed, setInstalled] = useState<Record<TabId, AddonItem[]>>({
     "claude-plugin": [],
@@ -184,7 +183,6 @@ export function AddonsSection({
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [locale, setLocale] = useState<Locale>("ja");
   // 更新チェック関連の state（Phase 1）。
   // items は「has_update=true」のものだけを保持し、id → AddonUpdateItem の Map。
   // チェック中・適用中の進捗用 string も同居させる。
@@ -196,16 +194,8 @@ export function AddonsSection({
   const [pendingUpdate, setPendingUpdate] = useState<string | null>(null);
   const [bulkUpdating, setBulkUpdating] = useState(false);
 
-  // localStorage で言語選好を永続化（プラグインタブのみのスコープ）
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = localStorage.getItem("unicrew.addons.locale");
-    if (saved === "ja" || saved === "en") setLocale(saved);
-  }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("unicrew.addons.locale", locale);
-  }, [locale]);
+  // 言語選好は lib/i18n の useTranslation 経由でグローバル管理。
+  // 旧 "unicrew.addons.locale" キーは setLocale 側で同期される（後方互換）。
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -281,7 +271,7 @@ export function AddonsSection({
       setInfo(null);
       try {
         const result = await installClaudePlugin(id);
-        setInfo(`プラグイン '${id}' を追加しました${result ? `: ${result.slice(0, 200)}` : ""}`);
+        setInfo(tr("addons.installedToast", { id, detail: result ? `: ${result.slice(0, 200)}` : "" }));
         await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -289,7 +279,7 @@ export function AddonsSection({
         setPendingInstall(null);
       }
     },
-    [reload],
+    [reload, tr],
   );
 
   // ----- 更新チェック / 適用（Phase 1） -----
@@ -319,8 +309,8 @@ export function AddonsSection({
       if (!silent) {
         setInfo(
           m.size === 0
-            ? "すべて最新です。"
-            : `${m.size} 件のアップデートが見つかりました。`,
+            ? tr("addons.updates.allLatest")
+            : tr("addons.updates.foundShort", { count: m.size }),
         );
       }
       // localStorage に時刻だけ保存（毎回チェックしないため）
@@ -339,7 +329,7 @@ export function AddonsSection({
     } finally {
       setCheckingUpdates(false);
     }
-  }, [checkingUpdates]);
+  }, [checkingUpdates, tr]);
 
   /** 1 アイテム適用。成功時はそのアイテムを updates Map から外す。 */
   const applyOneUpdate = useCallback(
@@ -354,7 +344,7 @@ export function AddonsSection({
           next.delete(key);
           return next;
         });
-        setInfo(`${item.name} を更新しました。`);
+        setInfo(tr("addons.updates.applied", { name: item.name }));
         await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -362,7 +352,7 @@ export function AddonsSection({
         setPendingUpdate(null);
       }
     },
-    [reload],
+    [reload, tr],
   );
 
   /** 全 has_update を順次適用。失敗してもループは続けて、最後にまとめてエラー表示。 */
@@ -392,14 +382,14 @@ export function AddonsSection({
     setBulkUpdating(false);
     await reload();
     if (errors.length === 0) {
-      setInfo(`${items.length} 件のアップデートを適用しました。`);
+      setInfo(tr("addons.updates.bulkApplied", { count: items.length }));
     } else {
       setError(
-        `${items.length - errors.length} 件成功 / ${errors.length} 件失敗:\n` +
+        tr("addons.updates.bulkPartial", { ok: items.length - errors.length, fail: errors.length }) +
           errors.join("\n"),
       );
     }
-  }, [bulkUpdating, updates, reload]);
+  }, [bulkUpdating, updates, reload, tr]);
 
   // マウント時に 1 日 1 回の自動チェック（localStorage の前回時刻と比較）。
   // 設定で OFF になっていれば手動チェックボタンに任せて自動チェックは行わない。
@@ -434,7 +424,7 @@ export function AddonsSection({
     async (item: AddonItem) => {
       // Codex MCP は対応済（codex mcp remove 経由）。それ以外の Codex（plugin/skill）は Phase D 留保
       if (item.source === "codex" && item.kind !== "mcp") {
-        setError("Codex プラグイン / スキルの削除は Phase D で対応予定です");
+        setError(tr("addons.uninstallCodexUnsupported"));
         return;
       }
       setPendingUninstall(item.id);
@@ -443,15 +433,15 @@ export function AddonsSection({
       try {
         if (item.kind === "mcp" && item.source === "codex") {
           await removeCodexMcp(item.name);
-          setInfo(`Codex MCP '${item.name}' を削除しました`);
+          setInfo(tr("addons.removedCodexMcp", { name: item.name }));
         } else if (item.kind === "mcp") {
           await removeClaudeMcp(item.name);
-          setInfo(`MCP '${item.name}' を削除しました`);
+          setInfo(tr("addons.removedClaudeMcp", { name: item.name }));
         } else if (item.kind === "plugin") {
           const r = await uninstallClaudePlugin(item.id);
-          setInfo(`プラグイン '${item.name}' を削除しました: ${r.slice(0, 200)}`);
+          setInfo(tr("addons.removedPlugin", { name: item.name, detail: r.slice(0, 200) }));
         } else {
-          setError("スキルの削除はファイルマネージャーから手動で行ってください（~/.claude/skills/）");
+          setError(tr("addons.uninstallSkillManual"));
         }
         await reload();
       } catch (e) {
@@ -460,7 +450,7 @@ export function AddonsSection({
         setPendingUninstall(null);
       }
     },
-    [reload],
+    [reload, tr],
   );
 
   const updateCount = updates.size;
@@ -473,22 +463,25 @@ export function AddonsSection({
           <ArrowUpCircle size={18} className="text-amber-600 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-[12.5px] font-semibold text-amber-900">
-              {updateCount} 件のアップデートがあります
+              {tr("addons.updates.found", { count: updateCount })}
             </div>
             <div className="text-[11px] text-amber-700/90 leading-snug">
-              CLI / プラグイン / git 連携スキル の最新版が利用できます。
+              {tr("addons.updates.intro")}
               {updatesCheckedAt && (
                 <>
                   {" "}
                   <span className="opacity-70">
-                    （最終チェック:{" "}
-                    {new Date(updatesCheckedAt).toLocaleString("ja-JP", {
-                      month: "numeric",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
+                    {tr("addons.updates.lastChecked", {
+                      time: new Date(updatesCheckedAt).toLocaleString(
+                        locale === "ja" ? "ja-JP" : "en-US",
+                        {
+                          month: "numeric",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        },
+                      ),
                     })}
-                    ）
                   </span>
                 </>
               )}
@@ -503,12 +496,12 @@ export function AddonsSection({
             {bulkUpdating ? (
               <>
                 <Loader2 size={12} className="animate-spin" />
-                更新中…
+                {tr("addons.updates.updating")}
               </>
             ) : (
               <>
                 <ArrowUpCircle size={12} />
-                すべて更新
+                {tr("addons.updates.updateAll")}
               </>
             )}
           </button>
@@ -521,34 +514,34 @@ export function AddonsSection({
           onClick={() => void checkUpdates(false)}
           disabled={checkingUpdates}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] rounded-md border border-[var(--color-border)] hover:bg-white transition disabled:opacity-50"
-          title="CLI / プラグイン / Skill の最新版を確認"
+          title={tr("addons.updates.checkTooltip")}
         >
           {checkingUpdates ? (
             <Loader2 size={13} className="animate-spin" />
           ) : (
             <ArrowUpCircle size={13} />
           )}
-          {checkingUpdates ? "確認中…" : "アップデート確認"}
+          {checkingUpdates ? tr("addons.updates.checking") : tr("addons.updates.checkCta")}
         </button>
-        {/* 言語切替（プラグイン説明の表示言語のみを切替） */}
+        {/* 言語切替（lib/i18n のグローバル locale を切替） */}
         <div
           className="inline-flex rounded-md border border-[var(--color-border)] overflow-hidden text-[11px] font-mono"
           role="group"
-          aria-label="Description language"
+          aria-label={tr("addons.langGroupLabel")}
         >
           {(["ja", "en"] as const).map((l) => (
             <button
               key={l}
-              onClick={() => setLocale(l)}
+              onClick={() => applyLocale(l)}
               className={clsx(
                 "px-2.5 py-1 transition",
                 locale === l
                   ? "bg-[var(--color-accent)] text-white"
                   : "bg-white hover:bg-[var(--color-surface)] text-[var(--color-muted)]",
               )}
-              title={l === "ja" ? "日本語表示" : "English"}
+              title={l === "ja" ? tr("addons.langTitleJa") : tr("addons.langTitleEn")}
             >
-              {l === "ja" ? "日本語" : "EN"}
+              {l === "ja" ? tr("addons.langJa") : tr("addons.langEn")}
             </button>
           ))}
         </div>
@@ -556,27 +549,27 @@ export function AddonsSection({
           onClick={() => void reload()}
           disabled={loading}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] rounded-md border border-[var(--color-border)] hover:bg-white transition disabled:opacity-50"
-          title="再読み込み"
+          title={tr("addons.reloadTooltip")}
         >
           {loading ? (
             <Loader2 size={13} className="animate-spin" />
           ) : (
             <RefreshCw size={13} />
           )}
-          {locale === "ja" ? "再読み込み" : "Reload"}
+          {tr("addons.reload")}
         </button>
       </div>
 
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--color-border)] pb-2">
-        {TABS.map((t) => {
-          const Icon = t.icon;
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
           const count =
-            t.id === "uni-series" ? null : installed[t.id].length;
-          const isActive = active === t.id;
+            tab.id === "uni-series" ? null : installed[tab.id].length;
+          const isActive = active === tab.id;
           return (
             <button
-              key={t.id}
-              onClick={() => setActive(t.id)}
+              key={tab.id}
+              onClick={() => setActive(tab.id)}
               className={clsx(
                 "inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-md border transition",
                 isActive
@@ -585,7 +578,7 @@ export function AddonsSection({
               )}
             >
               <Icon size={13} />
-              {t.label}
+              {tr(tab.labelKey)}
               {count !== null ? (
                 <span
                   className={clsx(
@@ -606,7 +599,7 @@ export function AddonsSection({
                       : "bg-amber-100 text-amber-700",
                   )}
                 >
-                  Soon
+                  {tr("addons.soon")}
                 </span>
               )}
             </button>
@@ -630,13 +623,11 @@ export function AddonsSection({
       ) : (
         <div>
           <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
-            {locale === "ja"
-              ? `インストール済み（${activeItems.length}）`
-              : `Installed (${activeItems.length})`}
+            {tr("addons.installed", { count: activeItems.length })}
           </div>
           {activeItems.length === 0 ? (
             <div className="text-[12px] text-[var(--color-muted)] bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-md px-3 py-3">
-              {activeTab.emptyHint}
+              {activeTab.emptyHintKey ? tr(activeTab.emptyHintKey) : ""}
             </div>
           ) : (
             <ul className="space-y-1.5">
@@ -687,9 +678,7 @@ export function AddonsSection({
       {recommendations.length > 0 && (
         <div>
           <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5 mt-3">
-            {locale === "ja"
-              ? `おすすめ（公式・検証済み ${recommendations.length}）`
-              : `Recommended (verified ${recommendations.length})`}
+            {tr("addons.recommended", { count: recommendations.length })}
           </div>
           <ul className="space-y-1.5">
             {recommendations.map((c) => (
@@ -731,11 +720,7 @@ export function AddonsSection({
             // 1クリックは MCP（add_codex_mcp 経由）に限定し、プラグインは
             // ~/.codex/config.toml 直編集が必要であることを明示する。
             // 「Phase D」みたいな曖昧な文言で詰まらせない方針。
-            setError(
-              locale === "ja"
-                ? `Codex プラグイン「${id}」は ~/.codex/config.toml の [plugins.${id}] セクションに直接追記して有効化してください（codex CLI は現時点で /plugin install を提供していません）。MCP サーバーは「Codex MCP」タブから1クリックで追加できます。`
-                : `Codex plugin "${id}" must be enabled by editing ~/.codex/config.toml directly under [plugins.${id}] (the codex CLI doesn't provide a /plugin install command yet). MCP servers can still be added via the "Codex MCP" tab.`,
-            );
+            setError(tr("addons.codexPluginInstallNote", { id }));
           }}
         />
       )}
@@ -749,9 +734,9 @@ export function AddonsSection({
             className="accent-[var(--color-accent)]"
           />
           <span>
-            上級者モードを有効にする
+            {tr("addons.advanced.title")}
             <span className="block text-[11px] text-[var(--color-muted)] mt-0.5">
-              任意の GitHub リポジトリや MCP サーバーを追加できるようになります。検証されていないコードを実行することになるので、信頼できるソースだけを追加してください。
+              {tr("addons.advanced.desc")}
             </span>
           </span>
         </label>
@@ -802,6 +787,7 @@ function InstalledRow({
   onToggle?: (next: boolean) => void;
   onUninstall?: () => void;
 }) {
+  const { t: tr } = useTranslation();
   // Claude のプラグイン/スキルは多言語化テーブルでローカライズ
   const localized =
     item.source === "claude" && (item.kind === "plugin" || item.kind === "skill")
@@ -836,13 +822,7 @@ function InstalledRow({
                 : "bg-zinc-200 text-zinc-600",
             )}
           >
-            {locale === "ja"
-              ? item.enabled
-                ? "有効"
-                : "無効"
-              : item.enabled
-                ? "Enabled"
-                : "Disabled"}
+            {item.enabled ? tr("addons.row.enabled") : tr("addons.row.disabled")}
           </span>
           {item.author && (
             <span className="text-[10.5px] text-[var(--color-muted)]">
@@ -870,8 +850,8 @@ function InstalledRow({
             title={
               updateInfo.detail ??
               (updateInfo.latest
-                ? `最新 v${updateInfo.latest} に更新`
-                : "更新を適用")
+                ? tr("addons.row.updateTooltipLatest", { ver: updateInfo.latest })
+                : tr("addons.row.updateTooltipPlain"))
             }
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500 text-white text-[11px] font-semibold hover:opacity-90 disabled:opacity-50"
           >
@@ -881,10 +861,10 @@ function InstalledRow({
               <ArrowUpCircle size={11} />
             )}
             {updating
-              ? "更新中…"
+              ? tr("addons.row.updateBtnDoing")
               : updateInfo.latest
-                ? `更新 → v${updateInfo.latest}`
-                : "更新"}
+                ? tr("addons.row.updateBtnTo", { ver: updateInfo.latest })
+                : tr("addons.row.updateBtnPlain")}
           </button>
         )}
         {onToggle && (
@@ -892,7 +872,7 @@ function InstalledRow({
             type="button"
             disabled={pending}
             onClick={() => onToggle(!item.enabled)}
-            title={item.enabled ? "無効化する" : "有効化する"}
+            title={item.enabled ? tr("addons.row.toggleDisable") : tr("addons.row.toggleEnable")}
             className={clsx(
               "relative w-9 h-5 rounded-full transition disabled:opacity-50",
               item.enabled ? "bg-emerald-500" : "bg-zinc-300",
@@ -911,7 +891,7 @@ function InstalledRow({
             type="button"
             disabled={uninstalling}
             onClick={onUninstall}
-            title="削除する"
+            title={tr("addons.row.delete")}
             className="p-1 rounded text-[var(--color-muted)] hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50"
           >
             {uninstalling ? (
@@ -1017,6 +997,7 @@ function MarketplaceCatalogPanel({
   pendingInstall: string | null;
   onInstall: (id: string) => void;
 }) {
+  const { t: tr } = useTranslation();
   const installedIds = new Set(installed.map((it) => it.id));
   const grouped = catalog.reduce<Record<string, AddonItem[]>>((acc, item) => {
     const ns = item.namespace ?? "(unknown)";
@@ -1029,14 +1010,10 @@ function MarketplaceCatalogPanel({
   return (
     <div className="mt-3 border-t border-[var(--color-border)] pt-3">
       <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
-        {locale === "ja"
-          ? `Marketplace カタログ（全 ${catalog.length} 件 / 未追加 ${totalAvailable} 件）`
-          : `Marketplace catalog (${catalog.length} total / ${totalAvailable} not installed)`}
+        {tr("addons.marketplaceTitle", { total: catalog.length, available: totalAvailable })}
       </div>
       <div className="text-[11px] text-[var(--color-muted)] mb-2 leading-relaxed">
-        {locale === "ja"
-          ? "ローカルに clone 済みの marketplace から実在する全プラグインを表示しています。"
-          : "Showing every plugin found in locally cloned marketplaces."}
+        {tr("addons.marketplaceIntro")}
       </div>
       <div className="space-y-3">
         {namespaces.map((ns) => (
@@ -1073,7 +1050,7 @@ function MarketplaceCatalogPanel({
                         )}
                         {isInstalled && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
-                            {locale === "ja" ? "インストール済み" : "Installed"}
+                            {tr("addons.marketplaceInstalledTag")}
                           </span>
                         )}
                         {it.author && (
@@ -1093,18 +1070,14 @@ function MarketplaceCatalogPanel({
                         onClick={() => onInstall(it.id)}
                         disabled={installing}
                         className="shrink-0 px-2 py-1 text-[11px] rounded-md bg-[var(--color-accent)] text-white hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1"
-                        title={
-                          locale === "ja"
-                            ? "1 クリックで追加"
-                            : "Install with one click"
-                        }
+                        title={tr("addons.installOneClickTitle")}
                       >
                         {installing ? (
                           <Loader2 size={10} className="animate-spin" />
                         ) : (
                           <Plus size={10} />
                         )}
-                        {locale === "ja" ? "追加" : "Install"}
+                        {tr("addons.install")}
                       </button>
                     )}
                   </li>
@@ -1119,38 +1092,32 @@ function MarketplaceCatalogPanel({
 }
 
 function UniSeriesPanel({ locale }: { locale: Locale }) {
+  const { t: tr } = useTranslation();
   const grouped = uniProductsByCategory();
   const sections: {
     id: UniCategory;
     label: string;
-    descriptionJa: string;
-    descriptionEn: string;
+    descKey: string;
   }[] = [
     {
       id: "service",
       label: "Services",
-      descriptionJa: "uniLinks が運営する SaaS 群（販売開始準備中）",
-      descriptionEn: "SaaS suite by uniLinks (preparing for launch)",
+      descKey: "addons.uni.servicesDesc",
     },
     {
       id: "mcp",
       label: "MCP Servers",
-      descriptionJa: "各 UNI 製品を任意の AI クライアントから操作する HTTP MCP",
-      descriptionEn:
-        "HTTP MCP servers to operate each UNI product from any AI client",
+      descKey: "addons.uni.mcpDesc",
     },
     {
       id: "skill",
       label: "Claude Skills",
-      descriptionJa: "UNI シリーズ向け専用スキル（LP・テーマ展開など）",
-      descriptionEn:
-        "Claude skills tailored for UNI workflows (LPs, theming, etc.)",
+      descKey: "addons.uni.skillDesc",
     },
     {
       id: "extension",
       label: "Extensions",
-      descriptionJa: "VS Code など外部ツール用拡張",
-      descriptionEn: "Extensions for VS Code and other external tools",
+      descKey: "addons.uni.extensionDesc",
     },
   ];
   return (
@@ -1158,11 +1125,9 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
       <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-900 leading-relaxed">
         <div className="font-semibold mb-0.5 inline-flex items-center gap-1.5">
           <Puzzle size={13} />
-          UNI Series — Coming Soon
+          {tr("addons.uni.bannerTitle")}
         </div>
-        {locale === "ja"
-          ? "UNICREW 内から uniLinks の SaaS 群・MCP・スキル・拡張をワンクリックで導入できる UNI ハブを開発中です。販売開始までは一覧プレビューのみ公開しています。"
-          : "We are building a one-click UNI hub inside UNICREW for the uniLinks SaaS suite, MCP servers, skills, and extensions. Until launch this is a preview-only listing."}
+        {tr("addons.uni.bannerBody")}
       </div>
       {sections.map((sec) => {
         const items = grouped[sec.id];
@@ -1170,10 +1135,10 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
         return (
           <div key={sec.id}>
             <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
-              {sec.label}（{items.length}）
+              {tr("addons.uni.sectionCount", { label: sec.label, count: items.length })}
             </div>
             <div className="text-[11.5px] text-[var(--color-muted)] mb-1.5">
-              {locale === "ja" ? sec.descriptionJa : sec.descriptionEn}
+              {tr(sec.descKey)}
             </div>
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {items.map((p) => (
@@ -1187,7 +1152,7 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
                         {p.name}
                       </span>
                       <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-                        Coming Soon
+                        {tr("addons.uni.comingSoon")}
                       </span>
                     </div>
                     <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 leading-snug">
@@ -1200,7 +1165,7 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
                       target="_blank"
                       rel="noreferrer"
                       className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-accent)] mt-0.5"
-                      title={`${p.url} を開く`}
+                      title={tr("addons.uni.openLink", { url: p.url })}
                     >
                       <ExternalLink size={13} />
                     </a>
@@ -1226,6 +1191,7 @@ function RecommendationRow({
   installing?: boolean;
   onInstall?: () => void;
 }) {
+  const { t: tr } = useTranslation();
   const supported = !!onInstall;
   const localized = describePlugin(item.id, item.description, locale);
   const description = localized.description || item.description;
@@ -1238,7 +1204,7 @@ function RecommendationRow({
           {item.verified && (
             <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
               <CheckCircle2 size={10} />
-              {locale === "ja" ? "検証済み" : "Verified"}
+              {tr("addons.row.verified")}
             </span>
           )}
           <span className="text-[10.5px] font-mono text-[var(--color-muted)]">
@@ -1259,12 +1225,8 @@ function RecommendationRow({
         onClick={onInstall}
         title={
           supported
-            ? locale === "ja"
-              ? "1クリックで追加（claude CLI 経由）"
-              : "Install with one click (via claude CLI)"
-            : locale === "ja"
-              ? "Codex 側の 1 クリック追加は Phase D で実装予定"
-              : "Codex 1-click install coming in Phase D"
+            ? tr("addons.row.installSupportedTitle")
+            : tr("addons.row.installUnsupportedTitle")
         }
         className={clsx(
           "px-3 py-1.5 text-[12px] rounded-md text-white whitespace-nowrap inline-flex items-center gap-1.5",
@@ -1276,17 +1238,15 @@ function RecommendationRow({
         {installing ? (
           <>
             <Loader2 size={12} className="animate-spin" />
-            {locale === "ja" ? "追加中…" : "Installing…"}
+            {tr("addons.row.installingShort")}
           </>
         ) : supported ? (
           <>
             <Plus size={12} />
-            {locale === "ja" ? "追加" : "Install"}
+            {tr("addons.install")}
           </>
-        ) : locale === "ja" ? (
-          "近日"
         ) : (
-          "Soon"
+          tr("addons.row.soonShort")
         )}
       </button>
     </li>
@@ -1300,12 +1260,13 @@ function CustomMarketplaceForm({
   onAdded: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
+  const { t: tr } = useTranslation();
   const [id, setId] = useState("");
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     if (!id.trim() || !repo.trim()) {
-      onError("ID と GitHub リポを両方入れてください");
+      onError(tr("addons.market.errIdRepo"));
       return;
     }
     setBusy(true);
@@ -1324,25 +1285,24 @@ function CustomMarketplaceForm({
     <div className="p-3 rounded-md bg-amber-50/60 border border-amber-200 text-[12px] space-y-2">
       <div className="font-semibold text-amber-800 flex items-center gap-1.5">
         <ShieldCheck size={13} />
-        カスタム marketplace を追加
+        {tr("addons.market.heading")}
       </div>
       <div className="text-amber-800/80 leading-relaxed text-[11.5px]">
-        Anthropic / OpenAI 公式以外の Claude プラグイン marketplace（GitHub リポ）を登録します。
-        信頼できるソースのみ追加してください。
+        {tr("addons.market.desc")}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <input
           type="text"
           value={id}
           onChange={(e) => setId(e.target.value)}
-          placeholder="ID（例: my-team-plugins）"
+          placeholder={tr("addons.market.idPlaceholder")}
           className="border border-amber-300 rounded-md px-2 py-1.5 text-[12px] bg-white"
         />
         <input
           type="text"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          placeholder="GitHub repo（例: my-org/my-plugins）"
+          placeholder={tr("addons.market.repoPlaceholder")}
           className="border border-amber-300 rounded-md px-2 py-1.5 text-[12px] bg-white"
         />
       </div>
@@ -1355,12 +1315,12 @@ function CustomMarketplaceForm({
         {busy ? (
           <>
             <Loader2 size={12} className="animate-spin" />
-            clone 中…
+            {tr("addons.market.cloning")}
           </>
         ) : (
           <>
             <Plus size={12} />
-            marketplace を追加
+            {tr("addons.market.add")}
           </>
         )}
       </button>
@@ -1377,6 +1337,7 @@ function CustomMcpForm({
   onAdded: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
+  const { t: tr } = useTranslation();
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"stdio" | "sse" | "http">("stdio");
   const [command, setCommand] = useState("");
@@ -1386,7 +1347,7 @@ function CustomMcpForm({
 
   const submit = async () => {
     if (!name.trim()) {
-      onError("MCP サーバー名を入力してください");
+      onError(tr("addons.mcp.errName"));
       return;
     }
     const req: McpAddRequest = {
@@ -1401,21 +1362,21 @@ function CustomMcpForm({
       env: null,
     };
     if (kind === "stdio" && !req.command) {
-      onError("stdio タイプには command を入れてください");
+      onError(tr("addons.mcp.errStdioCmd"));
       return;
     }
     if (kind !== "stdio" && !req.url) {
-      onError(`${kind} タイプには URL を入れてください`);
+      onError(tr("addons.mcp.errUrl", { kind }));
       return;
     }
     setBusy(true);
     try {
       if (source === "codex") {
         await addCodexMcp(req);
-        onAdded(`MCP '${req.name}' を ~/.codex/config.toml に追加しました`);
+        onAdded(tr("addons.mcp.addedCodex", { name: req.name }));
       } else {
         await addClaudeMcp(req);
-        onAdded(`MCP '${req.name}' を ~/.claude.json に追加しました`);
+        onAdded(tr("addons.mcp.addedClaude", { name: req.name }));
       }
       setName("");
       setCommand("");
@@ -1432,18 +1393,17 @@ function CustomMcpForm({
     <div className="p-3 rounded-md bg-sky-50/60 border border-sky-200 text-[12px] space-y-2">
       <div className="font-semibold text-sky-800 flex items-center gap-1.5">
         <Blocks size={13} />
-        MCP サーバーを追加
+        {tr("addons.mcp.heading")}
       </div>
       <div className="text-sky-800/80 leading-relaxed text-[11.5px]">
-        Notion / Slack / GitHub など外部サービスを Claude から操作する MCP サーバーを登録します。
-        次回起動時に有効化されます。
+        {tr("addons.mcp.desc")}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="サーバー名（例: notion）"
+          placeholder={tr("addons.mcp.namePlaceholder")}
           className="border border-sky-300 rounded-md px-2 py-1.5 text-[12px] bg-white sm:col-span-2"
         />
         <select
@@ -1453,7 +1413,7 @@ function CustomMcpForm({
           }
           className="border border-sky-300 rounded-md px-2 py-1.5 text-[12px] bg-white"
         >
-          <option value="stdio">stdio（コマンド型）</option>
+          <option value="stdio">{tr("addons.mcp.stdioOption")}</option>
           <option value="sse">sse</option>
           <option value="http">http</option>
         </select>
@@ -1464,14 +1424,14 @@ function CustomMcpForm({
             type="text"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder="command（例: npx）"
+            placeholder={tr("addons.mcp.commandPlaceholder")}
             className="w-full border border-sky-300 rounded-md px-2 py-1.5 text-[12px] bg-white font-mono"
           />
           <input
             type="text"
             value={args}
             onChange={(e) => setArgs(e.target.value)}
-            placeholder="args をスペース区切り（例: -y @notionhq/mcp）"
+            placeholder={tr("addons.mcp.argsPlaceholder")}
             className="w-full border border-sky-300 rounded-md px-2 py-1.5 text-[12px] bg-white font-mono"
           />
         </>
@@ -1480,7 +1440,7 @@ function CustomMcpForm({
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="URL（例: https://example.com/mcp）"
+          placeholder={tr("addons.mcp.urlPlaceholder")}
           className="w-full border border-sky-300 rounded-md px-2 py-1.5 text-[12px] bg-white font-mono"
         />
       )}
@@ -1493,12 +1453,12 @@ function CustomMcpForm({
         {busy ? (
           <>
             <Loader2 size={12} className="animate-spin" />
-            追加中…
+            {tr("addons.mcp.adding")}
           </>
         ) : (
           <>
             <Plus size={12} />
-            MCP サーバーを追加
+            {tr("addons.mcp.addBtn")}
           </>
         )}
       </button>

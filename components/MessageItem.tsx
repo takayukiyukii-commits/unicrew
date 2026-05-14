@@ -11,6 +11,7 @@ import { UserAvatar } from "./UserAvatar";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { resolveFilePath, segmentText } from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
+import { useTranslation } from "@/lib/i18n";
 import clsx from "clsx";
 
 interface Props {
@@ -67,6 +68,7 @@ export function MessageItem({
   workspace,
   userProfile,
 }: Props) {
+  const { t } = useTranslation();
   const isUser = message.role === "user";
   const showSos = !isUser && onSosForError && looksLikeError(message.content);
   // ReactMarkdown は markdown ASTを `<p>`, `<li>`, `<strong>` ... と HTML 要素に近い
@@ -115,8 +117,8 @@ export function MessageItem({
           avatarPath={userProfile?.avatarPath ?? null}
           emoji={userProfile?.emoji}
           accentColor={userProfile?.accentColor}
-          fallbackText={userProfile?.displayName?.trim().charAt(0) || "あ"}
-          title={userProfile?.displayName?.trim() || "あなた"}
+          fallbackText={userProfile?.displayName?.trim().charAt(0) || t("message.youInitial")}
+          title={userProfile?.displayName?.trim() || t("message.youDefault")}
           size={36}
         />
       ) : (
@@ -126,8 +128,8 @@ export function MessageItem({
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-semibold">
             {isUser
-              ? userProfile?.displayName?.trim() || "あなた"
-              : character?.name ?? "Claude"}
+              ? userProfile?.displayName?.trim() || t("message.youDefault")
+              : character?.name ?? t("message.assistantDefault")}
           </span>
           {!isUser && character && (
             <span className="text-[11px] text-[var(--color-muted)]">
@@ -168,10 +170,10 @@ export function MessageItem({
             type="button"
             onClick={() => onSosForError?.(message.content)}
             className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-100 border border-amber-300 text-amber-900 text-[11.5px] font-medium hover:bg-amber-200 transition"
-            title="このエラーをAIに診断・修復してもらう"
+            title={t("message.sosTitle")}
           >
             <LifeBuoy size={12} />
-            このエラーをAIに助けてもらう
+            {t("message.sosLabel")}
           </button>
         )}
         {!isUser && message.stats && <StatsLine stats={message.stats} />}
@@ -228,6 +230,7 @@ function CodeBlockShell({
   onExecute?: (command: string, lang: string) => void;
   children?: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -249,17 +252,17 @@ function CodeBlockShell({
         <button
           onClick={copy}
           className="px-1.5 py-1 rounded text-[11px] bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 inline-flex items-center gap-1"
-          title="クリップボードにコピー"
+          title={t("message.copyTitle")}
         >
           {copied ? (
             <>
               <Check size={11} />
-              コピー済
+              {t("message.copied")}
             </>
           ) : (
             <>
               <Copy size={11} />
-              コピー
+              {t("message.copy")}
             </>
           )}
         </button>
@@ -267,10 +270,10 @@ function CodeBlockShell({
           <button
             onClick={() => onExecute(text, lang || "bash")}
             className="px-2 py-1 rounded text-[11px] bg-emerald-500 hover:bg-emerald-600 text-white inline-flex items-center gap-1 font-medium"
-            title="このコマンドを UNICREW で実行する（AI が Bash ツールで自動実行）"
+            title={t("message.executeTitle")}
           >
             <Play size={11} fill="currentColor" />
-            実行
+            {t("message.execute")}
           </button>
         )}
       </div>
@@ -345,6 +348,7 @@ function FilePathLink({
   path: string;
   workspace: string | null;
 }) {
+  const { t } = useTranslation();
   // VSCode 風: 修飾キー (Ctrl/Cmd) なしの単純クリックでは何も起こらず、テキスト選択が普通にできる。
   // Ctrl+Click（Win/Linux）または Cmd+Click（Mac）で別ウィンドウのエディタを開く。
   // 中ボタンクリックも同等扱い。
@@ -370,7 +374,7 @@ function FilePathLink({
       onClick={tryOpen}
       onAuxClick={tryOpen}
       // ホバーで「Ctrl+Click で開く」を案内
-      title={`Ctrl+クリックで別ウィンドウで開く: ${absoluteForTitle}`}
+      title={t("message.fileLinkTitle").replace("{path}", absoluteForTitle)}
       className="text-[var(--color-accent)] underline decoration-dotted underline-offset-2 hover:decoration-solid"
       // 通常テキストとして選択もできるよう cursor は text のまま、ホバー時のみ移動感を出す
       style={{ cursor: "text" }}

@@ -2,6 +2,7 @@
 
 import { Shield, FileEdit, Terminal, Search, FileText, AlertTriangle } from "lucide-react";
 import type { PendingPermission } from "@/lib/types";
+import { useTranslation, t as translate } from "@/lib/i18n";
 
 interface Props {
   pending: PendingPermission | null;
@@ -22,17 +23,17 @@ function summary(toolName: string, input: Record<string, unknown>): string {
     case "Bash":
       return String(i.command ?? "");
     case "Read":
-      return `ファイルを読む：${String(i.file_path ?? "")}`;
+      return translate("permission.summaryRead", { path: String(i.file_path ?? "") });
     case "Edit":
-      return `ファイルを編集：${String(i.file_path ?? "")}`;
+      return translate("permission.summaryEdit", { path: String(i.file_path ?? "") });
     case "Write":
-      return `ファイルを書き込む：${String(i.file_path ?? "")}`;
+      return translate("permission.summaryWrite", { path: String(i.file_path ?? "") });
     case "MultiEdit":
-      return `複数編集：${String(i.file_path ?? "")}`;
+      return translate("permission.summaryMultiEdit", { path: String(i.file_path ?? "") });
     case "Glob":
-      return `ファイル検索：${String(i.pattern ?? "")}`;
+      return translate("permission.summaryGlob", { pattern: String(i.pattern ?? "") });
     case "Grep":
-      return `内容検索：${String(i.pattern ?? "")}`;
+      return translate("permission.summaryGrep", { pattern: String(i.pattern ?? "") });
     default:
       return JSON.stringify(i).slice(0, 200);
   }
@@ -49,6 +50,7 @@ const RISK_LEVEL: Record<string, "low" | "mid" | "high"> = {
 };
 
 export function PermissionPromptModal({ pending, onDecide }: Props) {
+  const { t } = useTranslation();
   if (!pending) return null;
   const Icon = iconFor(pending.toolName);
   const risk = RISK_LEVEL[pending.toolName] ?? "mid";
@@ -58,7 +60,12 @@ export function PermissionPromptModal({ pending, onDecide }: Props) {
       : risk === "mid"
         ? "text-amber-700 bg-amber-50 border-amber-200"
         : "text-emerald-700 bg-emerald-50 border-emerald-200";
-  const riskLabel = risk === "high" ? "高リスク" : risk === "mid" ? "中リスク" : "低リスク";
+  const riskLabel =
+    risk === "high"
+      ? t("permission.riskHigh")
+      : risk === "mid"
+        ? t("permission.riskMid")
+        : t("permission.riskLow");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
@@ -69,7 +76,7 @@ export function PermissionPromptModal({ pending, onDecide }: Props) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="font-bold text-[15px]">許可が必要です</h2>
+              <h2 className="font-bold text-[15px]">{t("permission.title")}</h2>
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${riskColor}`}
               >
@@ -77,14 +84,16 @@ export function PermissionPromptModal({ pending, onDecide }: Props) {
               </span>
             </div>
             <p className="text-[12px] text-[var(--color-muted)]">
-              ツール「<span className="font-mono">{pending.toolName}</span>」を実行しようとしています。
+              {t("permission.subtitleA")}
+              <span className="font-mono">{pending.toolName}</span>
+              {t("permission.subtitleB")}
             </p>
           </div>
         </div>
 
         <div className="px-5 py-4 space-y-3">
           <div className="text-[12px] font-semibold text-[var(--color-muted)] uppercase tracking-wide">
-            実行内容
+            {t("permission.actionLabel")}
           </div>
           <pre className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md p-3 text-[12.5px] whitespace-pre-wrap break-words max-h-60 overflow-auto font-mono">
             {summary(pending.toolName, pending.input)}
@@ -94,8 +103,7 @@ export function PermissionPromptModal({ pending, onDecide }: Props) {
             <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-md text-[12px] text-red-700">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <div>
-                シェルコマンドはシステムを変更したりネット越しに通信したりできます。
-                内容を必ず確認してから許可してください。
+                {t("permission.highRiskWarning")}
               </div>
             </div>
           )}
@@ -106,19 +114,19 @@ export function PermissionPromptModal({ pending, onDecide }: Props) {
             onClick={() => onDecide("deny")}
             className="px-4 py-2 text-sm rounded-md hover:bg-white transition"
           >
-            拒否
+            {t("permission.deny")}
           </button>
           <button
             onClick={() => onDecide("allow_once")}
             className="px-4 py-2 text-sm rounded-md border border-[var(--color-border)] hover:bg-white transition"
           >
-            今回だけ許可
+            {t("permission.allowOnce")}
           </button>
           <button
             onClick={() => onDecide("allow")}
             className="px-4 py-2 text-sm rounded-md bg-[var(--color-accent)] text-white hover:opacity-90 transition"
           >
-            許可
+            {t("permission.allow")}
           </button>
         </div>
       </div>

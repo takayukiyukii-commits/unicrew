@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "@/lib/i18n";
 
 export interface MenuAction {
   label: string;
@@ -40,6 +41,7 @@ interface Props {
 }
 
 export function AppMenuBar({ menus, onCheckUpdates }: Props) {
+  const { t } = useTranslation();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{
@@ -80,7 +82,7 @@ export function AppMenuBar({ menus, onCheckUpdates }: Props) {
       } else {
         setUpdateInfo({
           hasUpdate: false,
-          message: "現時点で最新版です（v0.1.0）",
+          message: t("appmenu.upToDate"),
           checkedAt: Date.now(),
         });
       }
@@ -177,22 +179,22 @@ export function AppMenuBar({ menus, onCheckUpdates }: Props) {
               : "bg-white text-[var(--color-muted)] border-[var(--color-border)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]",
             checking && "opacity-60 cursor-wait",
           )}
-          title="アップデートを確認"
+          title={t("appmenu.checkUpdates")}
         >
           {checking ? (
             <>
               <Loader2 size={12} className="animate-spin" />
-              確認中…
+              {t("appmenu.checking")}
             </>
           ) : updateInfo?.hasUpdate ? (
             <>
               <Download size={12} />
-              アップデートあり
+              {t("appmenu.updateAvailable")}
             </>
           ) : (
             <>
               <RefreshCw size={12} />
-              アップデートを確認
+              {t("appmenu.checkUpdates")}
             </>
           )}
         </button>

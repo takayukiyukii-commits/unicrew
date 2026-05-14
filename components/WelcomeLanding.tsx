@@ -20,6 +20,7 @@ import {
   ConferencePresets,
   type ConferencePreset,
 } from "@/components/ConferencePresets";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   onCreate: () => void;
@@ -59,6 +60,7 @@ export function WelcomeLanding({
   onStartFreeMode,
   onApplyPreset,
 }: Props) {
+  const { t } = useTranslation();
   const [claude, setClaude] = useState<Status | null>(null);
   const [codex, setCodex] = useState<Status | null>(null);
 
@@ -100,10 +102,10 @@ export function WelcomeLanding({
             </span>
           </h1>
           <p className="text-[15px] text-[var(--color-muted)]">
-            AIを動かすことに、特化したデスクトップ。
+            {t("welcome.tagline")}
           </p>
           <p className="text-[12.5px] text-[var(--color-muted)] mt-1">
-            業界標準 ACP 対応のマルチAI ランチャー。サブスクでも、ローカル AI でも動く。
+            {t("welcome.subTagline")}
           </p>
         </div>
 
@@ -115,10 +117,10 @@ export function WelcomeLanding({
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-bold text-[15px] text-[var(--color-text)] mb-1">
-                まずは無料で試す
+                {t("welcome.freeTitle")}
               </div>
               <p className="text-[12.5px] text-[var(--color-muted)] leading-relaxed mb-3">
-                API キー不要。ローカルで動く OSS AI（OpenCode + Ollama）を自動セットアップして、UNICREW の議論モード・並列モードをすぐ体験できます。
+                {t("welcome.freeBody")}
               </p>
               <button
                 type="button"
@@ -126,7 +128,7 @@ export function WelcomeLanding({
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white text-[13px] font-semibold hover:opacity-90 shadow-sm"
               >
                 <Sparkles size={14} />
-                1分で始める
+                {t("welcome.freeCta")}
               </button>
             </div>
           </div>
@@ -136,11 +138,11 @@ export function WelcomeLanding({
         <details className="mb-8 rounded-xl border border-[var(--color-border)] bg-white open:shadow-sm">
           <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-[12.5px] text-[var(--color-text)] font-medium hover:bg-[var(--color-surface)] rounded-xl">
             <ChevronDown size={14} className="text-[var(--color-muted)] transition-transform" />
-            <span>Claude / Codex / Gemini のサブスクをお持ちの方</span>
+            <span>{t("welcome.subscribersDetails")}</span>
             {hasAnyConnected && (
               <span className="ml-auto text-[11px] text-emerald-600 inline-flex items-center gap-1">
                 <CheckCircle2 size={12} />
-                接続済み
+                {t("welcome.connected")}
               </span>
             )}
           </summary>
@@ -171,18 +173,18 @@ export function WelcomeLanding({
         <div className="grid grid-cols-3 gap-3 mb-6">
           <FeatureCard
             icon={<Users size={16} />}
-            title="議論モード"
-            body="複数の AI に役割を持たせて議論させる。プリセットあり。"
+            title={t("welcome.featureDiscussTitle")}
+            body={t("welcome.featureDiscussBody")}
           />
           <FeatureCard
             icon={<Split size={16} />}
-            title="並列モード"
-            body="2社以上を同時実行。レスポンスを横並びで比較。"
+            title={t("welcome.featureParallelTitle")}
+            body={t("welcome.featureParallelBody")}
           />
           <FeatureCard
             icon={<FolderOpen size={16} />}
-            title="ローカルファイル"
-            body="フォルダを選んで開けば、AI がそこを編集・実行。"
+            title={t("welcome.featureLocalTitle")}
+            body={t("welcome.featureLocalBody")}
           />
         </div>
 
@@ -194,9 +196,9 @@ export function WelcomeLanding({
             <summary className="cursor-pointer list-none px-4 py-3 flex items-center gap-2 text-[12.5px] text-[var(--color-text)] font-medium hover:bg-[var(--color-surface)] rounded-xl">
               <ChevronDown size={14} className="text-[var(--color-muted)] transition-transform" />
               <Users size={14} className="text-[var(--color-accent)]" />
-              <span>プリセットから議論を始める</span>
+              <span>{t("welcome.presetsDetails")}</span>
               <span className="ml-auto text-[10.5px] text-[var(--color-muted)]">
-                定番3社 / コードレビュー / ACP 3社 ほか
+                {t("welcome.presetsHint")}
               </span>
             </summary>
             <div className="px-4 pb-4 pt-2 border-t border-[var(--color-border)]">
@@ -215,21 +217,21 @@ export function WelcomeLanding({
             className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[var(--color-accent)] text-white font-semibold text-sm hover:opacity-90 transition shadow-sm"
           >
             <Plus size={16} />
-            最初の会話を始める
+            {t("welcome.startCta")}
           </button>
           <button
             onClick={onOpenSettings}
             className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white border border-[var(--color-border)] text-[var(--color-text)] font-medium text-sm hover:bg-[var(--color-surface)] transition"
           >
             <SettingsIcon size={15} />
-            設定
+            {t("welcome.openSettings")}
           </button>
         </div>
 
         <div className="mt-10 text-center text-[11px] text-[var(--color-muted)] leading-relaxed">
-          UNICREW β は uniLinks UNI シリーズの一員です。
+          {t("welcome.footerLine1")}
           <br />
-          AI の応答とツール実行は誤りを含むことがあります。
+          {t("welcome.footerLine2")}
         </div>
       </div>
     </main>
@@ -251,6 +253,7 @@ function SetupGuide({
   onOpenSettings: () => void;
   onCreate: () => void;
 }) {
+  const { t } = useTranslation();
   if (!claude) return null;
 
   const stepIndex = (() => {
@@ -262,29 +265,29 @@ function SetupGuide({
   const message = (() => {
     if (!claude.installed) {
       return {
-        title: "Claude Code の自動インストールから",
-        body: "「設定」ボタンから「Claude Code を自動インストール」を押すと 2〜3 分で完了します。",
-        primary: { label: "設定を開く", onClick: onOpenSettings },
+        title: t("welcome.setup.installTitle"),
+        body: t("welcome.setup.installBody"),
+        primary: { label: t("welcome.setup.openSettings"), onClick: onOpenSettings },
       };
     }
     if (!claude.logged_in) {
       return {
-        title: "Claude にログインしましょう",
-        body: "Claude Pro / Max のアカウントでログインすると、API キーなしで使えます。",
-        primary: { label: "ログインに進む", onClick: onOpenSettings },
+        title: t("welcome.setup.loginTitle"),
+        body: t("welcome.setup.loginBody"),
+        primary: { label: t("welcome.setup.loginCta"), onClick: onOpenSettings },
       };
     }
     if (codex && !codex.logged_in) {
       return {
-        title: "Codex も並列で使うなら（任意）",
-        body: "Codex CLI を入れてログインすると、Claude と並列で動かして相互レビューや議論モードが使えます。",
-        primary: { label: "最初の会話を始める", onClick: onCreate },
+        title: t("welcome.setup.codexTitle"),
+        body: t("welcome.setup.codexBody"),
+        primary: { label: t("welcome.setup.startConversation"), onClick: onCreate },
       };
     }
     return {
-      title: "セットアップ完了",
-      body: "Claude（normal）/ Codex（normal）で素の CLI をそのまま動かせます。",
-      primary: { label: "最初の会話を始める", onClick: onCreate },
+      title: t("welcome.setup.doneTitle"),
+      body: t("welcome.setup.doneBody"),
+      primary: { label: t("welcome.setup.startConversation"), onClick: onCreate },
     };
   })();
 
@@ -297,10 +300,10 @@ function SetupGuide({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-[11px] font-semibold text-[var(--color-accent)]">
-              UNICREW セットアップ
+              {t("welcome.setup.label")}
             </span>
             <span className="text-[10.5px] text-[var(--color-muted)] font-mono">
-              Step {stepIndex}/3
+              {t("welcome.setup.step")} {stepIndex}/3
             </span>
           </div>
           <div className="font-bold text-[13px] text-[var(--color-text)] mb-1">
@@ -349,6 +352,7 @@ function StatusRow({
   onFix: () => void;
   optional?: boolean;
 }) {
+  const { t } = useTranslation();
   const ok = status?.installed && status?.logged_in;
   return (
     <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--color-border)] bg-white">
@@ -358,7 +362,7 @@ function StatusRow({
           <span>{label}</span>
           {!status && (
             <span className="text-[10.5px] text-[var(--color-muted)]">
-              確認中…
+              {t("common.checking")}
             </span>
           )}
           {ok && (
@@ -370,13 +374,13 @@ function StatusRow({
         </div>
         <div className="text-[10.5px] text-[var(--color-muted)] truncate">
           {!status
-            ? "—"
+            ? t("common.empty")
             : ok
-              ? "ログイン済み"
+              ? t("welcome.status.loggedIn")
               : status.installed
-                ? "未ログイン"
-                : "未インストール"}
-          {optional && !ok && "（任意）"}
+                ? t("welcome.status.notLoggedIn")
+                : t("welcome.status.notInstalled")}
+          {optional && !ok && t("common.optional")}
         </div>
       </div>
       {status && !ok && (
@@ -384,7 +388,7 @@ function StatusRow({
           onClick={onFix}
           className="text-[11px] text-[var(--color-accent)] hover:underline shrink-0"
         >
-          設定
+          {t("welcome.status.fix")}
         </button>
       )}
     </div>

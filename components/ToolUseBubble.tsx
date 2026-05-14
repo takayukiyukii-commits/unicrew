@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ToolUseBlock } from "@/lib/types";
 import { useShowActivity } from "./ActivityContext";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   block: ToolUseBlock;
@@ -53,6 +54,7 @@ function summary(toolName: string, input: Record<string, unknown>): string {
 }
 
 export function ToolUseBubble({ block }: Props) {
+  const { t } = useTranslation();
   const show = useShowActivity();
   if (!show) return null; // 日本語のみモード時はツール詳細を出さない
   // TodoWrite は Claude Code 風のチェックリスト表示にする。
@@ -86,11 +88,11 @@ export function ToolUseBubble({ block }: Props) {
             className={`${statusColor} ${status === "pending" || status === "approved" ? "animate-spin" : ""}`}
           />
           <span className={`text-[11px] ${statusColor}`}>
-            {status === "pending" && "確認待ち"}
-            {status === "approved" && "実行中"}
-            {status === "completed" && "完了"}
-            {status === "errored" && "エラー"}
-            {status === "denied" && "拒否"}
+            {status === "pending" && t("tool.statusPending")}
+            {status === "approved" && t("tool.statusApproved")}
+            {status === "completed" && t("tool.statusCompleted")}
+            {status === "errored" && t("tool.statusErrored")}
+            {status === "denied" && t("tool.statusDenied")}
           </span>
         </div>
         <div className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-muted)]">
@@ -102,6 +104,7 @@ export function ToolUseBubble({ block }: Props) {
 }
 
 function TodoListBubble({ block }: { block: ToolUseBlock }) {
+  const { t: tr } = useTranslation();
   const todosRaw = (block.input as { todos?: unknown }).todos;
   const todos: TodoItem[] = Array.isArray(todosRaw)
     ? (todosRaw.filter(
@@ -115,7 +118,7 @@ function TodoListBubble({ block }: { block: ToolUseBlock }) {
     inProgress?.activeForm ??
     inProgress?.content ??
     todos.find((t) => t.status === "pending")?.content ??
-    "タスク整理中…";
+    tr("tool.todoOrganizing");
 
   const isStreaming =
     block.status === "pending" || block.status === "approved";
@@ -131,7 +134,7 @@ function TodoListBubble({ block }: { block: ToolUseBlock }) {
           {todos.length > 0 && (
             <span className="text-[10.5px] text-[var(--color-muted)]">
               {todos.filter((t) => t.status === "completed").length}/
-              {todos.length} 完了
+              {todos.length}{tr("tool.todoCompletedSuffix")}
             </span>
           )}
           {isStreaming && (

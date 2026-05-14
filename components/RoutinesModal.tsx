@@ -9,6 +9,7 @@ import {
   saveRoutines,
   type Routine,
 } from "@/lib/routines";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -24,6 +25,7 @@ interface Props {
  * 毎日HH:MMに指定スレッドへプロンプトを送るルーティーンの登録・有効化・削除UI。
  */
 export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
+  const { t: tr } = useTranslation();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [draft, setDraft] = useState({
     label: "",
@@ -93,24 +95,23 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
         <div className="shrink-0 px-5 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
           <Calendar size={16} className="text-[var(--color-accent)]" />
           <h2 className="font-bold text-[15px] flex-1">
-            ルーティーン（毎日定期実行）
+            {tr("routines.title")}
           </h2>
           <span className="text-[11px] text-[var(--color-muted)]">
-            {routines.filter((r) => r.enabled).length} 有効 / {routines.length} 登録
+            {tr("routines.count", { enabled: routines.filter((r) => r.enabled).length, total: routines.length })}
           </span>
           <button
             type="button"
             onClick={onClose}
             className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            aria-label="閉じる"
+            aria-label={tr("common.close")}
           >
             <X size={16} />
           </button>
         </div>
 
         <div className="px-5 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)]/40 text-[11.5px] text-[var(--color-muted)] leading-relaxed">
-          UNICREWを起動している間、毎日指定の時刻に該当スレッドへプロンプトを自動送信します。
-          PC スリープ中は発火しませんが、起動後の同日中に該当時刻を過ぎていれば1回だけまとめて実行されます。
+          {tr("routines.intro")}
         </div>
 
         {/* 新規ルーティーン追加フォーム */}
@@ -122,7 +123,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
               onChange={(e) =>
                 setDraft({ ...draft, label: e.target.value })
               }
-              placeholder="ラベル（例: 朝の議題ブリーフ）"
+              placeholder={tr("routines.labelPlaceholder")}
               className="flex-1 border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
             />
             <select
@@ -133,7 +134,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
               className="border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white"
             >
               {threads.length === 0 && (
-                <option value="">（先にスレッドを作成）</option>
+                <option value="">{tr("routines.threadEmpty")}</option>
               )}
               {threads.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -171,7 +172,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
             value={draft.prompt}
             onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
             rows={2}
-            placeholder="送信するプロンプト（例：今日のXトレンドを5件まとめて）"
+            placeholder={tr("routines.promptPlaceholder")}
             className="w-full resize-none border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
           />
           <button
@@ -185,18 +186,18 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-[12px] font-medium disabled:opacity-30"
           >
             <Plus size={11} />
-            ルーティーンを追加
+            {tr("routines.addCta")}
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto unicrew-scroll px-3 py-2 space-y-1.5">
           {routines.length === 0 ? (
             <div className="text-[12px] text-[var(--color-muted)] py-4 text-center">
-              まだルーティーンはありません。上のフォームから追加してください。
+              {tr("routines.empty")}
             </div>
           ) : (
             routines.map((r) => {
-              const t = threads.find((x) => x.id === r.threadId);
+              const thread = threads.find((x) => x.id === r.threadId);
               return (
                 <div
                   key={r.id}
@@ -215,14 +216,14 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                       {r.label}
                     </span>
                     <span className="text-[10.5px] text-[var(--color-muted)] truncate max-w-[120px]">
-                      {t?.title ?? "(削除済みスレッド)"}
+                      {thread?.title ?? tr("routines.deletedThread")}
                     </span>
                     {onRunNow && (
                       <button
                         type="button"
                         onClick={() => onRunNow(r.threadId, r.prompt)}
                         className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600"
-                        title="今すぐ実行（テスト）"
+                        title={tr("routines.runNow")}
                       >
                         <Play size={11} />
                       </button>
@@ -235,7 +236,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                           ? "text-emerald-600 hover:bg-emerald-50"
                           : "text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
                       }`}
-                      title={r.enabled ? "一時停止" : "再開"}
+                      title={r.enabled ? tr("routines.pause") : tr("routines.resume")}
                     >
                       <Power size={11} />
                     </button>
@@ -243,7 +244,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                       type="button"
                       onClick={() => remove(r.id)}
                       className="p-0.5 rounded hover:bg-red-50 text-red-500"
-                      title="削除"
+                      title={tr("routines.delete")}
                     >
                       <Trash2 size={11} />
                     </button>
@@ -253,7 +254,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                   </div>
                   {r.schedule.lastFiredDay && (
                     <div className="mt-0.5 text-[10px] text-[var(--color-muted)]">
-                      最終発火: {r.schedule.lastFiredDay}
+                      {tr("routines.lastFired", { day: r.schedule.lastFiredDay })}
                     </div>
                   )}
                 </div>
