@@ -1,5 +1,21 @@
 name: release
 
+# UNICREW のクロスプラットフォーム ビルド & GitHub Release ドラフト作成。
+#
+# トリガ:
+#   - `vX.Y.Z` 形式のタグを push したとき
+#   - 手動実行（workflow_dispatch）
+#
+# 出力（GitHub Release のドラフトに自動添付）:
+#   - Windows : .msi / -setup.exe + 各 .sig + latest.json
+#   - macOS   : universal .dmg + .app.tar.gz + 各 .sig （Apple Silicon / Intel 両対応 universal バイナリ）
+#   - Linux   : .AppImage / .deb （ベストエフォート、失敗してもリリースを止めない）
+#
+# 必要な GitHub Secrets:
+#   - TAURI_SIGNING_PRIVATE_KEY            ... minisign 秘密鍵の本文
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD   ... 同パスフレーズ
+#   詳細は .github/RELEASE_SETUP.md を参照
+
 on:
   push:
     tags:
@@ -7,8 +23,13 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: "Tag to release (e.g. v0.1.0). Leave empty to use commit SHA"
+        description: "Tag to release (e.g. v0.2.3). Leave empty to use commit SHA"
         required: false
+
+# 同じタグの多重実行をブロック
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -18,12 +39,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ── macOS: Apple Silicon + Intel を 1 本の universal バイナリにまとめる
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin"
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            label: "macOS (universal)"
+            allow-failure: false
+          # ── Windows
           - platform: "windows-latest"
             args: ""
+            rust-targets: ""
+            label: "Windows"
+            allow-failure: false
+          # ── Linux はベストエフォート（失敗してもリリースを止めない）
+          - platform: "ubuntu-22.04"
+            args: ""
+            rust-targets: ""
+            label: "Linux"
+            allow-failure: true
     runs-on: ${{ matrix.platform }}
+    continue-on-error: ${{ matrix.allow-failure }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -31,13 +70,30 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      # Rust stable + macOS は universal バイナリ用に両アーキ追加
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
-      - name: Cache Rust
+      - name: Cache Rust target
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          key: ${{ matrix.platform }}
+
+      # Linux ビルドに必要な webkit2gtk / appindicator / rsvg などを導入
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
 
       - name: Install frontend dependencies
         run: npm ci
@@ -46,24 +102,44 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tauri Updater 用 minisign 署名（Ed25519）。両 OS 共通。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # ── 以下は Apple Developer Program に加入後、コード署名 + notarization する時に有効化:
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}                # base64(.p12)
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}      # "Developer ID Application: <Name> (<TeamID>)"
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}                      # App-specific password
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.event.inputs.version_tag || github.ref_name }}
           releaseName: "UNICREW ${{ github.event.inputs.version_tag || github.ref_name }}"
           releaseBody: |
             ## UNICREW デスクトップアプリ
 
-            **インストール手順 (Windows)**:
-            1. 下の Assets から `UNICREW_x.y.z_x64-setup.exe` をダウンロード
-            2. ダブルクリックで実行（SmartScreen警告が出たら「詳細情報」→「実行」）
-            3. デスクトップに UNICREW アイコンが追加される
+            **Windows (x64)**
+            - `UNICREW_x.y.z_x64-setup.exe`（NSIS インストーラ、推奨）
+            - `UNICREW_x.y.z_x64_ja-JP.msi`（MSI インストーラ）
+            - SmartScreen の警告が出たら「詳細情報 → 実行」で進めてください。
 
-            **必要環境**:
-            - Windows 10 / 11 (x64)
-            - Claude Code CLI または Codex CLI（アプリ内設定からインストール可）
+            **macOS 11+（Apple Silicon / Intel 両対応 universal）**
+            - `UNICREW_x.y.z_universal.dmg`
+            - 初回起動で「開発元が未確認」と出る場合：Finder で対象 .app を右クリック → 開く →「開く」をもう一度クリック。
+            - 以後は通常通り起動できます。
+
+            **Linux（ベストエフォート）**
+            - `unicrew_x.y.z_amd64.AppImage` / `.deb`
+            - 動作確認は Ubuntu 22.04 のみ。
+
+            ---
+
+            **必要なもの**
+            - 動作には Claude / Codex / Gemini / OpenCode などの公式 CLI が別途必要です。アプリ内の「設定」から自動インストールできます。
 
             ---
             🤖 Auto-generated by tauri-action
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
