@@ -183,17 +183,27 @@ export function ChatPane({
     }
   }, [input]);
 
+  // 新メッセージ追加（ユーザー送信 / AI 返信開始）時は無条件で最下部へ。
+  // requestAnimationFrame で DOM 反映後に走らせて、追加直後の scrollHeight を確実に拾う。
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    // ユーザーが上にスクロールして過去のやり取りを読んでいる時は邪魔しない。
-    // 末尾から 100px 以内にいる時だけ自動で追従する（一般的なチャットUIの挙動）。
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [thread?.id, thread?.messages.length]);
+
+  // ストリーミング中（ドラフト更新）は末尾付近にいる時だけ追従する。
+  // ユーザーが上に戻って過去を読んでいる時に強制スクロールすると邪魔になるため。
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
     const distanceFromBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom < 100) {
+    if (distanceFromBottom < 200) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [thread?.messages.length, threadDrafts]);
+  }, [threadDrafts]);
 
   const send = () => {
     const value = input.trim();
