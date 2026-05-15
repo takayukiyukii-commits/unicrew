@@ -15,7 +15,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
   {
     id: "tmpl-claude-normal",
     name: "Claude（normal）",
-    roleTag: "Claude（normal）",
+    roleTag: "Claude Code（Anthropic公式CLI）",
     emoji: "🟠",
     // normal テンプレは provider 識別の色玉 emoji を avatar に出す（lucide アイコンで上書きしない）。
     iconName: undefined,
@@ -32,7 +32,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
   {
     id: "tmpl-codex-normal",
     name: "Codex（normal）",
-    roleTag: "Codex（normal）",
+    roleTag: "Codex CLI（OpenAI公式・第二意見）",
     emoji: "🟢",
     iconName: undefined,
     avatarPath: null,
