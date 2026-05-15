@@ -12,6 +12,8 @@ import {
   X,
   MessageCircle,
   Sparkles,
+  CornerDownLeft,
+  Clock,
 } from "lucide-react";
 
 /**
@@ -80,6 +82,8 @@ interface Props {
   /** スロットID → draft。単独モード時は単一エントリ（"single"）、並列時はN個。 */
   threadDrafts: Record<string, ActiveDraftLite | null>;
   onSend: (text: string) => void;
+  /** 応答中に送られて順次送信待ちになっている件数（ターミナル風連投）。 */
+  queuedCount?: number;
   onAbort: () => void;
   /** "single" = 単一表示 / "primary" = 並列の左 / "split" = 並列の右 */
   paneRole?: "single" | "primary" | "split";
@@ -129,6 +133,7 @@ export function ChatPane({
   isStreaming,
   threadDrafts,
   onSend,
+  queuedCount = 0,
   onAbort,
   paneRole = "single",
   onSplit,
@@ -207,7 +212,9 @@ export function ChatPane({
 
   const send = () => {
     const value = input.trim();
-    if (!value || isStreaming || !thread) return;
+    // 応答中でも送信可（onSend = 親の submitOrQueue が「キューに積む」判断をする）。
+    // ターミナルのように指示を連投できる。
+    if (!value || !thread) return;
     onSend(value);
     setInput("");
   };
@@ -486,6 +493,14 @@ export function ChatPane({
             />
           </div>
         )}
+        {queuedCount > 0 && (
+          <div className="max-w-4xl mx-auto mb-2 flex items-center gap-1.5 text-[11px] text-[var(--color-accent)]">
+            <Clock size={12} className="shrink-0" />
+            <span>
+              {t("chat.queuedHint").replace("{n}", String(queuedCount))}
+            </span>
+          </div>
+        )}
         <div className="max-w-4xl mx-auto flex items-end gap-2 rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 focus-within:border-[var(--color-accent)] transition">
           <textarea
             ref={textareaRef}
@@ -518,25 +533,37 @@ export function ChatPane({
             disabled={isStreaming}
           />
           {isStreaming ? (
-            <button
-              onClick={onAbort}
-              title={
-                anyDraftStuck
-                  ? t("chat.abortStuckTitle")
-                  : t("chat.abortNormalTitle")
-              }
-              className={`shrink-0 px-3 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5 ${
-                anyDraftStuck
-                  ? "bg-amber-500 ring-2 ring-amber-300 unicrew-pulse-attention"
-                  : "bg-red-500"
-              }`}
-            >
-              <Square size={14} fill="currentColor" />
-              {anyDraftStuck ? t("chat.abortStuckLabel") : t("chat.abortNormalLabel")}
-              <span className="hidden md:inline text-[10px] opacity-80 font-mono">
-                Esc
-              </span>
-            </button>
+            <>
+              {input.trim() && (
+                <button
+                  onClick={send}
+                  title={t("chat.queueAddTitle")}
+                  className="shrink-0 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5"
+                >
+                  <CornerDownLeft size={14} />
+                  {t("chat.queueAdd")}
+                </button>
+              )}
+              <button
+                onClick={onAbort}
+                title={
+                  anyDraftStuck
+                    ? t("chat.abortStuckTitle")
+                    : t("chat.abortNormalTitle")
+                }
+                className={`shrink-0 px-3 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5 ${
+                  anyDraftStuck
+                    ? "bg-amber-500 ring-2 ring-amber-300 unicrew-pulse-attention"
+                    : "bg-red-500"
+                }`}
+              >
+                <Square size={14} fill="currentColor" />
+                {anyDraftStuck ? t("chat.abortStuckLabel") : t("chat.abortNormalLabel")}
+                <span className="hidden md:inline text-[10px] opacity-80 font-mono">
+                  Esc
+                </span>
+              </button>
+            </>
           ) : (
             <button
               onClick={send}
