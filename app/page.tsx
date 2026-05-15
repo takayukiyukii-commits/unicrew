@@ -499,6 +499,13 @@ export default function Page() {
   streamingSidsRef.current = streamingSids;
   const [hydrated, setHydrated] = useState(false);
 
+  // ターミナル風の指示連投。応答中に送信されたメッセージを thread ごとに
+  // 溜め、その thread がアイドルに戻ったら先頭から自動送出する。
+  const enqueuedSendsRef = useRef<Record<string, string[]>>({});
+  const [enqueuedCounts, setEnqueuedCounts] = useState<
+    Record<string, number>
+  >({});
+
   const sessionsStartedRef = useRef<Set<string>>(new Set());
   const paneAreaRef = useRef<HTMLDivElement>(null);
   const draftsRef = useRef<Record<string, ActiveDraft>>({});
@@ -999,7 +1006,11 @@ export default function Page() {
     setDrafts((prev) => {
       const existing = prev[sid];
       if (!existing) return prev;
-      return { ...prev, [sid]: mut(existing) };
+      const next = { ...prev, [sid]: mut(existing) };
+      // finalizeDraft は draftsRef.current から読む。render flush 前に停止が
+      // 割り込んでも最新 blocks を確定できるよう ref を即同期しておく。
+      draftsRef.current = next;
+      return next;
     });
   };
 
@@ -1040,6 +1051,13 @@ export default function Page() {
 
     // Ensure draft exists for this sid
     if (!draftsRef.current[sid]) {
+      // 停止/完了でセッションを畳んだ後、Rust 側 mpsc キューに残っていた遅延
+      // イベントが届くケースがある。ここで安易に fresh draft を作ると、停止済み
+      // セッションが「ストリーミング中」にゴースト復活し、後続の遅延 result /
+      // error で壊れた assistant メッセージが挿入されたり null 参照でクラッシュ
+      // （= 停止ボタンで白画面）する。開始済みセッション（ensureSlotSession で
+      // add 済み）でなければ、これは終了後の遅延ゴーストなので無視する。
+      if (!sessionsStartedRef.current.has(sid)) return;
       const fresh = FRESH_DRAFT(thread.id, slot);
       draftsRef.current = { ...draftsRef.current, [sid]: fresh };
       setDrafts(draftsRef.current);
@@ -2558,6 +2576,56 @@ ${command}
     }
   };
 
+  /** thread が応答中（いずれかの slot が streaming）か。ref 経由で常に最新。 */
+  const isThreadBusy = (thread: Thread): boolean => {
+    const parallel = isThreadParallel(thread);
+    return effectiveParticipants(thread).some((slot) =>
+      streamingSidsRef.current.has(makeSlotSid(thread.id, slot.id, parallel)),
+    );
+  };
+
+  /**
+   * ChatPane からの送信入口。応答中ならキューに積み（ターミナル風連投）、
+   * アイドルなら即送信。flush は streamingSids 変化の useEffect で行う。
+   */
+  const submitOrQueue = (text: string, thread: Thread) => {
+    const value = text.trim();
+    if (!value) return;
+    if (isThreadBusy(thread)) {
+      const q = enqueuedSendsRef.current[thread.id] ?? [];
+      q.push(value);
+      enqueuedSendsRef.current[thread.id] = q;
+      setEnqueuedCounts((prev) => ({ ...prev, [thread.id]: q.length }));
+      return;
+    }
+    void handleSendForThread(value, thread);
+  };
+
+  // アイドルに戻った thread のキュー先頭を 1 件送出。streamingSids が
+  // 変わるたびに評価し、busy が解けた瞬間に次を流す。handleSendForThread は
+  // 同期的に setStreamingSids するので二重送出にはならない。
+  useEffect(() => {
+    for (const [tid, q] of Object.entries(enqueuedSendsRef.current)) {
+      if (!q || q.length === 0) continue;
+      const thread = threadsRef.current.find((t) => t.id === tid);
+      if (!thread) {
+        delete enqueuedSendsRef.current[tid];
+        setEnqueuedCounts((prev) => {
+          const n = { ...prev };
+          delete n[tid];
+          return n;
+        });
+        continue;
+      }
+      if (isThreadBusy(thread)) continue;
+      const nextText = q.shift();
+      if (nextText === undefined) continue;
+      setEnqueuedCounts((prev) => ({ ...prev, [tid]: q.length }));
+      void handleSendForThread(nextText, thread);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamingSids]);
+
   const handleAbortForThread = async (thread: Thread) => {
     // UI は楽観的に即時 finalize（agentStop の await でハングする可能性に備える）。
     // Rust 側で hard kill するので、awaitせず投げっぱなしでも安全。
@@ -3411,7 +3479,10 @@ ${command}
                 threadDrafts={primaryDrafts}
                 userProfile={userProfile}
                 onSend={(text) =>
-                  activeThread && handleSendForThread(text, activeThread)
+                  activeThread && submitOrQueue(text, activeThread)
+                }
+                queuedCount={
+                  activeThread ? enqueuedCounts[activeThread.id] ?? 0 : 0
                 }
                 onAbort={() =>
                   activeThread && handleAbortForThread(activeThread)
@@ -3488,7 +3559,8 @@ ${command}
                   isStreaming={streaming}
                   threadDrafts={drafts}
                   userProfile={userProfile}
-                  onSend={(text) => handleSendForThread(text, t)}
+                  onSend={(text) => submitOrQueue(text, t)}
+                  queuedCount={enqueuedCounts[t.id] ?? 0}
                   onAbort={() => handleAbortForThread(t)}
                   onSplit={handleOpenSplitPane}
                   onCloseSplit={() => handleCloseSplitPane(t.id)}
@@ -3531,7 +3603,10 @@ ${command}
                 threadDrafts={primaryDrafts}
                 userProfile={userProfile}
                 onSend={(text) =>
-                  activeThread && handleSendForThread(text, activeThread)
+                  activeThread && submitOrQueue(text, activeThread)
+                }
+                queuedCount={
+                  activeThread ? enqueuedCounts[activeThread.id] ?? 0 : 0
                 }
                 onAbort={() =>
                   activeThread && handleAbortForThread(activeThread)
@@ -3616,8 +3691,9 @@ ${command}
                     threadDrafts={splitPaneStates[0]?.drafts ?? {}}
                     userProfile={userProfile}
                     onSend={(text) =>
-                      handleSendForThread(text, splitThread)
+                      submitOrQueue(text, splitThread)
                     }
+                    queuedCount={enqueuedCounts[splitThread.id] ?? 0}
                     onAbort={() => handleAbortForThread(splitThread)}
                     onSplit={handleOpenSplitPane}
                     onCloseSplit={() => handleCloseSplitPane(splitThread.id)}
