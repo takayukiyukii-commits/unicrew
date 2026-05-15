@@ -307,6 +307,14 @@ const ja: Dict = {
   "chat.streamingThought": "thought for {dur}",
   "chat.streamingSilentSec": "{sec}秒沈黙",
   "chat.streamingStuckTitle": "AI 側の応答が止まっている可能性があります。画面下の「停止」ボタンでこのターンを終わらせてやり直せます。",
+  "chat.activityBash": "コマンドを実行中",
+  "chat.activityRead": "ファイルを読み込み中",
+  "chat.activityEdit": "ファイルを書き換え中",
+  "chat.activitySearch": "コードを検索中",
+  "chat.activityTodo": "やることを整理中",
+  "chat.activityWeb": "Web で調べ中",
+  "chat.activityTool": "ツールを実行中",
+  "chat.activityWorking": "作業中",
   "chat.defaultAssistant": "Claude",
 
   // ----- Message item -----
@@ -1365,6 +1373,14 @@ const en: Dict = {
   "chat.streamingThought": "thought for {dur}",
   "chat.streamingSilentSec": "silent {sec}s",
   "chat.streamingStuckTitle": "The AI response may have stalled. Use the \"Stop\" button at the bottom to end this turn and retry.",
+  "chat.activityBash": "Running a command",
+  "chat.activityRead": "Reading a file",
+  "chat.activityEdit": "Editing a file",
+  "chat.activitySearch": "Searching the code",
+  "chat.activityTodo": "Organizing tasks",
+  "chat.activityWeb": "Searching the web",
+  "chat.activityTool": "Running a tool",
+  "chat.activityWorking": "Working",
   "chat.defaultAssistant": "Claude",
 
   // ----- Message item -----

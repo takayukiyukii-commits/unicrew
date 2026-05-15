@@ -409,6 +409,10 @@ export function ChatPane({
         {feedbackSlot}
       </div>
 
+      {/* 応答中の固定インジケータ。スクロール位置に関係なく常に入力欄の真上に出す。
+          「今なにをしているか」をコード断片ではなく日本語の行為ラベルで示す。 */}
+      <LiveActivityBar threadDrafts={threadDrafts} />
+
       {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示。N-way対応。 */}
       {(() => {
         if (!onContinueConference) return null;
@@ -1247,6 +1251,95 @@ interface ModeratorMinutes {
 }
 
 /**
+ * draft の blocks 末尾を見て「今まさに何をしているか」を人間可読の i18n キーで返す。
+ * - 末尾の tool_use が実行中（pending/approved）ならツール種別に応じたラベル
+ * - 末尾の tool が完了済み（= 今はテキスト生成中）なら null（呼び出し側で考え中/応答中にフォールバック）
+ * コード断片やコマンド文字列は出さず、行為の種類だけを日本語/英語で示すのが狙い。
+ */
+function currentActivityKey(blocks: Block[]): string | null {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.kind !== "tool_use") continue;
+    if (
+      b.status === "completed" ||
+      b.status === "errored" ||
+      b.status === "denied"
+    ) {
+      return null;
+    }
+    const n = b.toolName;
+    if (n === "Bash") return "chat.activityBash";
+    if (n === "Read" || n === "NotebookRead") return "chat.activityRead";
+    if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit")
+      return "chat.activityEdit";
+    if (n === "Grep" || n === "Glob" || n === "LS") return "chat.activitySearch";
+    if (n === "TodoWrite") return "chat.activityTodo";
+    if (n === "WebFetch" || n === "WebSearch") return "chat.activityWeb";
+    return "chat.activityTool";
+  }
+  return null;
+}
+
+/**
+ * メッセージ領域の下・入力欄の上に常時固定で出すアクティビティバー。
+ * スクロール位置に関係なく「今 AI が動いているか・何をしているか」が分かる。
+ * - 単独モード: 1 行（活動ラベル + 経過メトリクス）
+ * - 並列モード: 参加者ごとに 1 行
+ */
+function LiveActivityBar({
+  threadDrafts,
+}: {
+  threadDrafts: Record<string, ActiveDraftLite | null>;
+}) {
+  const { t } = useTranslation();
+  const active = Object.values(threadDrafts).filter(
+    (d): d is ActiveDraftLite => d != null,
+  );
+  if (active.length === 0) return null;
+
+  const lineFor = (d: ActiveDraftLite, key: string | number) => {
+    const actKey = currentActivityKey(d.blocks);
+    const now = Date.now();
+    const stuck = now - d.lastEventAt > INACTIVITY_HINT_MS;
+    const label = stuck
+      ? t("chat.streamingStuck")
+      : actKey
+        ? t(actKey)
+        : d.firstTextAt !== null
+          ? t("chat.streamingResponding")
+          : t("chat.streamingThinking");
+    return (
+      <div key={key} className="flex items-center gap-2 min-w-0">
+        <Loader2
+          size={13}
+          className={`animate-spin shrink-0 ${stuck ? "text-amber-600" : "text-[var(--color-accent)]"}`}
+        />
+        <span
+          className={`text-[12.5px] font-medium truncate ${stuck ? "text-amber-700" : "text-[var(--color-text)]"}`}
+        >
+          {label}
+        </span>
+        <span className="ml-auto shrink-0">
+          <StreamingStatus draft={d} variant="row" showLabel={false} />
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-[var(--color-accent)]/[0.06] flex flex-col gap-1"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      {active.length === 1
+        ? lineFor(active[0], "single")
+        : active.map((d, i) => lineFor(d, d.slotId ?? i))}
+    </div>
+  );
+}
+
+/**
  * ストリーミング中の状況を表示する共通インジケータ。
  * - 常に回り続ける Loader2 アイコン
  * - 「考え中…」/「応答中…」（最初のテキストが返ってきたら切替）
@@ -1257,9 +1350,12 @@ interface ModeratorMinutes {
 function StreamingStatus({
   draft,
   variant = "inline",
+  showLabel = true,
 }: {
   draft: ActiveDraftLite;
   variant?: "inline" | "row";
+  /** false なら「考え中…/応答中…」ラベルを省略し経過メトリクスのみ表示（stuck 警告時は強制表示）。 */
+  showLabel?: boolean;
 }) {
   const { t } = useTranslation();
   // 経過時間ライブ更新用ティック
@@ -1319,7 +1415,9 @@ function StreamingStatus({
       }
     >
       <Loader2 size={12} className="animate-spin shrink-0" />
-      <span className="font-medium">{label}…</span>
+      {(showLabel || stuck) && (
+        <span className="font-medium">{label}…</span>
+      )}
       <span className={`${subClass} font-normal`}>
         ({segments.join(" · ")})
       </span>
