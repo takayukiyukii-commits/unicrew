@@ -2824,7 +2824,18 @@ struct OllamaPullDone {
 async fn ollama_pull(app: AppHandle, model: String) -> Result<(), String> {
     // Ollama 本体が無いと NotFound で落ちる。Wizard 側で acp_cli_status("ollama")
     // を必ず先にチェックしている前提だが、ここでもバイナリ存在は確認しておく。
-    if resolve_on_path("ollama").is_none() {
+    // resolve_on_path は Windows 専用なので、cross-platform に動くよう --version probe を使う。
+    let exists = {
+        let probe = build_silent_command("ollama")
+            .arg("--version")
+            .output()
+            .await;
+        match probe {
+            Ok(_) => true,
+            Err(e) => !matches!(e.kind(), std::io::ErrorKind::NotFound),
+        }
+    };
+    if !exists {
         return Err(
             "Ollama がインストールされていません。先にローカル/OSS 系で Ollama を導入してください。"
                 .to_string(),
