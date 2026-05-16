@@ -63,6 +63,10 @@ export function MobileBridgeModal({
   const [host, setHost] = useState<string>("");
   const [lanIp, setLanIp] = useState<string | null>(null);
   const cloudReady = isCloudConfigured();
+  // 配布用静的 export（build_tauri.js が app/api を剥がしたビルド）では
+  // LAN モードの /api/mobile/* が物理的に存在せず必ず動かない。死にメニューを
+  // 見せない（next dev / tauri dev では未設定＝従来通り LAN タブを出す）。
+  const packaged = process.env.NEXT_PUBLIC_UNICREW_PACKAGED === "1";
 
   useEffect(() => {
     if (!open) return;
@@ -156,18 +160,20 @@ export function MobileBridgeModal({
             <Cloud size={11} className="inline mr-1" />
             {t("mobile.tabCloud")}
           </button>
-          <button
-            type="button"
-            onClick={() => setMode("lan")}
-            className={`px-3 py-1.5 text-[12px] rounded-t-md border-b-2 ${
-              mode === "lan"
-                ? "border-[var(--color-accent)] text-[var(--color-text)] font-semibold"
-                : "border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            <Wifi size={11} className="inline mr-1" />
-            {t("mobile.tabLan")}
-          </button>
+          {!packaged && (
+            <button
+              type="button"
+              onClick={() => setMode("lan")}
+              className={`px-3 py-1.5 text-[12px] rounded-t-md border-b-2 ${
+                mode === "lan"
+                  ? "border-[var(--color-accent)] text-[var(--color-text)] font-semibold"
+                  : "border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              <Wifi size={11} className="inline mr-1" />
+              {t("mobile.tabLan")}
+            </button>
+          )}
         </div>
 
         {mode === "cloud" && (

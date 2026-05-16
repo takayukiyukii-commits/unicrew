@@ -13,6 +13,11 @@
  *
  * これで dev サーバの LAN モードは動かしつつ、Tauri 配布版ビルド（クラウドモード専用）
  * を成功させられる。
+ *
+ * また NEXT_PUBLIC_UNICREW_PACKAGED=1 を渡す。これは「app/api を剥がした
+ * 配布用静的 export」だけで true になる client 可視フラグで、LAN モード
+ * （/api/mobile/* ポーリング）が物理的に動かない配布版を UI 側で正確に
+ * 判別するために使う。next dev / tauri dev では未設定のまま＝LAN は使える。
  */
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -94,7 +99,7 @@ try {
   moveAside();
   const result = spawnSync(
     "npx",
-    ["cross-env", "UNICREW_TAURI=1", "next", "build"],
+    ["cross-env", "UNICREW_TAURI=1", "NEXT_PUBLIC_UNICREW_PACKAGED=1", "next", "build"],
     {
       stdio: "inherit",
       shell: true,

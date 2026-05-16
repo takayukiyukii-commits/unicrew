@@ -109,6 +109,13 @@ jobs:
           # Tauri Updater 用 minisign 署名（Ed25519）。両 OS 共通。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # スマホ連携クラウドリレー（Supabase Realtime broadcast）用。
+          # build_tauri.js → next build がこの env を static export に焼き込み、
+          # 配布バイナリで isCloudConfigured()=true（「QRですぐ使う」が実働）になる。
+          # publishable キーは公開前提設計だが、public 化予定リポにソースで載せ
+          # ないため値は GitHub Secrets に置き、ビルド時のみ注入する。
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           # ── 以下は Apple Developer Program に加入後、コード署名 + notarization する時に有効化:
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}                # base64(.p12)
           # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
