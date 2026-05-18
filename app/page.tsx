@@ -603,17 +603,11 @@ export default function Page() {
   }, [explorerOpen]);
 
   useEffect(() => {
-    // 並列ペイン(isSplitPane)は一時的なので永続化しない。
-    // 永続化すると再起動後に「サイドバーに出ない孤児スレッド」として復活し、
-    // isEmpty / activeId / ペイン表示が壊れる（履歴全削除でもペインが残る等）。
-    if (hydrated) saveThreads(threads.filter((t) => !t.isSplitPane));
+    if (hydrated) saveThreads(threads);
   }, [threads, hydrated]);
 
   useEffect(() => {
-    if (activeId) return;
-    // activeId は必ず実会話（並列ペインでない）にする。
-    const firstReal = threads.find((t) => !t.isSplitPane);
-    if (firstReal) setActiveId(firstReal.id);
+    if (threads.length > 0 && !activeId) setActiveId(threads[0].id);
   }, [threads, activeId]);
 
   // splitIds の中で、削除済みスレッドを指している ID を掃除する
@@ -1550,23 +1544,8 @@ export default function Page() {
   const handleCloseSplitPane = (id?: string) => {
     if (id) {
       setSplitIds((prev) => prev.filter((x) => x !== id));
-      // 扉から開いた一時ペイン（isSplitPane）は閉じたら破棄。
-      // intoSplit で並べた“既存の独立会話”は isSplitPane でないため保持される。
-      void agentStop(id).catch(() => {});
-      sessionsStartedRef.current.delete(id);
-      setThreads((prev) =>
-        prev.filter((tt) => !(tt.id === id && tt.isSplitPane)),
-      );
     } else {
-      const closing = splitIds;
       setSplitIds([]);
-      for (const cid of closing) {
-        void agentStop(cid).catch(() => {});
-        sessionsStartedRef.current.delete(cid);
-      }
-      setThreads((prev) =>
-        prev.filter((tt) => !(closing.includes(tt.id) && tt.isSplitPane)),
-      );
     }
   };
 
@@ -1615,18 +1594,15 @@ export default function Page() {
       splitMode: false,
       conferenceMode: false,
     });
-    // 並列ペイン用に作るスレッドは独立会話ではなく一時ペイン。
-    // isSplitPane を立ててサイドバーから除外し、閉じたら破棄する。
-    const created = slot === "split" ? { ...t, isSplitPane: true } : t;
-    setThreads((prev) => [created, ...prev]);
+    setThreads((prev) => [t, ...prev]);
     if (slot === "split") {
       setSplitIds((prev) =>
-        prev.includes(created.id) || prev.length >= MAX_SPLIT_PANES
+        prev.includes(t.id) || prev.length >= MAX_SPLIT_PANES
           ? prev
-          : [...prev, created.id],
+          : [...prev, t.id],
       );
     } else {
-      setActiveId(created.id);
+      setActiveId(t.id);
     }
     setMainView("chat");
   };
@@ -1923,35 +1899,11 @@ export default function Page() {
         sessionsStartedRef.current.delete(id);
       }
     }
-    const wasActive = activeId === id;
-    const realRemaining = threads.filter(
-      (tt) => tt.id !== id && !tt.isSplitPane,
-    );
-    // 並列ペイン（isSplitPane）は「現在の会話の一時ペイン」。
-    // ・実会話が1つも残らない → 全ペイン破棄（履歴を全部消したらペインも消える）
-    // ・アクティブ会話を消した → その画面のペインは無効なので破棄
-    // ・裏の別会話を消しただけ → 現在のペインは維持
-    const discardPanes = wasActive || realRemaining.length === 0;
-
-    if (discardPanes) {
-      for (const sp of threads.filter((tt) => tt.isSplitPane)) {
-        await agentStop(sp.id).catch(() => {});
-        sessionsStartedRef.current.delete(sp.id);
-      }
-      setSplitIds([]);
-    } else {
-      setSplitIds((prev) => prev.filter((x) => x !== id));
-    }
-
-    setThreads((prev) =>
-      prev.filter(
-        (tt) => tt.id !== id && !(discardPanes && tt.isSplitPane),
-      ),
-    );
-
-    if (wasActive) {
-      setActiveId(realRemaining[0]?.id ?? null);
-      setFocusedThreadId(null);
+    setThreads((prev) => prev.filter((tt) => tt.id !== id));
+    setSplitIds((prev) => prev.filter((x) => x !== id));
+    if (activeId === id) {
+      const remaining = threads.filter((tt) => tt.id !== id);
+      setActiveId(remaining[0]?.id ?? null);
     }
   };
 
@@ -2908,8 +2860,7 @@ ${command}
 
   const totalPanes = 1 + splitThreads.length;
   const showSplit = splitThreads.length > 0;
-  // 実会話ゼロ（空 or 並列ペインだけ）なら WelcomeLanding を出す。
-  const isEmpty = threads.every((t) => t.isSplitPane);
+  const isEmpty = threads.length === 0;
 
   // Shift+Tab ハンドラ用に最新の toggle 関数を ref に流し込む
   togglePermissionModeRef.current = togglePermissionMode;

@@ -81,11 +81,7 @@ export function Sidebar({
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const sorted = useMemo(() => {
-    // 並列ペイン（isSplitPane）は独立会話ではなく現在会話の一時ペイン。
-    // サイドバーには出さない＝並列でもサイドバーは1会話。
-    const all = [...threads]
-      .filter((t) => !t.isSplitPane)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const all = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
     const q = searchQuery.trim().toLowerCase();
     if (!q) return all;
     return all.filter((th) => {
