@@ -1541,6 +1541,13 @@ export default function Page() {
    * - 引数なし: 全ての並列ペインを閉じる
    * - id 指定: その ID だけ並列ペインから外す（スレッド自体は残る）
    */
+  /** 並列ペインのうち、このペインだけを単独表示に切り替える。 */
+  const handleSoloPane = (id: string) => {
+    setActiveId(id);
+    setSplitIds([]);
+    setFocusedThreadId(null);
+  };
+
   const handleCloseSplitPane = (id?: string) => {
     if (id) {
       setSplitIds((prev) => prev.filter((x) => x !== id));
@@ -3597,6 +3604,7 @@ ${command}
                   onAbort={() => handleAbortForThread(t)}
                   onSplit={handleOpenSplitPane}
                   onCloseSplit={() => handleCloseSplitPane(t.id)}
+                  onSolo={() => handleSoloPane(t.id)}
                   onContinueConference={() => handleContinueConference(t)}
                   onExecuteCommand={(cmd, lang) =>
                     handleExecuteCommand(cmd, lang, t)
@@ -3730,6 +3738,7 @@ ${command}
                     onAbort={() => handleAbortForThread(splitThread)}
                     onSplit={handleOpenSplitPane}
                     onCloseSplit={() => handleCloseSplitPane(splitThread.id)}
+                    onSolo={() => handleSoloPane(splitThread.id)}
                     onContinueConference={() =>
                       handleContinueConference(splitThread)
                     }

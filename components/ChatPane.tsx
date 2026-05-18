@@ -9,6 +9,7 @@ import {
   Split,
   Loader2,
   Columns2,
+  Maximize2,
   X,
   MessageCircle,
   CornerDownLeft,
@@ -88,6 +89,8 @@ interface Props {
   onSplit?: () => void;
   /** 並列ペインを閉じる（splitペインだけに渡す）。 */
   onCloseSplit?: () => void;
+  /** このペインだけを単独表示に切り替える（並列時のみ）。 */
+  onSolo?: () => void;
   /** 会議モードで議論を1ラウンド延長する（[合意]に至っていない場合）。 */
   onContinueConference?: () => void;
   /** メッセージ内のコマンドを「UNICREWで実行」する。AI に Bash 実行を依頼する。 */
@@ -135,6 +138,7 @@ export function ChatPane({
   paneRole = "single",
   onSplit,
   onCloseSplit,
+  onSolo,
   onContinueConference,
   onExecuteCommand,
   onSosForError,
@@ -381,6 +385,16 @@ export function ChatPane({
               aria-label={t("chat.splitOpenAria")}
             >
               <Columns2 size={14} />
+            </button>
+          )}
+          {onSolo && (
+            <button
+              onClick={onSolo}
+              className="p-1.5 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)] transition"
+              title={t("chat.soloPaneTitle")}
+              aria-label={t("chat.soloPaneAria")}
+            >
+              <Maximize2 size={14} />
             </button>
           )}
           {onCloseSplit && (
