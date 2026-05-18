@@ -1520,40 +1520,20 @@ export default function Page() {
   };
 
   /**
-   * チャット画面の並列ペインを1つ増やす。
+   * 並列ペインを1つ追加する（物理的に独立した対話ペインを開く）。
    *
-   * 【2026-05-18 仕様変更】
-   * 旧実装は毎回「新しいスレッド」を作って splitIds に積んでいたため、
-   * 並列で開くたびにサイドバーへ独立した会話が量産され、別の「新しい会話」
-   * （議論モード等）が既存の並列ペインに割り込まれる事故が起きていた。
-   *
-   * 新実装: ペイン追加は「いま開いている会話の中に参加者を1人増やす」だけ。
-   * → 1スレッド = サイドバー1項目のまま、ChatPane が N-way 列で並べて表示する。
-   * 独立した会話／新しいサイドバー項目が欲しい時は「新しい会話」を使う。
-   *
-   * 追加する参加者は現在の末尾スロットと同じ provider/キャラを引き継ぐ
-   * （「今のまま並べたい」が圧倒的なため）。上限は参加者4人（RightPane と同値）。
+   * 開いた並列ペインは `isSplitPane` 付きの一時スレッドとして作られ、
+   * サイドバーには出さない（並列でもサイドバーは「1会話」）。閉じると破棄。
+   * 独立会話＝サイドバー項目が欲しい時は「新しい会話」を使う。
+   * 上限 MAX_SPLIT_PANES に達していたら無視。
    */
   const handleOpenSplitPane = () => {
     if (!isTauri()) {
       alert(tr("page.alert.tauriRequiredShort"));
       return;
     }
-    const target = focusedThread ?? activeThread;
-    if (!target) {
-      // 開いている会話が無ければ通常の新規会話を1つだけ作る
-      void handleCreateInstant("primary");
-      return;
-    }
-    const current = effectiveParticipants(target);
-    if (current.length >= 4) return; // RightPane の参加者上限と揃える
-    const lead = current[current.length - 1] ?? current[0];
-    updateThread(target.id, (t) =>
-      addParticipant(t, {
-        provider: lead?.provider ?? "claude",
-        characterId: lead?.characterId ?? t.characterId,
-      }),
-    );
+    if (splitIds.length >= MAX_SPLIT_PANES) return;
+    void handleCreateInstant("split");
   };
 
   /**
@@ -1564,8 +1544,23 @@ export default function Page() {
   const handleCloseSplitPane = (id?: string) => {
     if (id) {
       setSplitIds((prev) => prev.filter((x) => x !== id));
+      // 扉から開いた一時ペイン（isSplitPane）は閉じたら破棄。
+      // intoSplit で並べた“既存の独立会話”は isSplitPane でないため保持される。
+      void agentStop(id).catch(() => {});
+      sessionsStartedRef.current.delete(id);
+      setThreads((prev) =>
+        prev.filter((tt) => !(tt.id === id && tt.isSplitPane)),
+      );
     } else {
+      const closing = splitIds;
       setSplitIds([]);
+      for (const cid of closing) {
+        void agentStop(cid).catch(() => {});
+        sessionsStartedRef.current.delete(cid);
+      }
+      setThreads((prev) =>
+        prev.filter((tt) => !(closing.includes(tt.id) && tt.isSplitPane)),
+      );
     }
   };
 
@@ -1614,15 +1609,18 @@ export default function Page() {
       splitMode: false,
       conferenceMode: false,
     });
-    setThreads((prev) => [t, ...prev]);
+    // 並列ペイン用に作るスレッドは独立会話ではなく一時ペイン。
+    // isSplitPane を立ててサイドバーから除外し、閉じたら破棄する。
+    const created = slot === "split" ? { ...t, isSplitPane: true } : t;
+    setThreads((prev) => [created, ...prev]);
     if (slot === "split") {
       setSplitIds((prev) =>
-        prev.includes(t.id) || prev.length >= MAX_SPLIT_PANES
+        prev.includes(created.id) || prev.length >= MAX_SPLIT_PANES
           ? prev
-          : [...prev, t.id],
+          : [...prev, created.id],
       );
     } else {
-      setActiveId(t.id);
+      setActiveId(created.id);
     }
     setMainView("chat");
   };
@@ -3625,7 +3623,7 @@ ${command}
                   peekActive={peekPaneIds.has(t.id)}
                   onTogglePeek={() => togglePeekForThread(t.id)}
                   onTogglePermissionMode={togglePermissionMode}
-                  onSuggestNewThread={() => void handleCreateInstant("primary")}
+                  onSuggestNewThread={() => void handleCreateInstant("split")}
                 />
               </div>
             ))}
@@ -3762,7 +3760,7 @@ ${command}
                     peekActive={peekPaneIds.has(splitThread.id)}
                     onTogglePeek={() => togglePeekForThread(splitThread.id)}
                     onTogglePermissionMode={togglePermissionMode}
-                    onSuggestNewThread={() => void handleCreateInstant("primary")}
+                    onSuggestNewThread={() => void handleCreateInstant("split")}
                   />
                 </div>
               </>

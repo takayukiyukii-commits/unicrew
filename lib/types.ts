@@ -193,6 +193,13 @@ export interface Thread {
    * 未設定（旧スレッド）は acceptEdits 扱い。
    */
   permissionMode?: PermissionMode;
+  /**
+   * このスレッドが「チャット画面の扉ボタンから開いた並列ペイン」か。
+   * true は独立会話ではなく“現在の会話に属する一時ペイン”扱い。
+   * → サイドバーには出さない（並列でもサイドバーは1会話）。閉じると破棄。
+   * 「新しい会話」から作るスレッドは未設定＝サイドバーに出る独立会話。
+   */
+  isSplitPane?: boolean;
 }
 
 export type PermissionMode = "acceptEdits" | "plan";
