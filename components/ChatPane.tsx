@@ -407,7 +407,7 @@ export function ChatPane({
         ref={scrollerRef}
         className="flex-1 overflow-y-auto min-h-0 unicrew-scroll"
       >
-        {thread.messages.length === 0 && !isStreaming && (
+        {thread.messages.length === 0 && !isStreaming && !isParallel && (
           <div className="px-8 py-16 text-center text-[var(--color-muted)] text-sm">
             <div className="flex justify-center mb-3">
               <CharacterAvatar character={character} size={56} />
@@ -887,7 +887,7 @@ function NwayView({
           pendingNextRound={true}
         />
       )}
-      {hasDrafts && (!lastGroup || lastGroup.kind === "user") && (
+      {slotsForView.length > 0 && (!lastGroup || lastGroup.kind === "user") && (
         <NwayResponsesRow
           slots={slotsForView}
           round={0}
