@@ -603,11 +603,17 @@ export default function Page() {
   }, [explorerOpen]);
 
   useEffect(() => {
-    if (hydrated) saveThreads(threads);
+    // 並列ペイン(isSplitPane)は一時的なので永続化しない。
+    // 永続化すると再起動後に「サイドバーに出ない孤児スレッド」として復活し、
+    // isEmpty / activeId / ペイン表示が壊れる（履歴全削除でもペインが残る等）。
+    if (hydrated) saveThreads(threads.filter((t) => !t.isSplitPane));
   }, [threads, hydrated]);
 
   useEffect(() => {
-    if (threads.length > 0 && !activeId) setActiveId(threads[0].id);
+    if (activeId) return;
+    // activeId は必ず実会話（並列ペインでない）にする。
+    const firstReal = threads.find((t) => !t.isSplitPane);
+    if (firstReal) setActiveId(firstReal.id);
   }, [threads, activeId]);
 
   // splitIds の中で、削除済みスレッドを指している ID を掃除する
@@ -1917,11 +1923,35 @@ export default function Page() {
         sessionsStartedRef.current.delete(id);
       }
     }
-    setThreads((prev) => prev.filter((tt) => tt.id !== id));
-    setSplitIds((prev) => prev.filter((x) => x !== id));
-    if (activeId === id) {
-      const remaining = threads.filter((tt) => tt.id !== id);
-      setActiveId(remaining[0]?.id ?? null);
+    const wasActive = activeId === id;
+    const realRemaining = threads.filter(
+      (tt) => tt.id !== id && !tt.isSplitPane,
+    );
+    // 並列ペイン（isSplitPane）は「現在の会話の一時ペイン」。
+    // ・実会話が1つも残らない → 全ペイン破棄（履歴を全部消したらペインも消える）
+    // ・アクティブ会話を消した → その画面のペインは無効なので破棄
+    // ・裏の別会話を消しただけ → 現在のペインは維持
+    const discardPanes = wasActive || realRemaining.length === 0;
+
+    if (discardPanes) {
+      for (const sp of threads.filter((tt) => tt.isSplitPane)) {
+        await agentStop(sp.id).catch(() => {});
+        sessionsStartedRef.current.delete(sp.id);
+      }
+      setSplitIds([]);
+    } else {
+      setSplitIds((prev) => prev.filter((x) => x !== id));
+    }
+
+    setThreads((prev) =>
+      prev.filter(
+        (tt) => tt.id !== id && !(discardPanes && tt.isSplitPane),
+      ),
+    );
+
+    if (wasActive) {
+      setActiveId(realRemaining[0]?.id ?? null);
+      setFocusedThreadId(null);
     }
   };
 
@@ -2878,7 +2908,8 @@ ${command}
 
   const totalPanes = 1 + splitThreads.length;
   const showSplit = splitThreads.length > 0;
-  const isEmpty = threads.length === 0;
+  // 実会話ゼロ（空 or 並列ペインだけ）なら WelcomeLanding を出す。
+  const isEmpty = threads.every((t) => t.isSplitPane);
 
   // Shift+Tab ハンドラ用に最新の toggle 関数を ref に流し込む
   togglePermissionModeRef.current = togglePermissionMode;

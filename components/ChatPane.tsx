@@ -175,12 +175,18 @@ export function ChatPane({
     : null;
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height =
-        Math.min(textareaRef.current.scrollHeight, 200) + "px";
-    }
-  }, [input]);
+    const el = textareaRef.current;
+    if (!el) return;
+    const resize = () => {
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    };
+    resize();
+    // 並列ペインは後から DOM に挿入されるため、初回計測がレイアウト確定前に
+    // 走ると scrollHeight を誤検出して入力欄が肥大化する。確定後に再計測する。
+    const raf = requestAnimationFrame(resize);
+    return () => cancelAnimationFrame(raf);
+  }, [input, thread?.id]);
 
   // 新メッセージ追加（ユーザー送信 / AI 返信開始）時は無条件で最下部へ。
   // requestAnimationFrame で DOM 反映後に走らせて、追加直後の scrollHeight を確実に拾う。
