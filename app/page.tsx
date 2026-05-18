@@ -1164,14 +1164,20 @@ export default function Page() {
     }
 
     if (event.kind === "error") {
+      const lower = event.message.toLowerCase();
+      const isUsageLimit =
+        lower.includes("usage limit") ||
+        lower.includes("you've hit your usage") ||
+        lower.includes("rate limit") ||
+        lower.includes("quota exceeded");
+      const text = isUsageLimit
+        ? tr("page.error.usageLimit", { message: event.message })
+        : tr("page.error.generic", { message: event.message });
       updateDraft(sid, (d) => ({
         ...d,
         blocks: [
           ...d.blocks,
-          {
-            kind: "text",
-            text: tr("page.error.generic", { message: event.message }),
-          } as TextBlock,
+          { kind: "text", text } as TextBlock,
         ],
       }));
       finalizeDraft(sid);
@@ -1514,20 +1520,40 @@ export default function Page() {
   };
 
   /**
-   * 並列ペインを1つ追加する。
+   * チャット画面の並列ペインを1つ増やす。
    *
-   * 旧仕様ではキャラクターピッカーを開いて毎回選ばせていたが、
-   * 「今のキャラのまま並べたい」ケースが圧倒的なので picker は廃止し、
-   * `handleCreateInstant("split")` 直結（現スレッドのキャラ・ワークスペースを継承）に変更。
-   * 上限 MAX_SPLIT_PANES に達していたら無視。
+   * 【2026-05-18 仕様変更】
+   * 旧実装は毎回「新しいスレッド」を作って splitIds に積んでいたため、
+   * 並列で開くたびにサイドバーへ独立した会話が量産され、別の「新しい会話」
+   * （議論モード等）が既存の並列ペインに割り込まれる事故が起きていた。
+   *
+   * 新実装: ペイン追加は「いま開いている会話の中に参加者を1人増やす」だけ。
+   * → 1スレッド = サイドバー1項目のまま、ChatPane が N-way 列で並べて表示する。
+   * 独立した会話／新しいサイドバー項目が欲しい時は「新しい会話」を使う。
+   *
+   * 追加する参加者は現在の末尾スロットと同じ provider/キャラを引き継ぐ
+   * （「今のまま並べたい」が圧倒的なため）。上限は参加者4人（RightPane と同値）。
    */
   const handleOpenSplitPane = () => {
     if (!isTauri()) {
       alert(tr("page.alert.tauriRequiredShort"));
       return;
     }
-    if (splitIds.length >= MAX_SPLIT_PANES) return;
-    void handleCreateInstant("split");
+    const target = focusedThread ?? activeThread;
+    if (!target) {
+      // 開いている会話が無ければ通常の新規会話を1つだけ作る
+      void handleCreateInstant("primary");
+      return;
+    }
+    const current = effectiveParticipants(target);
+    if (current.length >= 4) return; // RightPane の参加者上限と揃える
+    const lead = current[current.length - 1] ?? current[0];
+    updateThread(target.id, (t) =>
+      addParticipant(t, {
+        provider: lead?.provider ?? "claude",
+        characterId: lead?.characterId ?? t.characterId,
+      }),
+    );
   };
 
   /**
@@ -3599,7 +3625,7 @@ ${command}
                   peekActive={peekPaneIds.has(t.id)}
                   onTogglePeek={() => togglePeekForThread(t.id)}
                   onTogglePermissionMode={togglePermissionMode}
-                  onSuggestNewThread={() => void handleCreateInstant("split")}
+                  onSuggestNewThread={() => void handleCreateInstant("primary")}
                 />
               </div>
             ))}
@@ -3736,7 +3762,7 @@ ${command}
                     peekActive={peekPaneIds.has(splitThread.id)}
                     onTogglePeek={() => togglePeekForThread(splitThread.id)}
                     onTogglePermissionMode={togglePermissionMode}
-                    onSuggestNewThread={() => void handleCreateInstant("split")}
+                    onSuggestNewThread={() => void handleCreateInstant("primary")}
                   />
                 </div>
               </>

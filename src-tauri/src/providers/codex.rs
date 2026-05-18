@@ -195,6 +195,9 @@ impl SessionHandle for CodexSessionHandle {
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
+            // 直前に昇格させた致命エラー行（Codex は同じ ERROR 行を 2 回出すことが
+            // あるので、連続重複は 1 回だけ Error イベントにする）。
+            let mut last_fatal: Option<String> = None;
             while let Ok(Some(line)) = reader.next_line().await {
                 if line.trim().is_empty() {
                     continue;
@@ -202,7 +205,30 @@ impl SessionHandle for CodexSessionHandle {
                 let parsed: Result<Value, _> = serde_json::from_str(&line);
                 let v = match parsed {
                     Ok(v) => v,
-                    Err(_) => continue,
+                    Err(_) => {
+                        // Codex は usage limit 等の致命的エラーを JSON ではなく
+                        // 平文で stdout に出す（例:
+                        //   "ERROR: You've hit your usage limit. ... try again at 6:41 PM."）。
+                        // stderr 側の error 検知には乗らないため、ここで握りつぶすと
+                        // フロントの draft が「…」のまま無言で固まる。
+                        // エラー兆候のある平文行だけを Error イベントへ昇格させる
+                        // （良性の非 JSON 行は従来どおりスキップして UI ノイズを増やさない）。
+                        let trimmed = line.trim();
+                        let lower = trimmed.to_lowercase();
+                        let looks_fatal = trimmed.starts_with("ERROR:")
+                            || lower.contains("usage limit")
+                            || lower.contains("rate limit")
+                            || lower.contains("quota exceeded")
+                            || lower.contains("you've hit your usage");
+                        if looks_fatal && last_fatal.as_deref() != Some(trimmed) {
+                            last_fatal = Some(trimmed.to_string());
+                            let _ = event_sender_stdout.send(NormalizedEvent::Error {
+                                session_id: session_id_for_stdout.clone(),
+                                message: trimmed.to_string(),
+                            });
+                        }
+                        continue;
+                    }
                 };
                 // Codex CLI の JSONL イベント正規化
                 let events = normalize_codex_event(&session_id_for_stdout, &v);

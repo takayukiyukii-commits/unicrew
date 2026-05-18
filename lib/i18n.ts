@@ -413,6 +413,7 @@ const ja: Dict = {
 
   // ----- Page errors / alerts -----
   "page.error.generic": "**エラー**: {message}\n\n認証状態とネットワーク接続を確認してください。",
+  "page.error.usageLimit": "**利用上限に達しました**\n\n{message}\n\n対処: ①しばらく待つと枠がリセットされます ②今すぐ続けたい場合は別のAI（Claude 等）に切り替えてください ③クレジット購入/アップグレードでも復帰できます。",
   "page.alert.tauriRequired": "ローカル機能（ファイル編集・コマンド実行）を使うには npm run tauri:dev でデスクトップアプリ起動が必要です。",
   "page.alert.tauriRequiredShort": "ローカル機能を使うには Tauri デスクトップ起動が必要です。",
   "page.alert.claudeSetupIncomplete": "Claude のセットアップが未完了です。設定から進めてください。",
@@ -1486,6 +1487,7 @@ const en: Dict = {
 
   // ----- Page errors / alerts -----
   "page.error.generic": "**Error**: {message}\n\nPlease check your authentication and network connection.",
+  "page.error.usageLimit": "**Usage limit reached**\n\n{message}\n\nWhat to do: (1) wait for the quota to reset, (2) switch to another AI (e.g. Claude) to keep working now, or (3) purchase credits / upgrade to restore access.",
   "page.alert.tauriRequired": "Local features (file editing, command execution) require the desktop app. Run `npm run tauri:dev` to launch it.",
   "page.alert.tauriRequiredShort": "Local features require the Tauri desktop app.",
   "page.alert.claudeSetupIncomplete": "Claude setup is incomplete. Please continue from Settings.",
