@@ -214,10 +214,19 @@ export function ChatPane({
     // 応答中でも送信可（onSend = 親の submitOrQueue が「キューに積む」判断をする）。
     // ターミナルのように指示を連投できる。
     if ((!value && attachments.length === 0) || !thread) return;
+    // 添付画像は CLI へテキストで渡すため、ただのパスだと AI が「画像」と
+    // 認識せず素通りしがち。Read ツールは画像対応なので「このパスは画像。
+    // Read で画像として開いて中身を見てから答えて」と明示する。
     const attachmentLines = attachments.map(
-      (a) => `[添付画像: ${a.name} / ${a.path}]`,
+      (a, idx) =>
+        `添付画像${attachments.length > 1 ? ` ${idx + 1}` : ""}（${a.name}）: ${a.path}`,
     );
-    const textForAi = [value, ...attachmentLines].filter(Boolean).join("\n\n");
+    const imgNote =
+      attachments.length > 0
+        ? "\n\n↑は添付された画像ファイルです。上記パスを Read ツールで開き、テキストとしてではなく画像として内容を確認したうえで回答してください。"
+        : "";
+    const textForAi =
+      [value, ...attachmentLines].filter(Boolean).join("\n\n") + imgNote;
     onSend(textForAi, attachments);
     setInput("");
     setAttachments([]);
