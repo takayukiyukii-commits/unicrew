@@ -11,6 +11,7 @@ import {
   Search,
   X,
   FolderTree,
+  Pencil,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { Thread } from "@/lib/types";
@@ -35,6 +36,7 @@ interface Props {
   onSelect: (id: string, modifiers?: { intoSplit?: boolean }) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   onOpenSettings: () => void;
   /** 現在中央に表示している view。"addons" の場合はサイドバーのプラグインボタンをアクティブ化。 */
   mainView?: MainView;
@@ -64,6 +66,7 @@ export function Sidebar({
   onSelect,
   onCreate,
   onDelete,
+  onRename,
   onOpenSettings,
   mainView = "chat",
   onOpenAddons,
@@ -75,6 +78,8 @@ export function Sidebar({
   const { t } = useTranslation();
   /** アイデア11: 全スレッド横断検索（最小実装：In-Memoryでタイトル＋メッセージ全文grep） */
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const sorted = useMemo(() => {
     const all = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
     const q = searchQuery.trim().toLowerCase();
@@ -84,6 +89,13 @@ export function Sidebar({
       return th.messages.some((m) => m.content.toLowerCase().includes(q));
     });
   }, [threads, searchQuery]);
+  const commitRename = () => {
+    if (!editingThreadId) return;
+    const title = editingTitle.trim();
+    if (title) onRename(editingThreadId, title);
+    setEditingThreadId(null);
+    setEditingTitle("");
+  };
   if (collapsed) {
     return (
       <aside className="w-12 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col">
@@ -280,9 +292,31 @@ export function Sidebar({
               <CharacterAvatar character={character} size={26} className="mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 min-w-0">
-                  <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
-                    {th.title}
-                  </span>
+                  {editingThreadId === th.id ? (
+                    <input
+                      autoFocus
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename();
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setEditingThreadId(null);
+                          setEditingTitle("");
+                        }
+                      }}
+                      className="min-w-0 flex-1 rounded border border-[var(--color-accent)] bg-white px-1 py-0.5 text-[13px] font-medium outline-none"
+                    />
+                  ) : (
+                    <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
+                      {th.title}
+                    </span>
+                  )}
                   {isStreaming && (
                     <Loader2
                       size={11}
@@ -310,6 +344,18 @@ export function Sidebar({
                   </div>
                 )}
               </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingThreadId(th.id);
+                  setEditingTitle(th.title);
+                }}
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] transition"
+                title={t("sidebar.renameThread")}
+                aria-label={t("sidebar.renameThread")}
+              >
+                <Pencil size={13} />
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();

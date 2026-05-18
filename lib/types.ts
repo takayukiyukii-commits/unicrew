@@ -47,6 +47,7 @@ export interface Message {
   id: string;
   role: Role;
   content: string;
+  attachments?: MessageAttachment[];
   blocks?: Block[];
   createdAt: number;
   /** どのプロバイダの応答か。user メッセージや単独モードでは未定義。 */
@@ -63,6 +64,14 @@ export interface Message {
   conferenceRound?: number;
   /** トークン消費・所要時間のスナップショット。assistant のみ。 */
   stats?: MessageStats;
+}
+
+export interface MessageAttachment {
+  id: string;
+  kind: "image";
+  name: string;
+  path: string;
+  mime: string;
 }
 
 export type ParticipantRole = "participant" | "moderator";
@@ -119,6 +128,8 @@ export interface Character {
 export interface Thread {
   id: string;
   title: string;
+  /** ユーザーが手動で題名を変えた場合 true。以後は初回プロンプト等で上書きしない。 */
+  titleEdited?: boolean;
   /**
    * 単独モードのキャラ。並列モードでも `splitCharacterIds` 未設定なら両プロバイダ共通フォールバックとして使う。
    */

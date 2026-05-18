@@ -81,10 +81,25 @@ export function appendMessage(thread: Thread, message: Message): Thread {
     messages: [...thread.messages, message],
     updatedAt: Date.now(),
   };
-  if (thread.title === "新しい会話" && message.role === "user") {
-    updated.title = message.content.slice(0, 30) || "新しい会話";
+  if (!thread.titleEdited && thread.title === "新しい会話" && message.role === "user") {
+    updated.title = makeThreadTitleFromPrompt(message.content);
   }
   return updated;
+}
+
+export function makeThreadTitleFromPrompt(prompt: string): string {
+  const cleaned = prompt
+    .replace(/\[添付画像:[^\]]+\]/g, " ")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "画像について相談";
+
+  const firstSentence =
+    cleaned.match(/^(.{1,40}?[。！？!?]|.{1,40})/)?.[1]?.trim() ?? cleaned;
+  return firstSentence.length > 24
+    ? `${firstSentence.slice(0, 24)}…`
+    : firstSentence;
 }
 
 // ---------- settings ----------

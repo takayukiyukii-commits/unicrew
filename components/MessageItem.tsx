@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, LifeBuoy, Play } from "lucide-react";
-import type { Character, Message, MessageStats } from "@/lib/types";
+import { Check, Copy, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
+import type { Character, Message, MessageAttachment, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { UserAvatar } from "./UserAvatar";
@@ -12,6 +12,7 @@ import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { resolveFilePath, segmentText } from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { useTranslation } from "@/lib/i18n";
+import { avatarSrc } from "@/lib/tauri";
 import clsx from "clsx";
 
 interface Props {
@@ -165,6 +166,13 @@ export function MessageItem({
             </ReactMarkdown>
           )}
         </div>
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {message.attachments.map((a) => (
+              <AttachmentPreview key={a.id} attachment={a} />
+            ))}
+          </div>
+        )}
         {showSos && (
           <button
             type="button"
@@ -179,6 +187,52 @@ export function MessageItem({
         {!isUser && message.stats && <StatsLine stats={message.stats} />}
       </div>
     </div>
+  );
+}
+
+function AttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
+  const { t } = useTranslation();
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void avatarSrc(attachment.path)
+      .then((url) => {
+        if (alive) setSrc(url);
+      })
+      .catch(() => {
+        if (alive) setSrc(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [attachment.path]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void openFileInEditorWindow(attachment.path);
+      }}
+      className="group overflow-hidden rounded-md border border-[var(--color-border)] bg-white text-left shadow-sm hover:border-[var(--color-accent)] transition"
+      title={t("message.attachmentOpen").replace("{path}", attachment.path)}
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={attachment.name}
+          className="block h-28 w-44 object-cover bg-[var(--color-surface)]"
+        />
+      ) : (
+        <div className="h-28 w-44 flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-muted)]">
+          <ImageIcon size={22} />
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-[var(--color-muted)]">
+        <ImageIcon size={12} className="shrink-0" />
+        <span className="truncate">{attachment.name}</span>
+      </div>
+    </button>
   );
 }
 

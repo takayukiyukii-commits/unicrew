@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import {
   Bot,
   Send,
@@ -14,6 +14,7 @@ import {
   Sparkles,
   CornerDownLeft,
   Clock,
+  Image as ImageIcon,
 } from "lucide-react";
 
 /**
@@ -24,11 +25,13 @@ const LONG_CHAT_THRESHOLD = 30;
 import type {
   Block,
   Message,
+  MessageAttachment,
   ParticipantSlot,
   PermissionMode,
   Provider,
   Thread,
 } from "@/lib/types";
+import { saveAvatarFromFile } from "@/lib/tauri";
 import {
   PERMISSION_MODE_LABELS,
   PROVIDER_COLORS,
@@ -81,7 +84,7 @@ interface Props {
   isStreaming: boolean;
   /** スロットID → draft。単独モード時は単一エントリ（"single"）、並列時はN個。 */
   threadDrafts: Record<string, ActiveDraftLite | null>;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments?: MessageAttachment[]) => void;
   /** 応答中に送られて順次送信待ちになっている件数（ターミナル風連投）。 */
   queuedCount?: number;
   onAbort: () => void;
@@ -150,6 +153,7 @@ export function ChatPane({
 }: Props) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   // 「新スレッド推奨」バナーを当該スレッドで一度閉じたかどうか（per thread, セッション単位）。
@@ -214,9 +218,38 @@ export function ChatPane({
     const value = input.trim();
     // 応答中でも送信可（onSend = 親の submitOrQueue が「キューに積む」判断をする）。
     // ターミナルのように指示を連投できる。
-    if (!value || !thread) return;
-    onSend(value);
+    if ((!value && attachments.length === 0) || !thread) return;
+    const attachmentLines = attachments.map(
+      (a) => `[添付画像: ${a.name} / ${a.path}]`,
+    );
+    const textForAi = [value, ...attachmentLines].filter(Boolean).join("\n\n");
+    onSend(textForAi, attachments);
     setInput("");
+    setAttachments([]);
+  };
+
+  const handlePaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    if (files.length === 0) return;
+    e.preventDefault();
+    const saved: MessageAttachment[] = [];
+    for (const file of files) {
+      const path = await saveAvatarFromFile(file);
+      if (!path) continue;
+      saved.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        kind: "image",
+        name: file.name || `screenshot-${saved.length + 1}.png`,
+        path,
+        mime: file.type || "image/png",
+      });
+    }
+    if (saved.length > 0) {
+      setAttachments((prev) => [...prev, ...saved]);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    }
   };
 
   // スラッシュコマンドピッカーから選ばれたら、textarea にコマンド文字列を反映する。
@@ -501,11 +534,39 @@ export function ChatPane({
             </span>
           </div>
         )}
+        {attachments.length > 0 && (
+          <div className="max-w-4xl mx-auto mb-2 flex flex-wrap gap-2">
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                className="inline-flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-text)]"
+                title={a.path}
+              >
+                <ImageIcon size={13} className="text-[var(--color-accent)]" />
+                <span className="max-w-[220px] truncate">{a.name}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAttachments((prev) => prev.filter((x) => x.id !== a.id))
+                  }
+                  className="rounded p-0.5 text-[var(--color-muted)] hover:bg-white hover:text-red-500"
+                  aria-label={t("chat.attachmentRemove")}
+                  title={t("chat.attachmentRemove")}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="max-w-4xl mx-auto flex items-end gap-2 rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 focus-within:border-[var(--color-accent)] transition">
           <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={(e) => {
+              void handlePaste(e);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -567,7 +628,7 @@ export function ChatPane({
           ) : (
             <button
               onClick={send}
-              disabled={!input.trim()}
+              disabled={!input.trim() && attachments.length === 0}
               className="shrink-0 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1.5"
             >
               <Send size={14} />

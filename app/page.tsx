@@ -138,6 +138,7 @@ import type {
   Block,
   Character,
   Message,
+  MessageAttachment,
   ModelId,
   ParticipantSlot,
   PendingPermission,
@@ -146,6 +147,11 @@ import type {
   Thread,
   ToolUseBlock,
 } from "@/lib/types";
+
+interface PendingSend {
+  text: string;
+  attachments?: MessageAttachment[];
+}
 
 interface ActiveDraft {
   threadId: string;
@@ -501,7 +507,7 @@ export default function Page() {
 
   // ターミナル風の指示連投。応答中に送信されたメッセージを thread ごとに
   // 溜め、その thread がアイドルに戻ったら先頭から自動送出する。
-  const enqueuedSendsRef = useRef<Record<string, string[]>>({});
+  const enqueuedSendsRef = useRef<Record<string, PendingSend[]>>({});
   const [enqueuedCounts, setEnqueuedCounts] = useState<
     Record<string, number>
   >({});
@@ -2402,7 +2408,11 @@ ${command}
     void handleSendForThread(text, thread);
   };
 
-  const handleSendForThread = async (text: string, thread: Thread) => {
+  const handleSendForThread = async (
+    text: string,
+    thread: Thread,
+    attachments?: MessageAttachment[],
+  ) => {
     const allSlots = effectiveParticipants(thread);
     const participantSlots = allSlots.filter((s) => s.role !== "moderator");
     // moderator は初回ターンには発火させない（各ラウンド完了後に総括する）
@@ -2442,6 +2452,7 @@ ${command}
       id: nanoid(8),
       role: "user" as const,
       content: textWithPeek,
+      attachments,
       createdAt: Date.now(),
     };
     const next = appendMessage(thread, userMsg);
@@ -2588,17 +2599,32 @@ ${command}
    * ChatPane からの送信入口。応答中ならキューに積み（ターミナル風連投）、
    * アイドルなら即送信。flush は streamingSids 変化の useEffect で行う。
    */
-  const submitOrQueue = (text: string, thread: Thread) => {
+  const submitOrQueue = (
+    text: string,
+    thread: Thread,
+    attachments?: MessageAttachment[],
+  ) => {
     const value = text.trim();
-    if (!value) return;
+    if (!value && (!attachments || attachments.length === 0)) return;
     if (isThreadBusy(thread)) {
       const q = enqueuedSendsRef.current[thread.id] ?? [];
-      q.push(value);
+      q.push({ text: value, attachments });
       enqueuedSendsRef.current[thread.id] = q;
       setEnqueuedCounts((prev) => ({ ...prev, [thread.id]: q.length }));
       return;
     }
-    void handleSendForThread(value, thread);
+    void handleSendForThread(value, thread, attachments);
+  };
+
+  const handleRenameThread = (id: string, title: string) => {
+    const value = title.trim();
+    if (!value) return;
+    updateThread(id, (t) => ({
+      ...t,
+      title: value,
+      titleEdited: true,
+      updatedAt: Date.now(),
+    }));
   };
 
   // アイドルに戻った thread のキュー先頭を 1 件送出。streamingSids が
@@ -2618,10 +2644,10 @@ ${command}
         continue;
       }
       if (isThreadBusy(thread)) continue;
-      const nextText = q.shift();
-      if (nextText === undefined) continue;
+      const next = q.shift();
+      if (next === undefined) continue;
       setEnqueuedCounts((prev) => ({ ...prev, [tid]: q.length }));
-      void handleSendForThread(nextText, thread);
+      void handleSendForThread(next.text, thread, next.attachments);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamingSids]);
@@ -3381,6 +3407,7 @@ ${command}
             handleCreate();
           }}
           onDelete={handleDelete}
+          onRename={handleRenameThread}
           onOpenSettings={() => setSettingsOpen(true)}
           mainView={mainView}
           onOpenAddons={() => setMainView("addons")}
@@ -3478,8 +3505,8 @@ ${command}
                 isStreaming={primaryStreaming}
                 threadDrafts={primaryDrafts}
                 userProfile={userProfile}
-                onSend={(text) =>
-                  activeThread && submitOrQueue(text, activeThread)
+                onSend={(text, attachments) =>
+                  activeThread && submitOrQueue(text, activeThread, attachments)
                 }
                 queuedCount={
                   activeThread ? enqueuedCounts[activeThread.id] ?? 0 : 0
@@ -3559,7 +3586,7 @@ ${command}
                   isStreaming={streaming}
                   threadDrafts={drafts}
                   userProfile={userProfile}
-                  onSend={(text) => submitOrQueue(text, t)}
+                  onSend={(text, attachments) => submitOrQueue(text, t, attachments)}
                   queuedCount={enqueuedCounts[t.id] ?? 0}
                   onAbort={() => handleAbortForThread(t)}
                   onSplit={handleOpenSplitPane}
@@ -3602,8 +3629,8 @@ ${command}
                 isStreaming={primaryStreaming}
                 threadDrafts={primaryDrafts}
                 userProfile={userProfile}
-                onSend={(text) =>
-                  activeThread && submitOrQueue(text, activeThread)
+                onSend={(text, attachments) =>
+                  activeThread && submitOrQueue(text, activeThread, attachments)
                 }
                 queuedCount={
                   activeThread ? enqueuedCounts[activeThread.id] ?? 0 : 0
@@ -3690,8 +3717,8 @@ ${command}
                     isStreaming={splitPaneStates[0]?.streaming ?? false}
                     threadDrafts={splitPaneStates[0]?.drafts ?? {}}
                     userProfile={userProfile}
-                    onSend={(text) =>
-                      submitOrQueue(text, splitThread)
+                    onSend={(text, attachments) =>
+                      submitOrQueue(text, splitThread, attachments)
                     }
                     queuedCount={enqueuedCounts[splitThread.id] ?? 0}
                     onAbort={() => handleAbortForThread(splitThread)}

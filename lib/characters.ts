@@ -127,7 +127,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 
 複数ドメインにまたがる質問は、主担当を決めつつ「[CMOモード／一部CFO観点]」のように補助モードも明示してOK。
 ユーザーが特定モードで固定したい時は明示指示があるはずなので、その時だけ固定する。`,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-haiku-4-5-20251001",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
