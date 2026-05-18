@@ -11,10 +11,17 @@ import {
   Columns2,
   X,
   MessageCircle,
+  Sparkles,
   CornerDownLeft,
   Clock,
   Image as ImageIcon,
 } from "lucide-react";
+
+/**
+ * 「新スレッド推奨」バナーを出すメッセージ件数の閾値。
+ * Claude Code では turn 30 を超えると context window 圧迫が顕著になる経験則から 30 を採用。
+ */
+const LONG_CHAT_THRESHOLD = 30;
 import type {
   Block,
   Message,
@@ -141,6 +148,7 @@ export function ChatPane({
   peekActive = false,
   onTogglePeek,
   onTogglePermissionMode,
+  onSuggestNewThread,
   userProfile,
 }: Props) {
   const { t } = useTranslation();
@@ -148,6 +156,8 @@ export function ChatPane({
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  // 「新スレッド推奨」バナーを当該スレッドで一度閉じたかどうか（per thread, セッション単位）。
+  const [longChatDismissedFor, setLongChatDismissedFor] = useState<string | null>(null);
   // 沈黙検知用ティック（500ms ごとに inactivity 状況を再評価して停止ボタンの強調を切替）
   const [, setStuckTick] = useState(0);
   useEffect(() => {
@@ -174,38 +184,13 @@ export function ChatPane({
     ? getPersonality(character.personalityId ?? "")
     : null;
 
-  // textarea の高さ自動調整。
-  // 入力テキストが変わるたび内容に合わせて伸縮（最大200px）。
   useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 200) + "px";
+    }
   }, [input]);
-
-  // 並列ペインは後から DOM に挿入され、初回計測時はまだ幅が確定していない
-  // （CSS Grid/flex のレイアウト前）。空 textarea でも幅0付近だと scrollHeight を
-  // 誤検出して入力欄が肥大化する。ResizeObserver で「幅が変わった時だけ」
-  // 再計測し、レイアウト確定・ペイン増減・ウィンドウリサイズに自己追従する。
-  // （高さは自分で書き換えるので width 変化のみをトリガにして無限ループを防ぐ）
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    let lastWidth = -1;
-    const resize = () => {
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 200) + "px";
-    };
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      if (w !== lastWidth) {
-        lastWidth = w;
-        resize();
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [thread?.id]);
 
   // 新メッセージ追加（ユーザー送信 / AI 返信開始）時は無条件で最下部へ。
   // requestAnimationFrame で DOM 反映後に走らせて、追加直後の scrollHeight を確実に拾う。
@@ -466,7 +451,7 @@ export function ChatPane({
 
       {/* 応答中の固定インジケータ。スクロール位置に関係なく常に入力欄の真上に出す。
           「今なにをしているか」をコード断片ではなく日本語の行為ラベルで示す。 */}
-      <LiveActivityBar threadDrafts={threadDrafts} slots={slots} />
+      <LiveActivityBar threadDrafts={threadDrafts} />
 
       {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示。N-way対応。 */}
       {(() => {
@@ -501,6 +486,36 @@ export function ChatPane({
           </div>
         );
       })()}
+
+      {/* 長い会話で token 消費が膨らむ前に新スレッドを切る案内。
+          閾値（LONG_CHAT_THRESHOLD）以上 & per-thread で未 dismiss の時だけ表示。 */}
+      {thread &&
+        onSuggestNewThread &&
+        thread.messages.length >= LONG_CHAT_THRESHOLD &&
+        longChatDismissedFor !== thread.id && (
+          <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-sky-50/70 flex items-center gap-2 text-[12px]">
+            <Sparkles size={13} className="text-sky-600 shrink-0" />
+            <span className="text-sky-900 leading-snug">
+              {t("chat.longChatTurnsPrefix")}<span className="font-mono font-semibold">
+                {thread.messages.length}
+              </span>{t("chat.longChatTurnsSuffix")}
+            </span>
+            <button
+              onClick={onSuggestNewThread}
+              className="ml-auto px-3 py-1.5 rounded-md bg-sky-600 text-white text-[11.5px] font-medium hover:opacity-90 shrink-0"
+            >
+              {t("chat.openNewThread")}
+            </button>
+            <button
+              onClick={() => setLongChatDismissedFor(thread.id)}
+              title={t("chat.dontShowAgainHere")}
+              className="shrink-0 p-1 rounded text-sky-700 hover:bg-sky-100"
+              aria-label={t("chat.close")}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-4 bg-white">
         {thread && (
@@ -1025,7 +1040,7 @@ function SlotColumn({
         {message ? (
           <ColumnContent blocks={message.blocks ?? []} fallback={message.content} />
         ) : draft ? (
-          <ColumnContent blocks={draft.blocks} fallback={`${currentActivityLabel(draft, t)}…`} />
+          <ColumnContent blocks={draft.blocks} fallback="…" />
         ) : isPending ? (
           <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
             <Loader2
@@ -1033,12 +1048,7 @@ function SlotColumn({
               className="animate-spin text-[var(--color-accent)] shrink-0"
               aria-hidden="true"
             />
-            <span>
-              {t("chat.slotWorking").replace(
-                "{name}",
-                character?.name ?? t("chat.slotPlaceholder"),
-              )}
-            </span>
+            <span>{t("chat.slotWaiting").replace("{name}", character?.name ?? t("chat.slotPlaceholder"))}</span>
           </div>
         ) : (
           <div className="text-[12px] text-[var(--color-muted)] italic">
@@ -1346,48 +1356,16 @@ function currentActivityKey(blocks: Block[]): string | null {
       return null;
     }
     const n = b.toolName;
-    const normalized = n.toLowerCase();
-    if (
-      n === "Bash" ||
-      normalized.includes("bash") ||
-      normalized.includes("shell") ||
-      normalized.includes("command") ||
-      normalized.includes("exec")
-    ) return "chat.activityBash";
-    if (n === "Read" || n === "NotebookRead" || normalized.includes("read"))
-      return "chat.activityRead";
-    if (
-      n === "Edit" ||
-      n === "Write" ||
-      n === "MultiEdit" ||
-      n === "NotebookEdit" ||
-      normalized.includes("edit") ||
-      normalized.includes("write")
-    )
+    if (n === "Bash") return "chat.activityBash";
+    if (n === "Read" || n === "NotebookRead") return "chat.activityRead";
+    if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit")
       return "chat.activityEdit";
-    if (
-      n === "Grep" ||
-      n === "Glob" ||
-      n === "LS" ||
-      normalized.includes("search") ||
-      normalized.includes("grep") ||
-      normalized.includes("glob") ||
-      normalized === "ls"
-    ) return "chat.activitySearch";
-    if (n === "TodoWrite" || normalized.includes("todo")) return "chat.activityTodo";
-    if (n === "WebFetch" || n === "WebSearch" || normalized.includes("web"))
-      return "chat.activityWeb";
+    if (n === "Grep" || n === "Glob" || n === "LS") return "chat.activitySearch";
+    if (n === "TodoWrite") return "chat.activityTodo";
+    if (n === "WebFetch" || n === "WebSearch") return "chat.activityWeb";
     return "chat.activityTool";
   }
   return null;
-}
-
-function currentActivityLabel(draft: ActiveDraftLite, t: (key: string) => string): string {
-  const actKey = currentActivityKey(draft.blocks);
-  if (actKey) return t(actKey);
-  return draft.firstTextAt !== null
-    ? t("chat.streamingResponding")
-    : t("chat.streamingThinking");
 }
 
 /**
@@ -1398,10 +1376,8 @@ function currentActivityLabel(draft: ActiveDraftLite, t: (key: string) => string
  */
 function LiveActivityBar({
   threadDrafts,
-  slots,
 }: {
   threadDrafts: Record<string, ActiveDraftLite | null>;
-  slots: ParticipantSlot[];
 }) {
   const { t } = useTranslation();
   const active = Object.values(threadDrafts).filter(
@@ -1410,14 +1386,16 @@ function LiveActivityBar({
   if (active.length === 0) return null;
 
   const lineFor = (d: ActiveDraftLite, key: string | number) => {
-    const slot = slots.find((s) => s.id === d.slotId);
-    const character = slot ? getCharacter(slot.characterId) : null;
+    const actKey = currentActivityKey(d.blocks);
     const now = Date.now();
     const stuck = now - d.lastEventAt > INACTIVITY_HINT_MS;
-    const actorName = character?.name ?? PROVIDER_LABELS[d.provider] ?? t("chat.defaultAssistant");
     const label = stuck
       ? t("chat.streamingStuck")
-      : currentActivityLabel(d, t);
+      : actKey
+        ? t(actKey)
+        : d.firstTextAt !== null
+          ? t("chat.streamingResponding")
+          : t("chat.streamingThinking");
     return (
       <div key={key} className="flex items-center gap-2 min-w-0">
         <Loader2
@@ -1426,10 +1404,7 @@ function LiveActivityBar({
         />
         <span
           className={`text-[12.5px] font-medium truncate ${stuck ? "text-amber-700" : "text-[var(--color-text)]"}`}
-          title={`${actorName}: ${label}`}
         >
-          <span className="font-semibold">{actorName}</span>
-          <span className="text-[var(--color-muted)]">: </span>
           {label}
         </span>
         <span className="ml-auto shrink-0">
@@ -1593,9 +1568,7 @@ function DraftBubble({
         </div>
         <div className="md-body text-[14.5px] leading-relaxed">
           {blocks.length === 0 && (
-            <span className="text-[var(--color-muted)]">
-              {currentActivityLabel(draft, t)}…
-            </span>
+            <span className="text-[var(--color-muted)]">…</span>
           )}
           {blocks.map((b, i) =>
             b.kind === "text" ? (
