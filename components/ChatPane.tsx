@@ -11,17 +11,11 @@ import {
   Columns2,
   X,
   MessageCircle,
-  Sparkles,
   CornerDownLeft,
   Clock,
   Image as ImageIcon,
+  Paperclip,
 } from "lucide-react";
-
-/**
- * 「新スレッド推奨」バナーを出すメッセージ件数の閾値。
- * Claude Code では turn 30 を超えると context window 圧迫が顕著になる経験則から 30 を採用。
- */
-const LONG_CHAT_THRESHOLD = 30;
 import type {
   Block,
   Message,
@@ -31,7 +25,7 @@ import type {
   Provider,
   Thread,
 } from "@/lib/types";
-import { saveAvatarFromFile } from "@/lib/tauri";
+import { saveAvatarFromFile, pickAndSaveAvatar } from "@/lib/tauri";
 import {
   PERMISSION_MODE_LABELS,
   PROVIDER_COLORS,
@@ -148,7 +142,6 @@ export function ChatPane({
   peekActive = false,
   onTogglePeek,
   onTogglePermissionMode,
-  onSuggestNewThread,
   userProfile,
 }: Props) {
   const { t } = useTranslation();
@@ -156,8 +149,6 @@ export function ChatPane({
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  // 「新スレッド推奨」バナーを当該スレッドで一度閉じたかどうか（per thread, セッション単位）。
-  const [longChatDismissedFor, setLongChatDismissedFor] = useState<string | null>(null);
   // 沈黙検知用ティック（500ms ごとに inactivity 状況を再評価して停止ボタンの強調を切替）
   const [, setStuckTick] = useState(0);
   useEffect(() => {
@@ -250,6 +241,39 @@ export function ChatPane({
       setAttachments((prev) => [...prev, ...saved]);
       setTimeout(() => textareaRef.current?.focus(), 0);
     }
+  };
+
+  // ファイル添付ボタン: ネイティブのファイル選択 → 画像を保存して添付に追加。
+  // 既存の貼り付け(handlePaste)と同じ attachments 機構に乗せる。
+  const handleAttachFile = async () => {
+    const path = await pickAndSaveAvatar();
+    if (!path) return;
+    const slash = path.lastIndexOf("/");
+    const bslash = path.lastIndexOf(String.fromCharCode(92));
+    const base = path.slice(Math.max(slash, bslash) + 1);
+    const name = base || `attachment-${Date.now()}.png`;
+    const ext = (name.split(".").pop() || "png").toLowerCase();
+    const mime =
+      ext === "jpg" || ext === "jpeg"
+        ? "image/jpeg"
+        : ext === "webp"
+          ? "image/webp"
+          : ext === "gif"
+            ? "image/gif"
+            : ext === "svg"
+              ? "image/svg+xml"
+              : "image/png";
+    setAttachments((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        kind: "image",
+        name,
+        path,
+        mime,
+      },
+    ]);
+    setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
   // スラッシュコマンドピッカーから選ばれたら、textarea にコマンド文字列を反映する。
@@ -451,7 +475,7 @@ export function ChatPane({
 
       {/* 応答中の固定インジケータ。スクロール位置に関係なく常に入力欄の真上に出す。
           「今なにをしているか」をコード断片ではなく日本語の行為ラベルで示す。 */}
-      <LiveActivityBar threadDrafts={threadDrafts} />
+      <LiveActivityBar threadDrafts={threadDrafts} slots={slots} />
 
       {/* 議論継続ボタン: 会議モードで [合意] に至らず終了したときだけ表示。N-way対応。 */}
       {(() => {
@@ -486,36 +510,6 @@ export function ChatPane({
           </div>
         );
       })()}
-
-      {/* 長い会話で token 消費が膨らむ前に新スレッドを切る案内。
-          閾値（LONG_CHAT_THRESHOLD）以上 & per-thread で未 dismiss の時だけ表示。 */}
-      {thread &&
-        onSuggestNewThread &&
-        thread.messages.length >= LONG_CHAT_THRESHOLD &&
-        longChatDismissedFor !== thread.id && (
-          <div className="shrink-0 border-t border-[var(--color-border)] px-4 py-2 bg-sky-50/70 flex items-center gap-2 text-[12px]">
-            <Sparkles size={13} className="text-sky-600 shrink-0" />
-            <span className="text-sky-900 leading-snug">
-              {t("chat.longChatTurnsPrefix")}<span className="font-mono font-semibold">
-                {thread.messages.length}
-              </span>{t("chat.longChatTurnsSuffix")}
-            </span>
-            <button
-              onClick={onSuggestNewThread}
-              className="ml-auto px-3 py-1.5 rounded-md bg-sky-600 text-white text-[11.5px] font-medium hover:opacity-90 shrink-0"
-            >
-              {t("chat.openNewThread")}
-            </button>
-            <button
-              onClick={() => setLongChatDismissedFor(thread.id)}
-              title={t("chat.dontShowAgainHere")}
-              className="shrink-0 p-1 rounded text-sky-700 hover:bg-sky-100"
-              aria-label={t("chat.close")}
-            >
-              <X size={12} />
-            </button>
-          </div>
-        )}
 
       <div className="shrink-0 border-t border-[var(--color-border)] p-4 bg-white">
         {thread && (
@@ -581,6 +575,16 @@ export function ChatPane({
             rows={1}
             className="flex-1 resize-none bg-transparent outline-none text-sm py-2 leading-relaxed max-h-[200px]"
           />
+          <button
+            type="button"
+            onClick={() => void handleAttachFile()}
+            disabled={isStreaming}
+            title={t("chat.attachFile")}
+            aria-label={t("chat.attachFile")}
+            className="shrink-0 p-2 rounded-lg text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Paperclip size={16} />
+          </button>
           <VoiceInputButton
             disabled={isStreaming}
             onTranscribed={(text) => {
@@ -1040,7 +1044,7 @@ function SlotColumn({
         {message ? (
           <ColumnContent blocks={message.blocks ?? []} fallback={message.content} />
         ) : draft ? (
-          <ColumnContent blocks={draft.blocks} fallback="…" />
+          <ColumnContent blocks={draft.blocks} fallback={`${currentActivityLabel(draft, t)}…`} />
         ) : isPending ? (
           <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
             <Loader2
@@ -1048,7 +1052,12 @@ function SlotColumn({
               className="animate-spin text-[var(--color-accent)] shrink-0"
               aria-hidden="true"
             />
-            <span>{t("chat.slotWaiting").replace("{name}", character?.name ?? t("chat.slotPlaceholder"))}</span>
+            <span>
+              {t("chat.slotWorking").replace(
+                "{name}",
+                character?.name ?? t("chat.slotPlaceholder"),
+              )}
+            </span>
           </div>
         ) : (
           <div className="text-[12px] text-[var(--color-muted)] italic">
@@ -1356,16 +1365,48 @@ function currentActivityKey(blocks: Block[]): string | null {
       return null;
     }
     const n = b.toolName;
-    if (n === "Bash") return "chat.activityBash";
-    if (n === "Read" || n === "NotebookRead") return "chat.activityRead";
-    if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit")
+    const normalized = n.toLowerCase();
+    if (
+      n === "Bash" ||
+      normalized.includes("bash") ||
+      normalized.includes("shell") ||
+      normalized.includes("command") ||
+      normalized.includes("exec")
+    ) return "chat.activityBash";
+    if (n === "Read" || n === "NotebookRead" || normalized.includes("read"))
+      return "chat.activityRead";
+    if (
+      n === "Edit" ||
+      n === "Write" ||
+      n === "MultiEdit" ||
+      n === "NotebookEdit" ||
+      normalized.includes("edit") ||
+      normalized.includes("write")
+    )
       return "chat.activityEdit";
-    if (n === "Grep" || n === "Glob" || n === "LS") return "chat.activitySearch";
-    if (n === "TodoWrite") return "chat.activityTodo";
-    if (n === "WebFetch" || n === "WebSearch") return "chat.activityWeb";
+    if (
+      n === "Grep" ||
+      n === "Glob" ||
+      n === "LS" ||
+      normalized.includes("search") ||
+      normalized.includes("grep") ||
+      normalized.includes("glob") ||
+      normalized === "ls"
+    ) return "chat.activitySearch";
+    if (n === "TodoWrite" || normalized.includes("todo")) return "chat.activityTodo";
+    if (n === "WebFetch" || n === "WebSearch" || normalized.includes("web"))
+      return "chat.activityWeb";
     return "chat.activityTool";
   }
   return null;
+}
+
+function currentActivityLabel(draft: ActiveDraftLite, t: (key: string) => string): string {
+  const actKey = currentActivityKey(draft.blocks);
+  if (actKey) return t(actKey);
+  return draft.firstTextAt !== null
+    ? t("chat.streamingResponding")
+    : t("chat.streamingThinking");
 }
 
 /**
@@ -1376,8 +1417,10 @@ function currentActivityKey(blocks: Block[]): string | null {
  */
 function LiveActivityBar({
   threadDrafts,
+  slots,
 }: {
   threadDrafts: Record<string, ActiveDraftLite | null>;
+  slots: ParticipantSlot[];
 }) {
   const { t } = useTranslation();
   const active = Object.values(threadDrafts).filter(
@@ -1386,16 +1429,14 @@ function LiveActivityBar({
   if (active.length === 0) return null;
 
   const lineFor = (d: ActiveDraftLite, key: string | number) => {
-    const actKey = currentActivityKey(d.blocks);
+    const slot = slots.find((s) => s.id === d.slotId);
+    const character = slot ? getCharacter(slot.characterId) : null;
     const now = Date.now();
     const stuck = now - d.lastEventAt > INACTIVITY_HINT_MS;
+    const actorName = character?.name ?? PROVIDER_LABELS[d.provider] ?? t("chat.defaultAssistant");
     const label = stuck
       ? t("chat.streamingStuck")
-      : actKey
-        ? t(actKey)
-        : d.firstTextAt !== null
-          ? t("chat.streamingResponding")
-          : t("chat.streamingThinking");
+      : currentActivityLabel(d, t);
     return (
       <div key={key} className="flex items-center gap-2 min-w-0">
         <Loader2
@@ -1404,7 +1445,10 @@ function LiveActivityBar({
         />
         <span
           className={`text-[12.5px] font-medium truncate ${stuck ? "text-amber-700" : "text-[var(--color-text)]"}`}
+          title={`${actorName}: ${label}`}
         >
+          <span className="font-semibold">{actorName}</span>
+          <span className="text-[var(--color-muted)]">: </span>
           {label}
         </span>
         <span className="ml-auto shrink-0">
@@ -1568,7 +1612,9 @@ function DraftBubble({
         </div>
         <div className="md-body text-[14.5px] leading-relaxed">
           {blocks.length === 0 && (
-            <span className="text-[var(--color-muted)]">…</span>
+            <span className="text-[var(--color-muted)]">
+              {currentActivityLabel(draft, t)}…
+            </span>
           )}
           {blocks.map((b, i) =>
             b.kind === "text" ? (
