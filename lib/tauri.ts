@@ -177,6 +177,43 @@ export async function pickAndSaveAvatar(): Promise<string | null> {
   return invoke<string>("save_avatar_image", { sourcePath: file as string });
 }
 
+export async function pickAttachment(): Promise<
+  { path: string; kind: "image" | "file" } | null
+> {
+  if (!isTauri()) {
+    alert("ファイル添付は Tauri アプリ起動時のみ利用できます。");
+    return null;
+  }
+  const dialog = await loadDialog();
+  const IMG = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
+  const DOC = [
+    "pdf", "txt", "md", "markdown", "csv", "tsv", "json",
+    "yaml", "yml", "log", "docx", "xlsx", "pptx", "html", "xml",
+  ];
+  const file = await dialog.open({
+    multiple: false,
+    directory: false,
+    filters: [
+      { name: "画像・書類", extensions: [...IMG, ...DOC] },
+      { name: "すべてのファイル", extensions: ["*"] },
+    ],
+    title: "添付するファイルを選択",
+  });
+  if (!file || Array.isArray(file)) return null;
+  const src = file as string;
+  const dot = src.lastIndexOf(".");
+  const ext = dot >= 0 ? src.slice(dot + 1).toLowerCase() : "";
+  if (IMG.includes(ext)) {
+    const invoke = await loadInvoke();
+    const saved = await invoke<string>("save_avatar_image", {
+      sourcePath: src,
+    });
+    return { path: saved, kind: "image" };
+  }
+  // 書類はコピーせず元パスをそのまま渡す（AI が Read ツールで開く）
+  return { path: src, kind: "file" };
+}
+
 export async function deleteAvatar(path: string): Promise<void> {
   if (!isTauri()) return;
   const invoke = await loadInvoke();

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
+import { Check, Copy, FileText, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
 import type { Character, Message, MessageAttachment, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
@@ -195,6 +195,11 @@ function AttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
+    if (attachment.kind !== "image") {
+      return () => {
+        alive = false;
+      };
+    }
     void avatarSrc(attachment.path)
       .then((url) => {
         if (alive) setSrc(url);
@@ -206,6 +211,22 @@ function AttachmentPreview({ attachment }: { attachment: MessageAttachment }) {
       alive = false;
     };
   }, [attachment.path]);
+
+  if (attachment.kind !== "image") {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          void openFileInEditorWindow(attachment.path);
+        }}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-white px-2.5 py-1.5 text-[11.5px] text-[var(--color-text)] shadow-sm hover:border-[var(--color-accent)] transition"
+        title={t("message.attachmentOpen").replace("{path}", attachment.path)}
+      >
+        <FileText size={13} className="text-[var(--color-accent)] shrink-0" />
+        <span className="truncate max-w-[220px]">{attachment.name}</span>
+      </button>
+    );
+  }
 
   return (
     <button

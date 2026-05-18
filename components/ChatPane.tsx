@@ -16,6 +16,7 @@ import {
   Clock,
   Image as ImageIcon,
   Paperclip,
+  FileText,
 } from "lucide-react";
 import type {
   Block,
@@ -26,7 +27,7 @@ import type {
   Provider,
   Thread,
 } from "@/lib/types";
-import { saveAvatarFromFile, pickAndSaveAvatar } from "@/lib/tauri";
+import { saveAvatarFromFile, pickAttachment } from "@/lib/tauri";
 import {
   PERMISSION_MODE_LABELS,
   PROVIDER_COLORS,
@@ -217,16 +218,31 @@ export function ChatPane({
     // 添付画像は CLI へテキストで渡すため、ただのパスだと AI が「画像」と
     // 認識せず素通りしがち。Read ツールは画像対応なので「このパスは画像。
     // Read で画像として開いて中身を見てから答えて」と明示する。
-    const attachmentLines = attachments.map(
-      (a, idx) =>
-        `添付画像${attachments.length > 1 ? ` ${idx + 1}` : ""}（${a.name}）: ${a.path}`,
+    const imgs = attachments.filter((a) => a.kind === "image");
+    const docs = attachments.filter((a) => a.kind !== "image");
+    const lines: string[] = [];
+    imgs.forEach((a, n) =>
+      lines.push(
+        `添付画像${imgs.length > 1 ? ` ${n + 1}` : ""}（${a.name}）: ${a.path}`,
+      ),
     );
-    const imgNote =
-      attachments.length > 0
-        ? "\n\n↑は添付された画像ファイルです。上記パスを Read ツールで開き、テキストとしてではなく画像として内容を確認したうえで回答してください。"
-        : "";
+    docs.forEach((a, n) =>
+      lines.push(
+        `添付ファイル${docs.length > 1 ? ` ${n + 1}` : ""}（${a.name}）: ${a.path}`,
+      ),
+    );
+    const notes: string[] = [];
+    if (imgs.length > 0)
+      notes.push(
+        "上記の画像ファイルは Read ツールで開き、テキストではなく画像として内容を確認したうえで回答してください。",
+      );
+    if (docs.length > 0)
+      notes.push(
+        "上記の添付ファイルは Read ツールで開いて中身を読んだうえで回答してください。",
+      );
+    const note = notes.length ? "\n\n" + notes.join("\n") : "";
     const textForAi =
-      [value, ...attachmentLines].filter(Boolean).join("\n\n") + imgNote;
+      [value, ...lines].filter(Boolean).join("\n\n") + note;
     onSend(textForAi, attachments);
     setInput("");
     setAttachments([]);
@@ -259,28 +275,33 @@ export function ChatPane({
   // ファイル添付ボタン: ネイティブのファイル選択 → 画像を保存して添付に追加。
   // 既存の貼り付け(handlePaste)と同じ attachments 機構に乗せる。
   const handleAttachFile = async () => {
-    const path = await pickAndSaveAvatar();
-    if (!path) return;
+    const picked = await pickAttachment();
+    if (!picked) return;
+    const { path, kind } = picked;
     const slash = path.lastIndexOf("/");
     const bslash = path.lastIndexOf(String.fromCharCode(92));
     const base = path.slice(Math.max(slash, bslash) + 1);
-    const name = base || `attachment-${Date.now()}.png`;
-    const ext = (name.split(".").pop() || "png").toLowerCase();
+    const name = base || `attachment-${Date.now()}`;
+    const ext = (name.split(".").pop() || "").toLowerCase();
     const mime =
-      ext === "jpg" || ext === "jpeg"
-        ? "image/jpeg"
-        : ext === "webp"
-          ? "image/webp"
-          : ext === "gif"
-            ? "image/gif"
-            : ext === "svg"
-              ? "image/svg+xml"
-              : "image/png";
+      kind === "image"
+        ? ext === "jpg" || ext === "jpeg"
+          ? "image/jpeg"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "gif"
+              ? "image/gif"
+              : ext === "svg"
+                ? "image/svg+xml"
+                : "image/png"
+        : ext === "pdf"
+          ? "application/pdf"
+          : "application/octet-stream";
     setAttachments((prev) => [
       ...prev,
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        kind: "image",
+        kind,
         name,
         path,
         mime,
@@ -559,7 +580,11 @@ export function ChatPane({
                 className="inline-flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-text)]"
                 title={a.path}
               >
-                <ImageIcon size={13} className="text-[var(--color-accent)]" />
+                {a.kind === "image" ? (
+                  <ImageIcon size={13} className="text-[var(--color-accent)]" />
+                ) : (
+                  <FileText size={13} className="text-[var(--color-accent)]" />
+                )}
                 <span className="max-w-[220px] truncate">{a.name}</span>
                 <button
                   type="button"
