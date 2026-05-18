@@ -174,19 +174,38 @@ export function ChatPane({
     ? getPersonality(character.personalityId ?? "")
     : null;
 
+  // textarea の高さ自動調整。
+  // 入力テキストが変わるたび内容に合わせて伸縮（最大200px）。
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
+
+  // 並列ペインは後から DOM に挿入され、初回計測時はまだ幅が確定していない
+  // （CSS Grid/flex のレイアウト前）。空 textarea でも幅0付近だと scrollHeight を
+  // 誤検出して入力欄が肥大化する。ResizeObserver で「幅が変わった時だけ」
+  // 再計測し、レイアウト確定・ペイン増減・ウィンドウリサイズに自己追従する。
+  // （高さは自分で書き換えるので width 変化のみをトリガにして無限ループを防ぐ）
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    let lastWidth = -1;
     const resize = () => {
       el.style.height = "auto";
       el.style.height = Math.min(el.scrollHeight, 200) + "px";
     };
-    resize();
-    // 並列ペインは後から DOM に挿入されるため、初回計測がレイアウト確定前に
-    // 走ると scrollHeight を誤検出して入力欄が肥大化する。確定後に再計測する。
-    const raf = requestAnimationFrame(resize);
-    return () => cancelAnimationFrame(raf);
-  }, [input, thread?.id]);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w !== lastWidth) {
+        lastWidth = w;
+        resize();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [thread?.id]);
 
   // 新メッセージ追加（ユーザー送信 / AI 返信開始）時は無条件で最下部へ。
   // requestAnimationFrame で DOM 反映後に走らせて、追加直後の scrollHeight を確実に拾う。
