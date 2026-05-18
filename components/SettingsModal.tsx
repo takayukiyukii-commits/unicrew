@@ -395,7 +395,9 @@ export function SettingsModal({
     onSave({
       ...settings,
       authMode,
-      showActivity: beginnerMode ? false : showActivity,
+      // 初心者モード=クリーン表示 / 解除=ターミナル風のツール実行詳細を表示
+      // （showActivity の独立トグルは無く beginnerMode が唯一のスイッチ）
+      showActivity: !beginnerMode,
       advancedMode,
       beginnerMode,
     });

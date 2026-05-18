@@ -3051,7 +3051,7 @@ ${command}
           const updated = {
             ...settings,
             beginnerMode: next,
-            showActivity: next ? false : settings.showActivity,
+            showActivity: !next,
           };
           setSettings(updated);
           saveSettings(updated);
@@ -3318,7 +3318,7 @@ ${command}
             const updated = {
               ...settings,
               beginnerMode: next,
-              showActivity: next ? false : settings.showActivity,
+              showActivity: !next,
             };
             setSettings(updated);
             saveSettings(updated);
