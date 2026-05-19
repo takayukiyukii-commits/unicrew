@@ -70,8 +70,17 @@ impl CliProvider for ClaudeProvider {
         let mut sysprompt_temp_path: Option<std::path::PathBuf> = None;
         if !opts.system_prompt.is_empty() {
             let mut path = std::env::temp_dir();
-            // セッションIDは UNICREW 内のものを使う（衝突しない）
-            path.push(format!("unicrew-claude-sysprompt-{}.txt", opts.session_id));
+            // session_id だけだと「停止→同スレッドへ即再送」で旧セッションの
+            // Drop が新セッションの同名ファイルを削除し、新 claude が
+            // --append-system-prompt-file を読めず終了コード1で即死する。
+            // spawn ごとに一意な連番を付けて衝突を根絶する。
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SYSPROMPT_SEQ: AtomicU64 = AtomicU64::new(0);
+            let nonce = SYSPROMPT_SEQ.fetch_add(1, Ordering::Relaxed);
+            path.push(format!(
+                "unicrew-claude-sysprompt-{}-{}.txt",
+                opts.session_id, nonce
+            ));
             match std::fs::write(&path, &opts.system_prompt) {
                 Ok(()) => {
                     cmd.arg("--append-system-prompt-file").arg(&path);
@@ -243,7 +252,7 @@ impl SessionHandle for ClaudeSessionHandle {
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "不明".into());
                 return Err(ProviderError::Session(format!(
-                    "Claude が起動直後に終了しました（終了コード {code}）。未ログイン／未認証の可能性が高いです。設定 → アカウントから Claude Code にログインし直してください。"
+                    "Claude が起動直後に終了しました（終了コード {code}）。停止直後の再送と競合したか、未ログインの可能性があります。少し待ってから再送し、改善しなければ設定 → アカウントで Claude Code のログインを確認してください。"
                 )));
             }
             return Err(ProviderError::Io(e));
