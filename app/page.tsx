@@ -15,6 +15,7 @@ import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { TrustPromptModal } from "@/components/TrustPromptModal";
 import { isWorkspaceTrusted, trustWorkspace } from "@/lib/trust";
 import { openFileInEditorWindow } from "@/lib/editor-window";
+import { applyAppearance } from "@/lib/appearance";
 import {
   Plus,
   FolderOpen as IconFolderOpen,
@@ -545,6 +546,11 @@ export default function Page() {
     new Promise<void>((resolve) => {
       slotCompletionResolversRef.current.set(sid, resolve);
     });
+
+  // 外観設定を画面へ反映（初期ロード・保存・モーダル変更すべてに追従）
+  useEffect(() => {
+    applyAppearance(settings.appearance);
+  }, [settings.appearance]);
 
   // hydrate
   useEffect(() => {

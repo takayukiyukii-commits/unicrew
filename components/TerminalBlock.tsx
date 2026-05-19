@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { Terminal, Check, X as XIcon, Loader2 } from "lucide-react";
+import { Terminal, Check, X as XIcon, Loader2, Eye } from "lucide-react";
 import type { ToolUseBlock } from "@/lib/types";
 import { ansiToLines, type AnsiStyle } from "@/lib/ansi";
 import { useTranslation } from "@/lib/i18n";
+import { detectPreview } from "@/lib/preview";
+import { openPreviewWindow } from "@/lib/preview-window";
 
 interface Props {
   block: ToolUseBlock;
@@ -57,6 +59,7 @@ export function TerminalBlock({ block }: Props) {
       ? t("terminal.failed")
       : t("terminal.done");
 
+  const preview = detectPreview(block);
   const hasOutput = output.trim().length > 0;
 
   return (
@@ -67,8 +70,18 @@ export function TerminalBlock({ block }: Props) {
         <span className="font-mono text-[11px] font-semibold text-slate-200">
           {t("terminal.title")}
         </span>
+        {preview && preview.mode === "window" && (
+          <button
+            onClick={() => void openPreviewWindow(preview.target)}
+            title="別ウィンドウでプレビュー"
+            className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] text-slate-200 border border-white/20 hover:bg-white/10"
+          >
+            <Eye size={11} />
+            プレビュー
+          </button>
+        )}
         <span
-          className={`ml-auto flex items-center gap-1 text-[10.5px] ${statusColor}`}
+          className={`${preview && preview.mode === "window" ? "" : "ml-auto"} flex items-center gap-1 text-[10.5px] ${statusColor}`}
         >
           <StatusIcon size={11} className={running ? "animate-spin" : ""} />
           <span>{statusText}</span>

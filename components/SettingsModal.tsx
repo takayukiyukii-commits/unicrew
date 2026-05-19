@@ -20,6 +20,12 @@ import {
 } from "lucide-react";
 import type { AppSettings, AuthMode } from "@/lib/types";
 import {
+  applyAppearance,
+  APPEARANCE_PRESETS,
+  DEFAULT_APPEARANCE,
+  type AppearanceSettings,
+} from "@/lib/appearance";
+import {
   acpCliStatus,
   claudeStatus,
   cliVersions,
@@ -114,6 +120,9 @@ export function SettingsModal({
   );
   const [beginnerMode, setBeginnerMode] = useState<boolean>(
     settings.beginnerMode ?? true,
+  );
+  const [appearance, setAppearance] = useState<AppearanceSettings>(
+    settings.appearance ?? DEFAULT_APPEARANCE,
   );
   const [apiKey, setApiKeyLocal] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -400,6 +409,7 @@ export function SettingsModal({
       showActivity: !beginnerMode,
       advancedMode,
       beginnerMode,
+      appearance,
     });
     onClose();
   };
@@ -461,6 +471,77 @@ export function SettingsModal({
         </div>
 
         <div className="p-5 space-y-5 overflow-y-auto">
+          <section>
+            <h3 className="font-semibold text-sm mb-2">外観（背景・アクセント色）</h3>
+            <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">
+              プリセットから選ぶか、背景色・アクセント色を自由に変えられます。
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {APPEARANCE_PRESETS.map((pr) => (
+                <button
+                  key={pr.id}
+                  type="button"
+                  onClick={() => {
+                    const next = { ...appearance, preset: pr.id };
+                    setAppearance(next);
+                    applyAppearance(next);
+                  }}
+                  className={clsx(
+                    "border rounded-xl p-2.5 text-left transition flex items-center gap-2",
+                    (appearance.preset ?? "default") === pr.id
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                      : "border-[var(--color-border)] hover:bg-[var(--color-surface)]",
+                  )}
+                >
+                  <span
+                    className="h-5 w-5 rounded-full border border-[var(--color-border)] shrink-0"
+                    style={{ background: pr.vars.bg }}
+                    aria-hidden
+                  />
+                  <span className="text-[12px] font-medium">{pr.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <label className="text-[12px] flex items-center justify-between gap-2 border border-[var(--color-border)] rounded-lg px-3 py-2">
+                <span>背景色</span>
+                <input
+                  type="color"
+                  value={appearance.bg || "#ffffff"}
+                  onChange={(e) => {
+                    const next = { ...appearance, bg: e.target.value };
+                    setAppearance(next);
+                    applyAppearance(next);
+                  }}
+                  className="h-6 w-10 cursor-pointer bg-transparent"
+                />
+              </label>
+              <label className="text-[12px] flex items-center justify-between gap-2 border border-[var(--color-border)] rounded-lg px-3 py-2">
+                <span>アクセント色</span>
+                <input
+                  type="color"
+                  value={appearance.accent || "#3b82f6"}
+                  onChange={(e) => {
+                    const next = { ...appearance, accent: e.target.value };
+                    setAppearance(next);
+                    applyAppearance(next);
+                  }}
+                  className="h-6 w-10 cursor-pointer bg-transparent"
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setAppearance(DEFAULT_APPEARANCE);
+                applyAppearance(DEFAULT_APPEARANCE);
+              }}
+              className="mt-2 text-[11px] text-[var(--color-muted)] underline hover:text-[var(--color-text)]"
+            >
+              既定に戻す
+            </button>
+          </section>
+
           <section>
             <h3 className="font-semibold text-sm mb-2">{tr("settings.language")}</h3>
             <p className="text-[12px] text-[var(--color-muted)] mb-3 leading-relaxed">

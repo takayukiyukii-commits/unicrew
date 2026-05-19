@@ -332,6 +332,11 @@ export interface AppSettings {
    * false（既定）ならバナーを出して、ユーザーが「すべて更新」ボタンを押した時のみ適用される。
    */
   autoApplyAddonUpdates?: boolean;
+  /**
+   * 外観カスタマイズ（背景・アクセント色／プリセット）。
+   * 未設定なら globals.css 既定＝既存ユーザーは無変化。
+   */
+  appearance?: { preset?: string; bg?: string; accent?: string };
   // apiKey は OS Keychain（Tauri）に格納するためここに置かない
   // ブラウザdev時のみ localStorage 経由で別キー保管（lib/tauri.ts）
 }

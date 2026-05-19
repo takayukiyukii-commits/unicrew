@@ -15,6 +15,9 @@ import type { ToolUseBlock } from "@/lib/types";
 import { useShowActivity } from "./ActivityContext";
 import { TerminalBlock } from "./TerminalBlock";
 import { useTranslation } from "@/lib/i18n";
+import { Eye, ExternalLink } from "lucide-react";
+import { detectPreview } from "@/lib/preview";
+import { openPreviewWindow, openExternal } from "@/lib/preview-window";
 
 interface Props {
   block: ToolUseBlock;
@@ -80,6 +83,7 @@ export function ToolUseBubble({ block }: Props) {
       : status === "errored" || status === "denied"
         ? "text-red-600"
         : "text-[var(--color-muted)]";
+  const preview = detectPreview(block);
   return (
     <div className="my-1.5 inline-flex items-start gap-2 max-w-full text-[12.5px]">
       <div className="border border-[var(--color-border)] bg-[var(--color-surface)] rounded-lg px-2.5 py-1.5 max-w-full overflow-hidden">
@@ -103,6 +107,20 @@ export function ToolUseBubble({ block }: Props) {
         <div className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-muted)]">
           {summary(block.toolName, block.input)}
         </div>
+        {preview && (
+          <button
+            onClick={() =>
+              preview.mode === "window"
+                ? void openPreviewWindow(preview.target)
+                : void openExternal(preview.target)
+            }
+            title={preview.mode === "window" ? "別ウィンドウでプレビュー" : "既定アプリ/ブラウザで開く"}
+            className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-bg)]"
+          >
+            {preview.mode === "window" ? <Eye size={11} /> : <ExternalLink size={11} />}
+            {preview.label}
+          </button>
+        )}
       </div>
     </div>
   );
