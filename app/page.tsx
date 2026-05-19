@@ -552,6 +552,18 @@ export default function Page() {
     applyAppearance(settings.appearance);
   }, [settings.appearance]);
 
+  // /mcp 等の REPL コマンド横取り（ChatPane が dispatch）→ 対応画面へ
+  useEffect(() => {
+    const onSlash = (e: Event) => {
+      const d = (e as CustomEvent<{ target?: string }>).detail;
+      if (!d) return;
+      if (d.target === "addons") setMainView("addons");
+      else setSettingsOpen(true);
+    };
+    window.addEventListener("unicrew:slash", onSlash);
+    return () => window.removeEventListener("unicrew:slash", onSlash);
+  }, []);
+
   // hydrate
   useEffect(() => {
     const t = loadThreads();

@@ -275,3 +275,41 @@ export function commandsForProviders(
     c.providers.some((p) => providers.includes(p)),
   );
 }
+
+/**
+ * UNICREW は claude/codex を headless で動かすため、Claude Code の REPL 専用
+ * コマンド（/mcp /agents /help 等）は CLI に送っても解釈されず「何も起きない」。
+ * これらは UNICREW 内の対応画面に振り替える（送信時に横取り）。
+ */
+export type NativeSlashTarget = "addons" | "settings";
+
+export const NATIVE_SLASH: Record<
+  string,
+  { target: NativeSlashTarget; hint: string }
+> = {
+  "/mcp": { target: "addons", hint: "MCP / アドオン画面を開きます" },
+  "/agents": { target: "addons", hint: "サブエージェント / スキルを開きます" },
+  "/help": { target: "settings", hint: "設定（ヘルプ・アカウント）を開きます" },
+  "/config": { target: "settings", hint: "設定を開きます" },
+  "/settings": { target: "settings", hint: "設定を開きます" },
+  "/permissions": { target: "settings", hint: "設定（権限・モード）を開きます" },
+  "/status": { target: "settings", hint: "設定（接続状態）を開きます" },
+  "/model": { target: "settings", hint: "設定（モデル）を開きます" },
+  "/login": { target: "settings", hint: "設定（ログイン）を開きます" },
+  "/logout": { target: "settings", hint: "設定（ログアウト）を開きます" },
+  "/doctor": { target: "settings", hint: "設定（診断）を開きます" },
+  "/cost": { target: "settings", hint: "設定を開きます" },
+};
+
+/**
+ * 入力が「UNICREW で横取りすべき REPL コマンド」なら対応先を返す。
+ * 先頭トークンだけ見る（引数付きでも判定可）。それ以外は null（＝通常送信）。
+ */
+export function resolveNativeSlash(
+  text: string,
+): { command: string; target: NativeSlashTarget; hint: string } | null {
+  const head = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (!head.startsWith("/")) return null;
+  const hit = NATIVE_SLASH[head];
+  return hit ? { command: head, ...hit } : null;
+}

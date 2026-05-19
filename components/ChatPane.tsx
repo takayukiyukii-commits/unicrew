@@ -43,6 +43,7 @@ import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import type { SlashCommandDef } from "@/lib/slash-commands";
+import { resolveNativeSlash } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import ReactMarkdown from "react-markdown";
@@ -215,6 +216,16 @@ export function ChatPane({
     // 応答中でも送信可（onSend = 親の submitOrQueue が「キューに積む」判断をする）。
     // ターミナルのように指示を連投できる。
     if ((!value && attachments.length === 0) || !thread) return;
+    // /mcp など Claude Code の REPL 専用コマンドは headless では CLI に
+    // 解釈されず「何も起きない」。UNICREW 内の対応画面へ振り替える。
+    const nativeSlash = resolveNativeSlash(value);
+    if (nativeSlash) {
+      window.dispatchEvent(
+        new CustomEvent("unicrew:slash", { detail: nativeSlash }),
+      );
+      setInput("");
+      return;
+    }
     // 添付画像は CLI へテキストで渡すため、ただのパスだと AI が「画像」と
     // 認識せず素通りしがち。Read ツールは画像対応なので「このパスは画像。
     // Read で画像として開いて中身を見てから答えて」と明示する。
