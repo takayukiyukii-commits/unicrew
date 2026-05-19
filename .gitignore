@@ -31,3 +31,7 @@ npm-debug.log*
 # Tauri build artifacts
 .next-tauri/
 /out/
+
+# generated (regenerated on build — do not track)
+tsconfig.tsbuildinfo
+next-env.d.ts

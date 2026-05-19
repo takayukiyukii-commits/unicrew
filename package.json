@@ -8,7 +8,7 @@
     "build": "next build",
     "build:tauri": "node scripts/build_tauri.js",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
