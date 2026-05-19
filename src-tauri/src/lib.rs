@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 pub mod providers;
 pub mod trust;
 pub mod observability;
+pub mod pty;
 
 use providers::types::{AuthMode, NormalizedEvent, PermissionMode, SpawnOpts};
 use providers::{build_provider, SessionHandle};
@@ -2084,7 +2085,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// これにより winget install 直後で UNICREW プロセスの PATH に新パスがまだ
 /// 伝播してない状況でも binary を発見できる。
 #[cfg(target_os = "windows")]
-fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     if let Some(p) = std::env::var_os("PATH") {
         let pathext_raw = std::env::var("PATHEXT").unwrap_or_else(|_| {
@@ -3222,6 +3223,10 @@ pub fn run() {
             agent_send,
             agent_stop,
             agent_permission_response,
+            pty::pty_open,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
             read_text_file,
             write_text_file,
             list_directory,

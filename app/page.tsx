@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { Sidebar, type MainView } from "@/components/Sidebar";
+import { InteractiveTerminal } from "@/components/InteractiveTerminal";
 import { ExplorerPanel } from "@/components/ExplorerPanel";
 import { CommandPalette } from "@/components/CommandPalette";
 import type { Command } from "@/lib/commands";
@@ -3452,6 +3453,11 @@ ${command}
           onOpenSettings={() => setSettingsOpen(true)}
           mainView={mainView}
           onOpenAddons={() => setMainView("addons")}
+          onOpenTerminal={
+            settings.beginnerMode === false
+              ? () => setMainView("terminal")
+              : undefined
+          }
           explorerOpen={explorerOpen}
           onToggleExplorer={() => {
             setExplorerOpen((v) => {
@@ -3647,6 +3653,12 @@ ${command}
               </div>
             ))}
           </div>
+        ) : mainView === "terminal" ? (
+          <main className="flex-1 min-w-0 min-h-0 bg-[#1e1e1e]">
+            <InteractiveTerminal
+              workspace={activeThread?.workspace ?? null}
+            />
+          </main>
         ) : (
           // 1〜2ペインは従来の flex + リサイザでそのまま運用
           <div ref={paneAreaRef} className="flex-1 flex min-w-0 min-h-0">

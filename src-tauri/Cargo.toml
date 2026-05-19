@@ -46,6 +46,10 @@ thiserror = "2.0"
 # Sprint 1（2026-05-13）追加。providers/acp_transport.rs と providers/goose.rs から使用。
 agent-client-protocol = "0.11"
 
+# 対話モード PTY（VSCode 統合ターミナルと同じく本物の対話 CLI を擬似端末で動かす）。
+# ハイブリッド方針 B の土台。providers/ とは独立。
+portable-pty = "0.8"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

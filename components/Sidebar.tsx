@@ -8,6 +8,7 @@ import {
   Loader2,
   Columns2,
   Puzzle,
+  SquareTerminal,
   Search,
   X,
   FolderTree,
@@ -20,7 +21,7 @@ import { CharacterAvatar } from "./CharacterAvatar";
 import { useTranslation } from "@/lib/i18n";
 import clsx from "clsx";
 
-export type MainView = "chat" | "addons";
+export type MainView = "chat" | "addons" | "terminal";
 
 interface Props {
   threads: Thread[];
@@ -42,6 +43,7 @@ interface Props {
   mainView?: MainView;
   /** プラグイン/スキル/MCP のページに切替 */
   onOpenAddons?: () => void;
+  onOpenTerminal?: () => void;
   /** エクスプローラーパネルが開いているか */
   explorerOpen?: boolean;
   /** エクスプローラーパネルの開閉トグル */
@@ -70,6 +72,7 @@ export function Sidebar({
   onOpenSettings,
   mainView = "chat",
   onOpenAddons,
+  onOpenTerminal,
   explorerOpen = false,
   onToggleExplorer,
   collapsed = false,
@@ -179,6 +182,22 @@ export function Sidebar({
               aria-label={t("sidebar.explorer")}
             >
               <FolderTree size={15} />
+            </button>
+          )}
+          {onOpenTerminal && (
+            <button
+              type="button"
+              onClick={onOpenTerminal}
+              className={clsx(
+                "w-full flex items-center justify-center py-2 rounded-md transition",
+                mainView === "terminal"
+                  ? "bg-white text-[var(--color-accent)] shadow-sm border border-[var(--color-border)]"
+                  : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+              )}
+              title={t("sidebar.terminal")}
+              aria-label={t("sidebar.terminal")}
+            >
+              <SquareTerminal size={15} />
             </button>
           )}
           {onOpenAddons && (
@@ -385,6 +404,21 @@ export function Sidebar({
           >
             <FolderTree size={15} />
             {t("sidebar.explorer")}
+          </button>
+        )}
+        {onOpenTerminal && (
+          <button
+            onClick={onOpenTerminal}
+            className={clsx(
+              "w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition",
+              mainView === "terminal"
+                ? "bg-white text-[var(--color-accent)] font-medium shadow-sm border border-[var(--color-border)]"
+                : "text-[var(--color-muted)] hover:bg-white hover:text-[var(--color-text)]",
+            )}
+            title={t("sidebar.terminalTooltip")}
+          >
+            <SquareTerminal size={15} />
+            {t("sidebar.terminal")}
           </button>
         )}
         {onOpenAddons && (
