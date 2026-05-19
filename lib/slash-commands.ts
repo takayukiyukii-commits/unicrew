@@ -313,3 +313,26 @@ export function resolveNativeSlash(
   const hit = NATIVE_SLASH[head];
   return hit ? { command: head, ...hit } : null;
 }
+
+/**
+ * headless では Claude Code の会話系 REPL コマンド（/compact /clear 等）を
+ * 素送りすると claude プロセスがそのターンで終了したり無反応になる
+ * （/mcp 等の「画面振替」とは別クラス＝会話操作）。これらは自然言語の
+ * 指示へ書き換えて送ることで、セッションを落とさず実用的に効かせる。
+ * 戻り値が string ならその文字列で送信、null なら書き換え対象外。
+ */
+export function rewriteSlashForHeadless(text: string): string | null {
+  const head = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (!head.startsWith("/")) return null;
+  switch (head) {
+    case "/compact":
+      return "ここまでの会話の要点（決定事項・前提・未解決・次の一手）を簡潔な箇条書きで要約してください。以降はその要約だけを文脈として続け、それ以前の細部は参照しなくて構いません。";
+    case "/clear":
+    case "/new":
+      return "ここから新しい話題として扱ってください。これまでの会話の文脈はいったん忘れ、まっさらな状態で次の指示に答えてください（履歴を完全に消したい場合は左上の新規スレッドを使ってください）。";
+    case "/resume":
+      return "直前の作業の続きから再開してください。どこまで終わっていて次に何をするかを最初に一言で確認してから進めてください。";
+    default:
+      return null;
+  }
+}

@@ -43,7 +43,7 @@ import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { SlashCommandPicker } from "./SlashCommandPicker";
 import type { SlashCommandDef } from "@/lib/slash-commands";
-import { resolveNativeSlash } from "@/lib/slash-commands";
+import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import ReactMarkdown from "react-markdown";
@@ -226,6 +226,9 @@ export function ChatPane({
       setInput("");
       return;
     }
+    // /compact /clear 等の会話系 REPL コマンドは headless の claude に
+    // 素送りするとプロセスが落ちる（os error 232）。自然言語へ書き換える。
+    const effectiveValue = rewriteSlashForHeadless(value) ?? value;
     // 添付画像は CLI へテキストで渡すため、ただのパスだと AI が「画像」と
     // 認識せず素通りしがち。Read ツールは画像対応なので「このパスは画像。
     // Read で画像として開いて中身を見てから答えて」と明示する。
@@ -253,7 +256,7 @@ export function ChatPane({
       );
     const note = notes.length ? "\n\n" + notes.join("\n") : "";
     const textForAi =
-      [value, ...lines].filter(Boolean).join("\n\n") + note;
+      [effectiveValue, ...lines].filter(Boolean).join("\n\n") + note;
     onSend(textForAi, attachments);
     setInput("");
     setAttachments([]);
