@@ -53,9 +53,15 @@ pub fn pty_open(
     // 同一 id が残っていれば閉じてから作り直す。
     let _ = pty_kill(id.clone());
 
+    // resolve_on_path は Windows 専用（#[cfg(target_os="windows")]）。
+    // 非 Windows では claude は PATH 上にあり exec が PATH 解決するため
+    // そのままで良い。OS で分岐しないと非 Windows で E0425 になる。
+    #[cfg(target_os = "windows")]
     let resolved = crate::resolve_on_path(&program)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| program.clone());
+    #[cfg(not(target_os = "windows"))]
+    let resolved = program.clone();
 
     let pty = native_pty_system();
     let pair = pty
