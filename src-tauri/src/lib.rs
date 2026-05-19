@@ -2295,11 +2295,16 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        // Try Homebrew first; fall back to npm
+        // macOS の .app を Finder/Dock から起動すると、ユーザーのシェル PATH
+        // （.zshrc 等）を継承せず最小 PATH（/usr/bin:/bin:...）になる。
+        // そのままだと brew も npm も見つからずインストールボタンが
+        // 「押しても無反応」になる。Homebrew(arm64/x86)・Volta・npm-global・
+        // nvm の代表 bin を PATH 先頭に足してから実行する。
+        // Try Homebrew first; fall back to npm.
         let mut cmd = build_silent_command("sh");
         cmd.args([
             "-c",
-            "command -v brew >/dev/null 2>&1 && brew install anthropic-ai/claude-code/claude-code || npm install -g @anthropic-ai/claude-code",
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; command -v brew >/dev/null 2>&1 && brew install anthropic-ai/claude-code/claude-code || npm install -g @anthropic-ai/claude-code",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
