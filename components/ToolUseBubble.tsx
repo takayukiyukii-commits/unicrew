@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { ToolUseBlock } from "@/lib/types";
 import { useShowActivity } from "./ActivityContext";
+import { TerminalBlock } from "./TerminalBlock";
 import { useTranslation } from "@/lib/i18n";
 
 interface Props {
@@ -60,6 +61,10 @@ export function ToolUseBubble({ block }: Props) {
   // TodoWrite は Claude Code 風のチェックリスト表示にする。
   if (block.toolName === "TodoWrite") {
     return <TodoListBubble block={block} />;
+  }
+  // Bash は VSCode の統合ターミナルそっくりに（プロンプト+全出力+ANSI色）。
+  if (block.toolName === "Bash") {
+    return <TerminalBlock block={block} />;
   }
   const Icon = iconFor(block.toolName);
   const status = block.status;

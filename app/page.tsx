@@ -147,6 +147,7 @@ import type {
   Thread,
   ToolUseBlock,
 } from "@/lib/types";
+import { PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/types";
 
 interface PendingSend {
   text: string;
@@ -888,7 +889,6 @@ export default function Page() {
       clearInterval(id);
       cloudHeartbeatRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudPairCode]);
 
   // Phase 2 クラウドリレーの状態 snapshot push は、
@@ -1950,10 +1950,9 @@ export default function Page() {
   const togglePermissionMode = async () => {
     const target = focusedThread;
     if (!target) return;
-    const next: "acceptEdits" | "plan" =
-      (target.permissionMode ?? "acceptEdits") === "acceptEdits"
-        ? "plan"
-        : "acceptEdits";
+    const order = PERMISSION_MODE_ORDER;
+    const cur = target.permissionMode ?? "acceptEdits";
+    const next = order[(order.indexOf(cur) + 1) % order.length];
     const slots = effectiveParticipants(target);
     const parallel = slots.length >= 2;
     if (parallel) {
@@ -2328,6 +2327,7 @@ export default function Page() {
       baseSystem,
       slot.role === "moderator" ? null : character?.personalityId ?? null,
       slot.role === "moderator" ? false : settings.beginnerMode ?? true,
+      slot.role === "moderator" ? undefined : thread.permissionMode,
     );
     // Memory.md 方式: スレッドに紐づく "覚えてほしいこと" があれば最先頭に前置きする。
     // moderator は中立審判なのでメモは食わせない（人格汚染を避ける）。
@@ -2375,7 +2375,7 @@ export default function Page() {
       apiKey,
       provider: slot.provider,
       resumeCliSessionId,
-      permissionMode: thread.permissionMode ?? "acceptEdits",
+      permissionMode: toCliPermissionMode(thread.permissionMode),
     });
     sessionsStartedRef.current.add(sid);
   };

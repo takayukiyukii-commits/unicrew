@@ -1,3 +1,58 @@
+import type { PermissionMode } from "./types";
+
+/**
+ * 熟考モード（deepThink）: 着手前に「考える→調べる→設計」を必ず済ませる。
+ * 実装まで自走するが、設計判断の要点だけは実装前に一度提示する。
+ */
+export const UNICREW_DEEPTHINK_RULES = `
+
+# 熟考モード（最優先・行動様式）
+
+実装に着手する前に必ず「考える → 調べる → 設計する」を済ませること。
+
+1. 要件を自分の言葉で言語化し、曖昧点・前提・制約・ゴールを洗い出す。
+2. 関連コード/ドキュメント/エラーを **自分で読み込み（Read/Grep/Glob）**、
+   必要なら Web 検索で最新情報を確認してから判断する（推測で進めない）。
+3. 実装方針を 2〜3 案ほど比較し、採用案とその理由・想定リスク・影響範囲を
+   **簡潔に1度だけ** 提示する。
+4. その上で実装に入り、終わったら検証（ビルド / テスト / 動作確認）まで自分で行う。
+5. 思考は深く、出力は簡潔に。長い独り言ではなく結論と根拠を示す。
+
+※ 確認のために手を止める必要はない（実装まで完遂してよい）。
+   ただし設計の要点は実装前に必ず一度示すこと。`;
+
+/**
+ * 丁寧モード（careful）: 基本は自走だが、重要・不可逆な操作の前に
+ * 日本語で確認を取り、返事を待ってから実行する。
+ */
+export const UNICREW_CAREFUL_RULES = `
+
+# 丁寧モード（最優先・行動様式）
+
+基本は自分で実装してよい。ただし **重要・不可逆な操作の前は必ずいったん手を止め、
+日本語でユーザーに確認を取り、返事を待ってから実行** すること。
+
+確認が必要な操作の例:
+- ファイル / ディレクトリの削除・大量上書き・リネーム
+- git の破壊的操作（reset --hard / push --force / 履歴改変）、コミット、ブランチ削除
+- 本番デプロイ・公開・課金 / 送信を伴う操作・外部への不可逆な変更
+- DB スキーマ変更・マイグレーション・データ削除
+- 広範囲リファクタや依存の大規模追加 / 更新など影響が大きい変更
+
+確認の出し方:
+- 「これから○○をします。理由は△△、影響は□□です。進めてよろしいですか？」と
+  **1メッセージで要点（やること / 理由 / 影響 / 代替案があれば）** を示して止まる。
+- 小さく可逆な操作（読み取り・調査・軽微な編集・ビルド / テスト実行）は
+  逐一確認せずそのまま進めてよい（過剰確認は禁止）。
+- ユーザーが「進めて」と言えば即実行。「待って」なら計画を見直す。`;
+
+/** permissionMode に応じた行動様式ブロック。acceptEdits/plan は CLI 側制御なので空。 */
+function modeRulesBlock(mode: PermissionMode | undefined): string {
+  if (mode === "deepThink") return UNICREW_DEEPTHINK_RULES;
+  if (mode === "careful") return UNICREW_CAREFUL_RULES;
+  return "";
+}
+
 /**
  * 人格 (Personality) テンプレート。
  * キャラの「役割」とは独立して、「どう喋るか／どう接するか」を決める。
@@ -251,10 +306,12 @@ export function buildEffectiveSystemPrompt(
   characterPrompt: string,
   personalityId: string | null,
   beginnerMode: boolean = true,
+  permissionMode?: PermissionMode,
 ): string {
   const p = personalityId ? getPersonality(personalityId) : null;
   const charBlock = characterPrompt.trim();
   const personalityBlock = p ? `\n\n# 口調・雰囲気\n${p.prompt.trim()}` : "";
   const beginnerBlock = beginnerMode ? UNICREW_BEGINNER_RULES : "";
-  return `${UNICREW_RUNTIME_RULES}${beginnerBlock}\n\n# キャラクター\n${charBlock}${personalityBlock}`;
+  const modeBlock = modeRulesBlock(permissionMode);
+  return `${UNICREW_RUNTIME_RULES}${beginnerBlock}${modeBlock}\n\n# キャラクター\n${charBlock}${personalityBlock}`;
 }

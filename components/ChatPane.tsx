@@ -706,30 +706,41 @@ function PermissionModeBadge({
   onToggle?: () => void;
 }) {
   const { t } = useTranslation();
-  const isPlan = mode === "plan";
-  // Plan モードは「読み取り専用で動作中」の注意喚起として色を強める。
-  const tone = isPlan
-    ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-    : "border-[var(--color-border)] bg-white text-[var(--color-muted)] hover:bg-gray-50";
+  // モードごとの見た目。自動編集=中立 / プラン=琥珀 / 熟考=藍 / 丁寧=空。
+  const TONE: Record<PermissionMode, string> = {
+    acceptEdits:
+      "border-[var(--color-border)] bg-white text-[var(--color-muted)] hover:bg-gray-50",
+    plan: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+    deepThink:
+      "border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100",
+    careful: "border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100",
+  };
+  const DOT: Record<PermissionMode, string> = {
+    acceptEdits: "bg-emerald-500",
+    plan: "bg-amber-500",
+    deepThink: "bg-indigo-500",
+    careful: "bg-sky-500",
+  };
+  const TITLE_KEY: Record<PermissionMode, string> = {
+    acceptEdits: "chat.permissionAcceptTitle",
+    plan: "chat.permissionPlanTitle",
+    deepThink: "chat.permissionDeepThinkTitle",
+    careful: "chat.permissionCarefulTitle",
+  };
+  const tone = TONE[mode];
   const label = PERMISSION_MODE_LABELS[mode];
   const Component = onToggle ? "button" : "div";
   return (
     <Component
       onClick={onToggle}
       type={onToggle ? "button" : undefined}
-      title={
-        isPlan
-          ? t("chat.permissionPlanTitle")
-          : t("chat.permissionAcceptTitle")
-      }
+      title={t(TITLE_KEY[mode])}
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition ${tone} ${
         onToggle ? "cursor-pointer" : "cursor-default"
       }`}
     >
       <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          isPlan ? "bg-amber-500" : "bg-emerald-500"
-        }`}
+        className={`h-1.5 w-1.5 rounded-full ${DOT[mode]}`}
         aria-hidden
       />
       <span>{label}</span>

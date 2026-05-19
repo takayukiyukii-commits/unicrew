@@ -195,12 +195,36 @@ export interface Thread {
   permissionMode?: PermissionMode;
 }
 
-export type PermissionMode = "acceptEdits" | "plan";
+export type PermissionMode = "acceptEdits" | "plan" | "deepThink" | "careful";
 
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
   acceptEdits: "自動編集",
   plan: "プランモード",
+  deepThink: "熟考モード",
+  careful: "丁寧モード",
 };
+
+/**
+ * Shift+Tab で循環する順序。自動編集 → プラン → 熟考 → 丁寧 → 自動編集…
+ */
+export const PERMISSION_MODE_ORDER: PermissionMode[] = [
+  "acceptEdits",
+  "plan",
+  "deepThink",
+  "careful",
+];
+
+/**
+ * 「熟考」「丁寧」はあくまで UNICREW 側の振る舞いモード（system prompt で制御）。
+ * 実 CLI に渡すパーミッションは acceptEdits/plan の2値だけなので、ここで畳む。
+ * - plan          → "plan"（読み取り専用 / Claude --permission-mode plan, Codex read-only）
+ * - それ以外       → "acceptEdits"（実装まで行うが、振る舞いは prompt で分岐）
+ */
+export function toCliPermissionMode(
+  mode: PermissionMode | undefined,
+): "acceptEdits" | "plan" {
+  return mode === "plan" ? "plan" : "acceptEdits";
+}
 
 export type AuthMode = "subscription" | "apikey";
 
