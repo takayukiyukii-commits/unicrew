@@ -440,6 +440,7 @@ export default function Page() {
   /** フィードバック・サーベイ表示フラグ。たまに会話末尾に差し込む。 */
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [mainView, setMainView] = useState<MainView>("chat");
+  const [addonsTab, setAddonsTab] = useState<string>("claude-plugin");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSplitMode, setPickerSplitMode] = useState(false);
   const [pickerConferenceMode, setPickerConferenceMode] = useState(false);
@@ -555,10 +556,19 @@ export default function Page() {
   // /mcp 等の REPL コマンド横取り（ChatPane が dispatch）→ 対応画面へ
   useEffect(() => {
     const onSlash = (e: Event) => {
-      const d = (e as CustomEvent<{ target?: string }>).detail;
+      const d = (e as CustomEvent<{ command?: string; target?: string }>)
+        .detail;
       if (!d) return;
-      if (d.target === "addons") setMainView("addons");
-      else setSettingsOpen(true);
+      if (d.target === "addons") {
+        setAddonsTab(
+          d.command === "/mcp"
+            ? "claude-mcp"
+            : d.command === "/agents"
+              ? "claude-skill"
+              : "claude-plugin",
+        );
+        setMainView("addons");
+      } else setSettingsOpen(true);
     };
     window.addEventListener("unicrew:slash", onSlash);
     return () => window.removeEventListener("unicrew:slash", onSlash);
@@ -3487,6 +3497,7 @@ ${command}
                 </p>
               </header>
               <AddonsSection
+                initialTab={addonsTab}
                 workspace={activeThread?.workspace ?? null}
                 advancedMode={settings.advancedMode ?? false}
                 autoCheckAddonUpdates={settings.autoCheckAddonUpdates ?? true}

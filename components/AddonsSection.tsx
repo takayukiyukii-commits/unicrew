@@ -75,6 +75,8 @@ interface Props {
    * true の場合、ユーザー承認なしに `applyAllUpdates` 相当を走らせる。
    */
   autoApplyAddonUpdates?: boolean;
+  /** 外部から開く時の初期タブ（例: /mcp → "claude-mcp"）。未指定で "claude-plugin"。 */
+  initialTab?: string;
 }
 
 type TabId =
@@ -163,9 +165,15 @@ export function AddonsSection({
   onAdvancedModeChange,
   autoCheckAddonUpdates = true,
   autoApplyAddonUpdates = false,
+  initialTab,
 }: Props) {
   const { locale, t: tr, setLocale: applyLocale } = useTranslation();
-  const [active, setActive] = useState<TabId>("claude-plugin");
+  const coerceTab = (v: string | undefined): TabId =>
+    (TABS.find((t) => t.id === v)?.id as TabId) ?? "claude-plugin";
+  const [active, setActive] = useState<TabId>(coerceTab(initialTab));
+  useEffect(() => {
+    if (initialTab) setActive(coerceTab(initialTab));
+  }, [initialTab]);
   const [installed, setInstalled] = useState<Record<TabId, AddonItem[]>>({
     "claude-plugin": [],
     "claude-skill": [],
