@@ -39,25 +39,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Windows のみ（GitHub Actions コスト削減：private 期間中は反復
-          #    テストで macOS×10 倍課金を避ける）。
-          #    5/21 の public 化（Actions 無料）以降、または公開リリース時は
-          #    下の macOS / Linux のコメントを外して 3OS に戻すこと。
+          # ── 一時的に 3OS 再有効化（macOS install 修正の検証/配布のため）。
+          #    macOS は ×10 課金。検証後は Windows のみへ戻すか、5/21 の
+          #    public 化（Actions 無料）以降に常時 3OS へ。
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin"
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            label: "macOS (universal)"
+            allow-failure: false
           - platform: "windows-latest"
             args: ""
             rust-targets: ""
             label: "Windows"
             allow-failure: false
-          # - platform: "macos-latest"
-          #   args: "--target universal-apple-darwin"
-          #   rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          #   label: "macOS (universal)"
-          #   allow-failure: false
-          # - platform: "ubuntu-22.04"
-          #   args: ""
-          #   rust-targets: ""
-          #   label: "Linux"
-          #   allow-failure: true
+          - platform: "ubuntu-22.04"
+            args: ""
+            rust-targets: ""
+            label: "Linux"
+            allow-failure: true
     runs-on: ${{ matrix.platform }}
     continue-on-error: ${{ matrix.allow-failure }}
 
