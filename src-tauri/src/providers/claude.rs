@@ -226,8 +226,28 @@ impl SessionHandle for ClaudeSessionHandle {
         });
         let mut line = serde_json::to_string(&payload)?;
         line.push('\n');
-        self.stdin.write_all(line.as_bytes()).await?;
-        self.stdin.flush().await?;
+        // 書き込み失敗の多くは claude が起動直後に終了しているケース
+        // （未ログイン/未認証/CLI未インストール等）。生のパイプエラー
+        // （Windows: os error 232「パイプを閉じています」）は分かりにくいので、
+        // 子プロセスの終了状態を見て実用的な案内へ置き換える。
+        let w = self.stdin.write_all(line.as_bytes()).await;
+        let f = if w.is_ok() {
+            self.stdin.flush().await
+        } else {
+            Ok(())
+        };
+        if let Err(e) = w.and(f) {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "不明".into());
+                return Err(ProviderError::Session(format!(
+                    "Claude が起動直後に終了しました（終了コード {code}）。未ログイン／未認証の可能性が高いです。設定 → アカウントから Claude Code にログインし直してください。"
+                )));
+            }
+            return Err(ProviderError::Io(e));
+        }
         Ok(())
     }
 
