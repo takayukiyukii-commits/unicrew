@@ -46,6 +46,23 @@ export function InteractiveTerminal({
     let unData: (() => void) | undefined;
     let unExit: (() => void) | undefined;
     let ro: ResizeObserver | undefined;
+    let io: IntersectionObserver | undefined;
+
+    /**
+     * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
+     * 別ビューに切り替わって display:none の間は clientWidth/Height が 0 になり、
+     * そこで fit すると行高が壊れて「文字が縦に圧縮される」ため、0 サイズなら何もしない。
+     * 表示に戻った時は IntersectionObserver / ResizeObserver が改めて呼ぶ。
+     */
+    const safeFit = () => {
+      const el = ref.current;
+      if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
+      try {
+        fit?.fit();
+      } catch {
+        /* noop */
+      }
+    };
 
     (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([
@@ -88,11 +105,36 @@ export function InteractiveTerminal({
       fit = new FitAddon();
       term.loadAddon(fit);
       term.open(ref.current);
-      try {
-        fit.fit();
-      } catch {
-        /* noop */
-      }
+      safeFit();
+
+      // コピー＆ペースト（Ctrl/Cmd + C / V）。
+      // - Ctrl/Cmd+C: 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
+      // - Ctrl/Cmd+V: クリップボードから貼り付け（term.paste でブラケットペースト対応）
+      term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        if (e.type !== "keydown") return true;
+        const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
+        if (mod && (e.key === "c" || e.key === "C")) {
+          if (term.hasSelection()) {
+            const sel = term.getSelection();
+            if (sel) void navigator.clipboard.writeText(sel);
+            term.clearSelection();
+            return false; // SIGINT を送らずコピーを優先
+          }
+          return true; // 選択が無ければ通常どおり SIGINT
+        }
+        if (mod && (e.key === "v" || e.key === "V")) {
+          void navigator.clipboard
+            .readText()
+            .then((text) => {
+              if (text) term.paste(text);
+            })
+            .catch(() => {
+              /* クリップボード読取り不可時は無視 */
+            });
+          return false;
+        }
+        return true;
+      });
 
       unData = await onPtyData(id, (bytes) => term?.write(bytes));
       unExit = await onPtyExit(id, () => {
@@ -129,14 +171,22 @@ export function InteractiveTerminal({
         void ptyResize(id, cols, rows);
       });
 
-      ro = new ResizeObserver(() => {
-        try {
-          fit?.fit();
-        } catch {
-          /* noop */
+      // 実サイズ変化に追従（display:none の間は safeFit が 0 サイズを弾く）
+      ro = new ResizeObserver(() => safeFit());
+      ro.observe(ref.current);
+
+      // 別ビューから戻って再表示された瞬間に fit し直す。
+      // display:none → 表示で IntersectionObserver が isIntersecting:true を返すので、
+      // レイアウト確定後（rAF）に safeFit して縦圧縮を確実に直す。
+      io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            requestAnimationFrame(() => safeFit());
+          }
         }
       });
-      ro.observe(ref.current);
+      io.observe(ref.current);
+
       term.focus();
     })();
 
@@ -144,6 +194,11 @@ export function InteractiveTerminal({
       disposed = true;
       try {
         ro?.disconnect();
+      } catch {
+        /* noop */
+      }
+      try {
+        io?.disconnect();
       } catch {
         /* noop */
       }
