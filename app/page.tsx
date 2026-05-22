@@ -3538,6 +3538,10 @@ ${command}
             />
           );
         })()}
+        {/* ターミナル表示中はチャット系UIを display:none で隠す（アンマウントしない）。
+            contents ラッパは layout box を作らないので、内部の flex-1 ペインは
+            これまで通りメイン行の直接の子として振る舞う。 */}
+        <div className={mainView === "terminal" ? "hidden" : "contents"}>
         {mainView === "addons" ? (
           <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-white">
             <div className="max-w-5xl mx-auto px-6 py-8">
@@ -3702,10 +3706,6 @@ ${command}
               </div>
             ))}
           </div>
-        ) : mainView === "terminal" ? (
-          <main className="flex-1 min-w-0 min-h-0 bg-[#faf9f6]">
-            <TerminalPanes workspace={activeThread?.workspace ?? null} />
-          </main>
         ) : (
           // 1〜2ペインは従来の flex + リサイザでそのまま運用
           <div ref={paneAreaRef} className="flex-1 flex min-w-0 min-h-0">
@@ -3846,6 +3846,18 @@ ${command}
             )}
           </div>
         )}
+        </div>
+        {/* ターミナルは常時マウントのまま hidden で切替。ビュー切替で unmount すると
+            PTY が kill され xterm バッファも消えるため、複数ペイン構成ごと状態を保持する。 */}
+        <div
+          className={
+            mainView === "terminal"
+              ? "flex-1 flex min-w-0 min-h-0 bg-[#faf9f6]"
+              : "hidden"
+          }
+        >
+          <TerminalPanes workspace={activeThread?.workspace ?? null} />
+        </div>
         {mainView === "chat" && (
           <RightPane
             thread={focusedThread}

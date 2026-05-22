@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Columns2, X, FolderOpen } from "lucide-react";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { useTranslation } from "@/lib/i18n";
@@ -11,6 +11,12 @@ const MAX_PANES = 4;
 interface Pane {
   /** PTY ID にも使う一意なキー。タブを閉じるまで PTY を保持する。 */
   key: string;
+  /**
+   * このペインを起動した時点の workspace。
+   * 親の workspace prop が後から変わっても（チャットでスレッド切替した等）、
+   * 既存ペインの PTY を作り直さないよう、ペインごとに固定して持つ。
+   */
+  workspace: string | null;
 }
 
 interface Props {
@@ -25,14 +31,25 @@ interface Props {
  * ペインを増やしても 1 ペインあたりの PTY は独立しており、
  * `/clear` や `/compact` 等はそのペインだけに作用する。
  *
+ * このコンポーネントは（page.tsx 側で）ビューを切り替えても unmount されず
+ * hidden で隠れるだけなので、ペイン構成・PTY・xterm バッファはすべて保持される。
+ * 各ペインは起動時の workspace を固定で持ち、親 prop の変化では作り直さない。
+ *
  * PaneResizer を入れずに均等 flex で並べる。
  * シェル PTY は xterm の resize で都度フィットするので、
  * ウィンドウサイズ変更や開閉時にも追従する。
  */
-export function TerminalPanes({ workspace }: Props) {
+export function TerminalPanes({ workspace = null }: Props) {
   const { t } = useTranslation();
+  // 親の最新 workspace を ref で追従（新規ペイン作成時の初期 cwd に使う）。
+  const latestWorkspaceRef = useRef<string | null>(workspace);
+  latestWorkspaceRef.current = workspace;
+
   const [panes, setPanes] = useState<Pane[]>(() => [
-    { key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+    {
+      key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      workspace,
+    },
   ]);
 
   const handleSplit = useCallback(() => {
@@ -40,7 +57,11 @@ export function TerminalPanes({ workspace }: Props) {
       if (prev.length >= MAX_PANES) return prev;
       return [
         ...prev,
-        { key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+        {
+          key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          // 新しいペインは「いま」の workspace で開く。
+          workspace: latestWorkspaceRef.current,
+        },
       ];
     });
   }, []);
@@ -67,11 +88,11 @@ export function TerminalPanes({ workspace }: Props) {
             }`}
           >
             <div className="shrink-0 h-7 px-2 flex items-center gap-2 border-b border-[var(--color-border)] bg-white text-[11px] text-[var(--color-muted)]">
-              {workspace && (
+              {pane.workspace && (
                 <span className="flex items-center gap-1 truncate font-mono">
                   <FolderOpen size={11} />
-                  <span className="truncate" title={workspace}>
-                    {workspace}
+                  <span className="truncate" title={pane.workspace}>
+                    {pane.workspace}
                   </span>
                 </span>
               )}
@@ -101,7 +122,10 @@ export function TerminalPanes({ workspace }: Props) {
               </span>
             </div>
             <div className="flex-1 min-h-0">
-              <InteractiveTerminal workspace={workspace} paneKey={pane.key} />
+              <InteractiveTerminal
+                workspace={pane.workspace}
+                paneKey={pane.key}
+              />
             </div>
           </div>
         );
