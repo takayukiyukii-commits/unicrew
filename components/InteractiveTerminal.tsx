@@ -18,18 +18,29 @@ import {
  * VSCode の統合ターミナルと同じく PTY 上で対話 CLI をそのまま動かすので、
  * /mcp・/compact・/clear 等の REPL コマンドは CLI 本体がネイティブに処理する。
  * 既存の構造化チャット（headless）には一切影響しない、独立ビュー。
+ *
+ * 配色は UNI シリーズ共通の白基調に揃えるためオフホワイト背景＋ダーク文字。
+ * （旧 #1e1e1e の黒背景は他ビューと浮いていたため廃止）
  */
 export function InteractiveTerminal({
   workspace,
+  paneKey,
 }: {
   workspace?: string | null;
+  /**
+   * 同じ workspace で複数ペインを立てるときに、ペインごとに独立した PTY を
+   * 起動するための識別子。指定が無ければ自動生成（後方互換）。
+   */
+  paneKey?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isTauri() || !ref.current) return;
     let disposed = false;
-    const id = `term-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const id = paneKey
+      ? `term-${paneKey}`
+      : `term-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let term: any;
     let fit: any;
     let unData: (() => void) | undefined;
@@ -47,7 +58,32 @@ export function InteractiveTerminal({
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
         fontSize: 13,
-        theme: { background: "#1e1e1e", foreground: "#cccccc" },
+        theme: {
+          // オフホワイト基調（UNI 共通ライトテーマと馴染ませる）
+          background: "#faf9f6",
+          foreground: "#1f2328",
+          cursor: "#1f2328",
+          cursorAccent: "#faf9f6",
+          selectionBackground: "#d0d7de",
+          selectionForeground: "#1f2328",
+          // ANSI 8色（明るい背景でも視認できるよう調整）
+          black: "#1f2328",
+          red: "#cf222e",
+          green: "#116329",
+          yellow: "#9a6700",
+          blue: "#0969da",
+          magenta: "#8250df",
+          cyan: "#1b7c83",
+          white: "#6e7781",
+          brightBlack: "#57606a",
+          brightRed: "#a40e26",
+          brightGreen: "#1a7f37",
+          brightYellow: "#7d4e00",
+          brightBlue: "#0550ae",
+          brightMagenta: "#6639ba",
+          brightCyan: "#3192aa",
+          brightWhite: "#1f2328",
+        },
       });
       fit = new FitAddon();
       term.loadAddon(fit);
@@ -116,7 +152,7 @@ export function InteractiveTerminal({
         /* noop */
       }
     };
-  }, [workspace]);
+  }, [workspace, paneKey]);
 
   if (!isTauri()) {
     return (
@@ -127,7 +163,7 @@ export function InteractiveTerminal({
   }
 
   return (
-    <div className="h-full w-full bg-[#1e1e1e] p-2">
+    <div className="h-full w-full bg-[#faf9f6] p-2">
       <div ref={ref} className="h-full w-full" />
     </div>
   );

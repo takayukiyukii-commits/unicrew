@@ -866,6 +866,10 @@ const ja: Dict = {
   "terminal.done": "完了",
   "terminal.failed": "エラー",
   "terminal.noOutput": "(出力なし)",
+  "terminal.splitTitle": "新しいターミナルを右に開く（最大4ペイン）",
+  "terminal.splitAria": "新しいターミナルを開く",
+  "terminal.closePaneTitle": "このターミナルを閉じる",
+  "terminal.closePaneAria": "このターミナルを閉じる",
 
   // ----- Slash command picker -----
   "slash.tooltip": "スラッシュコマンドを挿入",
@@ -1952,6 +1956,10 @@ const en: Dict = {
   "terminal.done": "done",
   "terminal.failed": "failed",
   "terminal.noOutput": "(no output)",
+  "terminal.splitTitle": "Open a new terminal on the right (up to 4 panes)",
+  "terminal.splitAria": "Open a new terminal pane",
+  "terminal.closePaneTitle": "Close this terminal",
+  "terminal.closePaneAria": "Close this terminal",
 
   // ----- Slash command picker -----
   "slash.tooltip": "Insert a slash command",

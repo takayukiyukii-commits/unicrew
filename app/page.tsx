@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { Sidebar, type MainView } from "@/components/Sidebar";
-import { InteractiveTerminal } from "@/components/InteractiveTerminal";
+import { TerminalPanes } from "@/components/TerminalPanes";
 import { ExplorerPanel } from "@/components/ExplorerPanel";
 import { CommandPalette } from "@/components/CommandPalette";
 import type { Command } from "@/lib/commands";
@@ -467,6 +467,14 @@ export default function Page() {
     state: "updating" | "done" | "error";
     message?: string;
   } | null>(null);
+  /**
+   * graphify 同時起動の抑止と「ナレッジ更新中…無限固着バグ」の防護壁。
+   * - inFlightWorkspaces: 現在 graphify update 中のワークスペース集合（重複起動を抑止）
+   * - safetyTimerRef: トースト自動消去のフェイルセーフ。CLI が予期せず resolve しなかった
+   *   ときも UI 側でトーストを必ず閉じる（Rust 側にも 120s timeout を入れているので二重防護）
+   */
+  const graphifyInFlightRef = useRef<Set<string>>(new Set());
+  const graphifySafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   /** VSCode風エクスプローラー列の開閉状態。永続化は localStorage */
@@ -1295,19 +1303,60 @@ export default function Page() {
       );
       if (touchedFiles) {
         const ws = thread.workspace;
-        setGraphifyStatus({ state: "updating" });
-        void graphifyUpdate(ws)
-          .then(() => {
-            setGraphifyStatus({ state: "done" });
-            setTimeout(() => setGraphifyStatus(null), 3000);
-          })
-          .catch((err) => {
-            setGraphifyStatus({
-              state: "error",
-              message: err instanceof Error ? err.message : String(err),
+        // 同じ workspace で graphify が走っているなら重複起動しない。
+        // （並列ペインや高速連投で onStreamComplete が立て続けに発火しても 1 本だけ）
+        if (graphifyInFlightRef.current.has(ws)) {
+          // skip
+        } else {
+          graphifyInFlightRef.current.add(ws);
+          setGraphifyStatus({ state: "updating" });
+          // 既存の安全タイマーがあれば一旦クリア（複数回更新で延命する形）
+          if (graphifySafetyTimerRef.current) {
+            clearTimeout(graphifySafetyTimerRef.current);
+            graphifySafetyTimerRef.current = null;
+          }
+          // フェイルセーフ：Rust 側 timeout(120s) ＋猶予 60s で必ずトーストを消す。
+          // .then/.catch が何らかの理由で発火しないケース（ハングや HMR）への保険。
+          graphifySafetyTimerRef.current = setTimeout(() => {
+            graphifyInFlightRef.current.delete(ws);
+            setGraphifyStatus((cur) => (cur?.state === "updating" ? null : cur));
+            graphifySafetyTimerRef.current = null;
+          }, 180_000);
+          void graphifyUpdate(ws)
+            .then(() => {
+              graphifyInFlightRef.current.delete(ws);
+              setGraphifyStatus({ state: "done" });
+              if (graphifySafetyTimerRef.current) {
+                clearTimeout(graphifySafetyTimerRef.current);
+                graphifySafetyTimerRef.current = null;
+              }
+              setTimeout(
+                () =>
+                  setGraphifyStatus((cur) =>
+                    cur?.state === "done" ? null : cur,
+                  ),
+                3000,
+              );
+            })
+            .catch((err) => {
+              graphifyInFlightRef.current.delete(ws);
+              setGraphifyStatus({
+                state: "error",
+                message: err instanceof Error ? err.message : String(err),
+              });
+              if (graphifySafetyTimerRef.current) {
+                clearTimeout(graphifySafetyTimerRef.current);
+                graphifySafetyTimerRef.current = null;
+              }
+              setTimeout(
+                () =>
+                  setGraphifyStatus((cur) =>
+                    cur?.state === "error" ? null : cur,
+                  ),
+                6000,
+              );
             });
-            setTimeout(() => setGraphifyStatus(null), 6000);
-          });
+        }
       }
     }
 
@@ -3654,10 +3703,8 @@ ${command}
             ))}
           </div>
         ) : mainView === "terminal" ? (
-          <main className="flex-1 min-w-0 min-h-0 bg-[#1e1e1e]">
-            <InteractiveTerminal
-              workspace={activeThread?.workspace ?? null}
-            />
+          <main className="flex-1 min-w-0 min-h-0 bg-[#faf9f6]">
+            <TerminalPanes workspace={activeThread?.workspace ?? null} />
           </main>
         ) : (
           // 1〜2ペインは従来の flex + リサイザでそのまま運用

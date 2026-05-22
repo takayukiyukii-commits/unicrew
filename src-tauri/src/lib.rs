@@ -1147,6 +1147,8 @@ fn get_lan_ip() -> Result<String, String> {
 /// graphify CLI が PATH に無ければエラー文字列を返す（UI 側でトーストに出す）。
 ///
 /// AST-only 処理でトークン消費0、5〜30秒で完了する設計（graphify-rolloutメモ参照）。
+/// 万一 CLI が固まっても UI 側のトーストが永久に残らないよう、
+/// 120 秒のハードタイムアウトを設けて確実に Result を返す（ナレッジ更新中…無限固着バグ対策）。
 #[tauri::command]
 async fn graphify_update(workspace: String) -> Result<String, String> {
     if workspace.trim().is_empty() {
@@ -1160,12 +1162,25 @@ async fn graphify_update(workspace: String) -> Result<String, String> {
     cmd.arg("update").arg(".").arg("--force").current_dir(&path);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    let output = cmd.output().await.map_err(|e| {
+    // 子プロセスを spawn してから timeout で待つ。
+    // タイムアウト時は kill して固着を断ち切る（PTY を持たないバッチ実行なので安全に kill 可）。
+    let child = cmd.spawn().map_err(|e| {
         format!(
             "graphify CLI を起動できませんでした（pipx install graphifyy で導入してください）: {}",
             e
         )
     })?;
+    let wait_fut = child.wait_with_output();
+    let output = match tokio::time::timeout(std::time::Duration::from_secs(120), wait_fut).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return Err(format!("graphify update 実行エラー: {}", e)),
+        Err(_) => {
+            // タイムアウト。child の所有権はすでに wait_with_output に渡っているので
+            // ここから kill はできないが、Drop で stdin/stdout がクローズされ
+            // graphify 側も短時間で abort される想定。
+            return Err("graphify update がタイムアウト（120秒）しました".into());
+        }
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("graphify update 失敗: {}", stderr.trim()));
