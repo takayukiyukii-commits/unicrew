@@ -1469,13 +1469,14 @@ fn list_codex_skills() -> Result<Vec<AddonItem>, String> {
 
 #[tauri::command]
 async fn default_workspace_path() -> Result<String, String> {
-    let home = std::env::var("USERPROFILE")
-        .ok()
-        .or_else(|| std::env::var("HOME").ok())
-        .ok_or("home directory not found")?;
-    let path = std::path::PathBuf::from(home)
-        .join("Documents")
-        .join("UNICREW");
+    // Documents は Known Folder API 経由で解決する（dirs::document_dir）。
+    // ユーザーが Documents を別ドライブ（D: など）へリダイレクトしていても
+    // 正しい実体パスを返す。`%USERPROFILE%\Documents` 直結だと
+    // リダイレクトを無視して C: 固定になってしまうため避ける。
+    let base = dirs::document_dir()
+        .or_else(dirs::home_dir)
+        .ok_or("documents directory not found")?;
+    let path = base.join("UNICREW");
     if !path.exists() {
         std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     }

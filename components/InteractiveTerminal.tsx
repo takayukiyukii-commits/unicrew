@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { isTauri } from "@/lib/tauri";
+import { isTauri, defaultWorkspacePath } from "@/lib/tauri";
 import {
   ptyOpen,
   ptyWriteText,
@@ -101,11 +101,23 @@ export function InteractiveTerminal({
         );
       });
 
+      // workspace が無いと PTY が親プロセス(unicrew.exe)の cwd を継承してしまい
+      // C: 基点で開いてしまう。明示的にデフォルト workspace へフォールバックする。
+      let cwd = workspace && workspace.trim() ? workspace : null;
+      if (!cwd) {
+        try {
+          cwd = await defaultWorkspacePath();
+        } catch {
+          cwd = null;
+        }
+      }
+      if (disposed) return;
+
       await ptyOpen({
         id,
         program: "claude",
         args: [],
-        cwd: workspace ?? null,
+        cwd,
         cols: term.cols,
         rows: term.rows,
       });
