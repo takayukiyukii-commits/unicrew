@@ -186,9 +186,9 @@ describe("RATING_OPTIONS", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("5段階それぞれが絵文字とラベルを持つ", () => {
+  it("5段階それぞれがラベルを持ち、絵文字レス方針を守る", () => {
     for (const opt of RATING_OPTIONS) {
-      expect(opt.emoji).toBeTruthy();
+      expect(opt.emoji).toBe("");
       expect(opt.label).toBeTruthy();
     }
   });
