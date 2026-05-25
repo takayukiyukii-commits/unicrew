@@ -173,3 +173,55 @@ export function resolveFilePath(
   const sep = wsClean.includes("\\") ? "\\" : "/";
   return `${wsClean}${sep}${raw.replace(/^[.][\\/]+/, "")}`;
 }
+
+
+/**
+ * ターミナル1行から「クリック可能なファイルパス候補」を行内インデックス付きで抽出する。
+ * xterm の registerLinkProvider 用。`path:line:col` の行/桁サフィックスや
+ * Windows ドライブ(C:\...)、`~/...`、相対パスに対応。URL は除外。
+ */
+export interface PathMatch {
+  /** 行内 0-based 開始インデックス */
+  start: number;
+  /** 行内 0-based 終了インデックス（exclusive、:line:col を含む） */
+  end: number;
+  /** 表示用の元トークン（:line:col 含む） */
+  raw: string;
+  /** 実際に開くパス（:line:col を除いた本体） */
+  openPath: string;
+}
+
+// ドライブ接頭辞 + パス本体（`:` は本体に含めない＝行番号と分離）+ 末尾 :line(:col)
+const FILE_PATH_RE =
+  /(?:[A-Za-z]:)?[\p{L}\p{N}_.（）()【】「」/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
+
+export function findPathMatches(line: string): PathMatch[] {
+  if (!line) return [];
+  const out: PathMatch[] = [];
+  FILE_PATH_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = FILE_PATH_RE.exec(line)) !== null) {
+    const token = m[0];
+    const start = m.index;
+    if (token.length === 0) {
+      FILE_PATH_RE.lastIndex++;
+      continue;
+    }
+    // 直前が / または : の場合は URL や連続トークンの途中とみなしスキップ
+    const prev = start > 0 ? line[start - 1] : "";
+    if (prev === "/" || prev === ":") continue;
+    // :line(:col) を分離
+    const lc = token.match(/:(\d+)(?::\d+)?$/);
+    const openPath = lc ? token.slice(0, token.length - lc[0].length) : token;
+    // URL は除外
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(openPath)) continue;
+    const dot = openPath.lastIndexOf(".");
+    if (dot <= 0) continue;
+    const ext = openPath.slice(dot + 1).toLowerCase();
+    if (!CLICKABLE_EXTENSIONS.has(ext)) continue;
+    // バージョン文字列(1.2.3 等)を除外
+    if (/^\d+(?:\.\d+)+$/.test(openPath)) continue;
+    out.push({ start, end: start + token.length, raw: token, openPath });
+  }
+  return out;
+}

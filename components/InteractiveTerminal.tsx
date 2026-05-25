@@ -11,6 +11,8 @@ import {
   onPtyData,
   onPtyExit,
 } from "@/lib/pty";
+import { findPathMatches, resolveFilePath } from "@/lib/file-link";
+import { openFileInEditorWindow } from "@/lib/editor-window";
 
 /**
  * 本物の対話 Claude Code を擬似端末で動かすターミナル（ハイブリッド B）。
@@ -47,6 +49,7 @@ export function InteractiveTerminal({
     let unExit: (() => void) | undefined;
     let ro: ResizeObserver | undefined;
     let io: IntersectionObserver | undefined;
+    let linkProvider: { dispose(): void } | undefined;
 
     /**
      * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
@@ -106,6 +109,47 @@ export function InteractiveTerminal({
       term.loadAddon(fit);
       term.open(ref.current);
       safeFit();
+
+      // ターミナル内のファイルパスを Ctrl/Cmd+Click でエディタウィンドウに開く
+      try {
+        linkProvider = term.registerLinkProvider({
+          provideLinks(
+            bufferLineNumber: number,
+            callback: (links: unknown[] | undefined) => void,
+          ) {
+            const lineBuf = term.buffer?.active?.getLine(bufferLineNumber - 1);
+            if (!lineBuf) {
+              callback(undefined);
+              return;
+            }
+            const text = lineBuf.translateToString(true);
+            const matches = findPathMatches(text);
+            if (matches.length === 0) {
+              callback(undefined);
+              return;
+            }
+            callback(
+              matches.map((mt) => ({
+                text: mt.raw,
+                range: {
+                  start: { x: mt.start + 1, y: bufferLineNumber },
+                  end: { x: mt.end, y: bufferLineNumber },
+                },
+                activate: (e: MouseEvent) => {
+                  // VSCode 風: 修飾キー付きクリックでのみ開く（誤クリック防止・選択は通常通り）
+                  if (!(e.ctrlKey || e.metaKey)) return;
+                  const abs = resolveFilePath(mt.openPath, workspace ?? null);
+                  void openFileInEditorWindow(abs).catch(() => {
+                    /* 開けない場合は無視 */
+                  });
+                },
+              })),
+            );
+          },
+        });
+      } catch {
+        /* registerLinkProvider 非対応版では何もしない */
+      }
 
       // コピー＆ペースト（Ctrl/Cmd + C / V）。
       // - Ctrl/Cmd+C: 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
@@ -209,6 +253,11 @@ export function InteractiveTerminal({
       }
       try {
         unExit?.();
+      } catch {
+        /* noop */
+      }
+      try {
+        linkProvider?.dispose();
       } catch {
         /* noop */
       }
