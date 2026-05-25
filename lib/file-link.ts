@@ -79,10 +79,12 @@ const CLICKABLE_EXTENSIONS = new Set([
  *
  *  - 区切り文字: `/` または `\`
  *  - 文字: 半角英数 + アンダースコア + ハイフン + ドット + 日本語（よくある全角名）
+ *  - `:` を含める → Windows ドライブレター `D:` を分断しない
+ *  - `（）()【】「」` を含める → `CDO（技術責任者）` 等の日本語フォルダ名を分断しない
  *  - 末尾は `.<拡張子>` で終わる
  *  - 区切り文字を含まない単発の `xxx.md` も拾う
  */
-const PATH_TOKEN = /[\p{L}\p{N}_./\\-]+\.[A-Za-z0-9]{1,8}/gu;
+const PATH_TOKEN = /[\p{L}\p{N}_.:（）()【】「」/\\-]+\.[A-Za-z0-9]{1,8}/gu;
 
 export interface PathHit {
   /** 元テキスト中のファイルパス候補（そのまま表示する）。 */
@@ -160,7 +162,10 @@ export function resolveFilePath(
   if (!raw) return raw;
   const isAbsWin = /^[A-Za-z]:[\\/]/.test(raw);
   const isAbsUnix = raw.startsWith("/") || raw.startsWith("\\");
-  if (isAbsWin || isAbsUnix) return raw;
+  // `~` / `~/` / `~\` 始まりはホームディレクトリ基準。workspace を前置きせず
+  // そのまま渡し、Rust 側 expand_user_path() でホーム展開させる。
+  const isHome = raw === "~" || raw.startsWith("~/") || raw.startsWith("~\\");
+  if (isAbsWin || isAbsUnix || isHome) return raw;
   if (!workspace) return raw;
   // workspace の末尾区切りを揃える
   const wsClean = workspace.replace(/[\\/]+$/, "");

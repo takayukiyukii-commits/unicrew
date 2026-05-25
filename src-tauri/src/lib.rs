@@ -236,10 +236,11 @@ async fn delete_avatar_image(path: String) -> Result<(), String> {
 #[tauri::command]
 async fn read_image_as_data_url(path: String) -> Result<String, String> {
     use base64::Engine;
+    let path = expand_user_path(&path);
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|e| format!("画像の読み込みに失敗: {}", e))?;
-    let ext = std::path::Path::new(&path)
+    let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("png")
@@ -283,6 +284,31 @@ pub struct AddonItem {
 
 fn home_dir() -> Result<std::path::PathBuf, String> {
     dirs::home_dir().ok_or_else(|| "ホームディレクトリが取得できません".to_string())
+}
+
+/// AI 応答やファイルツリーから渡されるパス文字列を実ファイルパスへ正規化する。
+/// - 前後の空白／囲みクォートを除去
+/// - 先頭 `~` / `~/` / `~\` をホームディレクトリへ展開
+/// `~/.claude/...` のようなパスのクリックで os error 3 になる問題を防ぐ。
+fn expand_user_path(input: &str) -> std::path::PathBuf {
+    let mut s = input.trim();
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\'')))
+    {
+        s = &s[1..s.len() - 1];
+    }
+    if s == "~" {
+        if let Some(h) = dirs::home_dir() {
+            return h;
+        }
+    }
+    if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
+        if let Some(h) = dirs::home_dir() {
+            return h.join(rest);
+        }
+    }
+    std::path::PathBuf::from(s)
 }
 
 fn read_json_file(path: &std::path::Path) -> Option<serde_json::Value> {
@@ -3158,20 +3184,23 @@ async fn agent_stop(
 
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, String> {
-    tokio::fs::read_to_string(&path)
+    let p = expand_user_path(&path);
+    tokio::fs::read_to_string(&p)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    tokio::fs::write(&path, contents)
+    let p = expand_user_path(&path);
+    tokio::fs::write(&p, contents)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
+    let path = expand_user_path(&path);
     let mut entries = vec![];
     let mut rd = tokio::fs::read_dir(&path).await.map_err(|e| e.to_string())?;
     while let Some(entry) = rd.next_entry().await.map_err(|e| e.to_string())? {
