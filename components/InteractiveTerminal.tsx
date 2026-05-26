@@ -50,6 +50,7 @@ export function InteractiveTerminal({
     let ro: ResizeObserver | undefined;
     let io: IntersectionObserver | undefined;
     let linkProvider: { dispose(): void } | undefined;
+    let fitTimer: ReturnType<typeof setTimeout> | undefined;
 
     /**
      * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
@@ -57,7 +58,7 @@ export function InteractiveTerminal({
      * そこで fit すると行高が壊れて「文字が縦に圧縮される」ため、0 サイズなら何もしない。
      * 表示に戻った時は IntersectionObserver / ResizeObserver が改めて呼ぶ。
      */
-    const safeFit = () => {
+    const doFit = () => {
       const el = ref.current;
       if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
       try {
@@ -65,6 +66,16 @@ export function InteractiveTerminal({
       } catch {
         /* noop */
       }
+    };
+    // observer 経由の fit はデバウンス＋次フレームで「レイアウト確定後に1回」だけ実行する。
+    // タブ切替や分割ペインのドラッグ中に一瞬縮んだ高さで fit すると、誤った rows が
+    // ConPTY に伝わり、対話CLIが入力ボックスを画面上部に描いてしまう（入力が左上に出る）ため。
+    const safeFit = () => {
+      if (fitTimer !== undefined) clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitTimer = undefined;
+        requestAnimationFrame(doFit);
+      }, 80);
     };
 
     (async () => {
@@ -108,7 +119,7 @@ export function InteractiveTerminal({
       fit = new FitAddon();
       term.loadAddon(fit);
       term.open(ref.current);
-      safeFit();
+      doFit();
 
       // ターミナル内のファイルパスを Ctrl/Cmd+Click でエディタウィンドウに開く
       try {
@@ -211,7 +222,12 @@ export function InteractiveTerminal({
       term.onData((d: string) => {
         void ptyWriteText(id, d);
       });
+      let lastCols = term.cols;
+      let lastRows = term.rows;
       term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        if (cols === lastCols && rows === lastRows) return;
+        lastCols = cols;
+        lastRows = rows;
         void ptyResize(id, cols, rows);
       });
 
@@ -236,6 +252,7 @@ export function InteractiveTerminal({
 
     return () => {
       disposed = true;
+      if (fitTimer !== undefined) clearTimeout(fitTimer);
       try {
         ro?.disconnect();
       } catch {
