@@ -5,8 +5,14 @@ import { Columns2, X, FolderOpen } from "lucide-react";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { useTranslation } from "@/lib/i18n";
 
-/** 同時に開けるターミナルペインの上限（チャット並列と同じ感覚）。 */
-const MAX_PANES = 4;
+/**
+ * 同時に開けるターミナルペインの上限。
+ * 3カラム以上は自動的に「上段＋下段3列」の2段グリッドになるため、
+ * 2段ぶん（最大 3×2）まで許可する。
+ */
+const MAX_PANES = 6;
+/** 1行あたりの最大カラム数。これを超えると段（行）が増える。 */
+const COLS = 3;
 
 interface Pane {
   /** PTY ID にも使う一意なキー。タブを閉じるまで PTY を保持する。 */
@@ -17,6 +23,24 @@ interface Props {
   workspace?: string | null;
 }
 
+/** 各ペインの grid 上の配置（1-based の行・列）を返す。
+ *
+ *  方針: 下段を3列で埋め、余り（remainder）は上段に置く。
+ *   - n<=3: 1段に n 列
+ *   - n=4 : 上1 / 下3
+ *   - n=5 : 上2 / 下3
+ *   - n=6 : 上3 / 下3
+ *  これにより「3カラム以上で上段＋下段3列」になる。
+ */
+function placement(index: number, total: number): { row: number; col: number } {
+  if (total <= COLS) return { row: 1, col: index + 1 };
+  const totalRows = Math.ceil(total / COLS);
+  const topCount = total - (totalRows - 1) * COLS; // 上段（部分行）の個数
+  if (index < topCount) return { row: 1, col: index + 1 };
+  const k = index - topCount;
+  return { row: 2 + Math.floor(k / COLS), col: (k % COLS) + 1 };
+}
+
 /**
  * 複数ペインのターミナル表示。
  *
@@ -25,17 +49,12 @@ interface Props {
  * ペインを増やしても 1 ペインあたりの PTY は独立しており、
  * `/clear` や `/compact` 等はそのペインだけに作用する。
  *
- * このコンポーネントは（page.tsx 側で）ビューを切り替えても unmount されず
- * hidden で隠れるだけなので、ペイン構成・PTY・xterm バッファはすべて保持される。
+ * レイアウト: 1〜3 ペインは横一列、3カラムを超えると自動的に
+ * 「上段（余り）＋下段3列」の 2 段グリッドになる。
+ * 全ペインは単一 grid の直接の子のままなので、段組みが変わっても
+ * InteractiveTerminal は再マウントされず PTY/xterm バッファを保持する。
  *
- * cwd はアクティブな workspace に「連動」する：
- *   - workspace 値が変わると各 InteractiveTerminal の effect が再実行され、
- *     新しいディレクトリで PTY を開き直す（= ワークスペース切替に追従）
- *   - 単なるビュー切替（workspace 値は不変）では再生成されないので状態は保たれる
- *
- * PaneResizer を入れずに均等 flex で並べる。
- * シェル PTY は xterm の resize で都度フィットするので、
- * ウィンドウサイズ変更や開閉時にも追従する。
+ * cwd はアクティブな workspace に「連動」する（workspace 値変化で PTY 開き直し）。
  */
 export function TerminalPanes({ workspace = null }: Props) {
   const { t } = useTranslation();
@@ -61,18 +80,29 @@ export function TerminalPanes({ workspace = null }: Props) {
     });
   }, []);
 
+  const n = panes.length;
+  const cols = Math.min(n, COLS);
+  const rows = n <= COLS ? 1 : Math.ceil(n / COLS);
+
   return (
-    <div className="flex-1 flex min-w-0 min-h-0 bg-[#faf9f6]">
+    <div
+      className="flex-1 grid min-w-0 min-h-0 bg-[#faf9f6]"
+      style={{
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+      }}
+    >
       {panes.map((pane, idx) => {
-        const isFirst = idx === 0;
+        const { row, col } = placement(idx, n);
         const canSplit = panes.length < MAX_PANES;
         const canClose = panes.length > 1;
         return (
           <div
             key={pane.key}
-            className={`flex-1 min-w-0 min-h-0 flex flex-col ${
-              isFirst ? "" : "border-l border-[var(--color-border)]"
-            }`}
+            style={{ gridColumn: col, gridRow: row }}
+            className={`min-w-0 min-h-0 flex flex-col ${
+              col > 1 ? "border-l border-[var(--color-border)]" : ""
+            } ${row > 1 ? "border-t border-[var(--color-border)]" : ""}`}
           >
             <div className="shrink-0 h-7 px-2 flex items-center gap-2 border-b border-[var(--color-border)] bg-white text-[11px] text-[var(--color-muted)]">
               {workspace && (
