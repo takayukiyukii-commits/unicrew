@@ -75,6 +75,7 @@ import {
   type ProviderCategory,
 } from "@/lib/providerCategories";
 import { useTranslation, type Locale } from "@/lib/i18n";
+import { useAppVersion } from "@/lib/app-version";
 
 interface Props {
   open: boolean;
@@ -1579,6 +1580,7 @@ function InstallFailedFallback({
   helpUrl: string;
 }) {
   const { t: tr } = useTranslation();
+  const appVersion = useAppVersion();
   const [copied, setCopied] = useState(false);
   const os = detectOs();
   const command = manualInstallCommand(product, os);
@@ -1608,7 +1610,7 @@ function InstallFailedFallback({
       `${tr("settings.installFail.mailTriedHeader")}\n${tr("settings.installFail.mailTriedBody")}\n\n` +
       `${tr("settings.installFail.mailCmdHeader", { os: osLabel })}\n${command}\n\n` +
       `${tr("settings.installFail.mailLogHeader")}\n${lastLine || tr("settings.installFail.mailLogEmpty")}\n\n` +
-      `${tr("settings.installFail.mailEnvHeader")}\nOS: ${osLabel}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : ""}\nUNICREW: 0.1.0\n\n` +
+      `${tr("settings.installFail.mailEnvHeader")}\nOS: ${osLabel}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : ""}\nUNICREW: ${appVersion || "?"}\n\n` +
       `――――――――――――――――――――\n` +
       `${tr("settings.installFail.mailScreenshotNote")}\n`;
     const url = `mailto:support@uni-core.jp?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

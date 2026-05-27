@@ -1,6 +1,6 @@
 {
   "name": "unicrew",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "private": true,
   "description": "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。公式 claude / codex CLI を subprocess として束ねる Pure CLI Conductor。",
   "scripts": {
@@ -29,6 +29,7 @@
     "@types/qrcode": "^1.5.6",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-unicode11": "^0.8.0",
+    "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",

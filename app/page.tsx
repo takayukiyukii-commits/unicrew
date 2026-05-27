@@ -11,6 +11,7 @@ import { Walkthrough } from "@/components/Walkthrough";
 import { isWalkthroughDone, resetWalkthrough } from "@/lib/walkthrough";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import { resetWhatsNew, shouldShowWhatsNew, UNICREW_VERSION } from "@/lib/whatsnew";
+import { useAppVersion } from "@/lib/app-version";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { TrustPromptModal } from "@/components/TrustPromptModal";
@@ -387,6 +388,7 @@ function buildPeekOtherPanesContext(
 export default function Page() {
   // 既存コードに `t: Thread` パラメータが多数あるため、翻訳関数はエイリアス `tr` で受ける。
   const { t: tr } = useTranslation();
+  const appVersion = useAppVersion();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   /**
@@ -3661,7 +3663,7 @@ ${command}
                 feedbackSlot={
                   feedbackVisible ? (
                     <FeedbackCard
-                      appVersion="0.1.0"
+                      appVersion={appVersion}
                       userMessageCount={userMsgCount}
                       onClose={() => setFeedbackVisible(false)}
                     />
@@ -3788,7 +3790,7 @@ ${command}
                 feedbackSlot={
                   feedbackVisible ? (
                     <FeedbackCard
-                      appVersion="0.1.0"
+                      appVersion={appVersion}
                       userMessageCount={userMsgCount}
                       onClose={() => setFeedbackVisible(false)}
                     />

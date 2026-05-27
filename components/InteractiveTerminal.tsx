@@ -197,6 +197,23 @@ export function InteractiveTerminal({
         /* 非対応版では既定のまま */
       }
       term.open(ref.current);
+      // WebGL レンダラ（VSCode 統合ターミナルと同じ方式）。各グリフをセル枠にクリップして
+      // GPU 描画するため、DOM レンダラで起きていた「全角(日本語)入力時に差分描画がズレて
+      // 入力中の文字が別の行に描かれる」問題に強い。生成失敗/コンテキスト喪失時は DOM へ戻す。
+      try {
+        const { WebglAddon } = await import("@xterm/addon-webgl");
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          try {
+            webgl.dispose();
+          } catch {
+            /* noop */
+          }
+        });
+        term.loadAddon(webgl);
+      } catch {
+        /* WebGL 不可環境では DOM レンダラのまま（機能は維持） */
+      }
       // 同期 fit はあくまで暫定。確定 fit は PTY を開く直前に fitBeforeOpen() で行う。
       doFit();
 

@@ -528,7 +528,7 @@ const ja: Dict = {
   "appmenu.checkUpdates": "アップデートを確認",
   "appmenu.checking": "確認中…",
   "appmenu.updateAvailable": "アップデートあり",
-  "appmenu.upToDate": "現時点で最新版です（v0.1.0）",
+  "appmenu.upToDate": "現時点で最新版です（v{version}）",
 
   // ----- Pane / Addons -----
   "page.pane.focusHint": "クリックでこのペインを編集対象に指定",
@@ -1618,7 +1618,7 @@ const en: Dict = {
   "appmenu.checkUpdates": "Check for updates",
   "appmenu.checking": "Checking…",
   "appmenu.updateAvailable": "Update available",
-  "appmenu.upToDate": "You are on the latest version (v0.1.0)",
+  "appmenu.upToDate": "You are on the latest version (v{version})",
 
   // ----- Pane / Addons -----
   "page.pane.focusHint": "Click to focus this pane for editing",

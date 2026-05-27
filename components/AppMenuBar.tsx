@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "@/lib/i18n";
+import { useAppVersion } from "@/lib/app-version";
 
 export interface MenuAction {
   label: string;
@@ -42,6 +43,7 @@ interface Props {
 
 export function AppMenuBar({ menus, onCheckUpdates }: Props) {
   const { t } = useTranslation();
+  const appVersion = useAppVersion();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{
@@ -82,7 +84,7 @@ export function AppMenuBar({ menus, onCheckUpdates }: Props) {
       } else {
         setUpdateInfo({
           hasUpdate: false,
-          message: t("appmenu.upToDate"),
+          message: t("appmenu.upToDate", { version: appVersion || "?" }),
           checkedAt: Date.now(),
         });
       }
