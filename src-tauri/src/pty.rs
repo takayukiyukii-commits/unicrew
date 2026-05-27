@@ -14,6 +14,62 @@ use std::io::{Read, Write};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
+// ============================================================
+// 診断ログ（日本語入力ズレの原因特定用・一時的）。
+// claude が出す ANSI 制御コードと入出力・端末サイズを生のまま記録する。
+// 同一マシン上で解析するため固定パスへ書き出す。原因確定後に削除する。
+// ============================================================
+const DBG_PATH: &str = "D:\\Downloads\\unicrew-term-debug.log";
+
+/// 制御文字を可読化（ESC やカーソル移動が見えるように）。UTF-8 の多バイト
+/// （日本語）はそのまま通すのでログ上で日本語が読める。
+fn esc_bytes(buf: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(buf.len() * 2);
+    for &b in buf {
+        match b {
+            0x1b => out.extend_from_slice(b"\\x1b"),
+            0x0d => out.extend_from_slice(b"\\r"),
+            0x0a => out.extend_from_slice(b"\\n\n"),
+            0x09 => out.extend_from_slice(b"\\t"),
+            0x00..=0x1f | 0x7f => out.extend_from_slice(format!("\\x{:02x}", b).as_bytes()),
+            _ => out.push(b),
+        }
+    }
+    out
+}
+
+fn dbg_truncate(header: &str) {
+    if let Ok(mut f) = std::fs::File::create(DBG_PATH) {
+        let _ = f.write_all(header.as_bytes());
+        let _ = f.write_all(b"\n");
+    }
+}
+
+fn dbg_line(line: &str) {
+    if let Ok(meta) = std::fs::metadata(DBG_PATH) {
+        if meta.len() > 8 * 1024 * 1024 {
+            return; // 暴走防止（8MB上限）
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(DBG_PATH) {
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.write_all(b"\n");
+    }
+}
+
+fn dbg_data(prefix: &str, data: &[u8]) {
+    if let Ok(meta) = std::fs::metadata(DBG_PATH) {
+        if meta.len() > 8 * 1024 * 1024 {
+            return;
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(DBG_PATH) {
+        let _ = f.write_all(prefix.as_bytes());
+        let _ = f.write_all(&esc_bytes(data));
+        let _ = f.write_all(b"\n");
+    }
+}
+
 struct PtyEntry {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -62,6 +118,11 @@ pub fn pty_open(
         .unwrap_or_else(|| program.clone());
     #[cfg(not(target_os = "windows"))]
     let resolved = program.clone();
+
+    // 診断ログを毎セッション頭で初期化（クリーンな1回分を取る）。
+    dbg_truncate(&format!(
+        "=== OPEN id={id} program={resolved} cols={cols} rows={rows} ==="
+    ));
 
     let pty = native_pty_system();
     let pair = pty
@@ -117,6 +178,8 @@ pub fn pty_open(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // 診断: claude が出した生の ANSI を記録
+                    dbg_data("OUT| ", &buf[..n]);
                     let b64 = base64::engine::general_purpose::STANDARD
                         .encode(&buf[..n]);
                     if app_r
@@ -158,6 +221,8 @@ pub fn pty_write(id: String, data: String) -> Result<(), String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data.as_bytes())
         .map_err(|e| format!("base64 デコード失敗: {e}"))?;
+    // 診断: フロントから PTY へ送る入力を記録
+    dbg_data("IN | ", &bytes);
     let mut reg = registry().lock().map_err(|_| "registry lock".to_string())?;
     let entry = reg
         .get_mut(&id)
@@ -173,6 +238,7 @@ pub fn pty_write(id: String, data: String) -> Result<(), String> {
 /// 端末リサイズ（cols/rows）を PTY に伝える（SIGWINCH 相当）。
 #[tauri::command]
 pub fn pty_resize(id: String, cols: u16, rows: u16) -> Result<(), String> {
+    dbg_line(&format!("RESIZE id={id} cols={cols} rows={rows}"));
     let reg = registry().lock().map_err(|_| "registry lock".to_string())?;
     if let Some(entry) = reg.get(&id) {
         entry
