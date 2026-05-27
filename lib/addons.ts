@@ -201,10 +201,10 @@ export interface UniProduct {
  */
 export const UNI_PRODUCTS: UniProduct[] = [
   // Services
-  { id: "unicore", name: "UNICORE", category: "service", tagline: "Member sites & LMS", taglineJa: "会員サイト・教材販売・コース運営の本体", url: "https://uni-core.jp", status: "coming-soon" },
-  { id: "unidesk", name: "UNIDESK", category: "service", tagline: "Personal desk & social hub", taglineJa: "個人の作業デスク＋ソーシャル機能（家族・カップル・友人モード）", url: "https://desk.uni-core.jp", status: "coming-soon" },
+  { id: "unicore", name: "UNICORE", category: "service", tagline: "Member sites & LMS", taglineJa: "会員サイト・教材販売・コース運営の本体", url: "https://uni-core.jp", status: "live" },
+  { id: "unidesk", name: "UNIDESK", category: "service", tagline: "Personal desk & social hub", taglineJa: "個人の作業デスク＋ソーシャル機能（家族・カップル・友人モード）", url: "https://desk.uni-core.jp", status: "live" },
   { id: "unicarte", name: "UNICARTE", category: "service", tagline: "Coaching & client management", taglineJa: "コーチング・クライアント管理・カルテ記録", url: "https://carte.uni-core.jp", status: "coming-soon" },
-  { id: "unihub", name: "UNIHUB", category: "service", tagline: "Team chat for tiny teams", taglineJa: "少人数チーム向けのチャット（Slack 代替・人数課金なし）", url: "https://hub.uni-core.jp", status: "coming-soon" },
+  { id: "unihub", name: "UNIHUB", category: "service", tagline: "Team chat for tiny teams", taglineJa: "少人数チーム向けのチャット（Slack 代替・人数課金なし）", url: "https://hub.uni-core.jp", status: "live" },
   { id: "unistep", name: "UNISTEP", category: "service", tagline: "LINE-first marketing automation", taglineJa: "LINE 公式アカウントを中心としたステップ配信・CRM", url: "https://step.uni-core.jp", status: "coming-soon" },
   { id: "unibase", name: "UNIBASE", category: "service", tagline: "All-in-one growth toolkit", taglineJa: "5カテゴリ16機能をひとまとめにした成長支援ハブ", url: "https://base.uni-core.jp", status: "coming-soon" },
   { id: "uniscan", name: "UNISCAN", category: "service", tagline: "Market & persona analytics", taglineJa: "市場・トレンド・競合・顧客心理の分析", url: "https://scan.uni-core.jp", status: "coming-soon" },

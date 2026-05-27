@@ -14,6 +14,7 @@ import {
   GraduationCap,
   Layers,
   Loader2,
+  Lock,
   Network,
   Palette,
   Plug,
@@ -1140,6 +1141,8 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
       {sections.map((sec) => {
         const items = grouped[sec.id];
         if (items.length === 0) return null;
+        const liveItems = items.filter((p) => p.status === "live");
+        const lockedCount = items.length - liveItems.length;
         return (
           <div key={sec.id}>
             <div className="text-[11.5px] font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-1.5">
@@ -1149,7 +1152,7 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
               {tr(sec.descKey)}
             </div>
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {items.map((p) => (
+              {liveItems.map((p) => (
                 <li
                   key={p.id}
                   className="flex items-start justify-between gap-3 px-3 py-2 rounded-md border border-[var(--color-border)] bg-white"
@@ -1158,9 +1161,6 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-semibold text-[13px] truncate">
                         {p.name}
-                      </span>
-                      <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
-                        {tr("addons.uni.comingSoon")}
                       </span>
                     </div>
                     <div className="text-[11.5px] text-[var(--color-muted)] mt-0.5 leading-snug">
@@ -1180,6 +1180,14 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
                   )}
                 </li>
               ))}
+              {lockedCount > 0 && (
+                <li className="flex items-center gap-2 px-3 py-2 rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)]/40 text-[var(--color-muted)] select-none">
+                  <Lock size={13} className="shrink-0" />
+                  <span className="text-[12px]">
+                    {tr("addons.uni.lockedCount", { count: lockedCount })}
+                  </span>
+                </li>
+              )}
             </ul>
           </div>
         );

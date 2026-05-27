@@ -14,62 +14,6 @@ use std::io::{Read, Write};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
-// ============================================================
-// 診断ログ（日本語入力ズレの原因特定用・一時的）。
-// claude が出す ANSI 制御コードと入出力・端末サイズを生のまま記録する。
-// 同一マシン上で解析するため固定パスへ書き出す。原因確定後に削除する。
-// ============================================================
-const DBG_PATH: &str = "D:\\Downloads\\unicrew-term-debug.log";
-
-/// 制御文字を可読化（ESC やカーソル移動が見えるように）。UTF-8 の多バイト
-/// （日本語）はそのまま通すのでログ上で日本語が読める。
-fn esc_bytes(buf: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(buf.len() * 2);
-    for &b in buf {
-        match b {
-            0x1b => out.extend_from_slice(b"\\x1b"),
-            0x0d => out.extend_from_slice(b"\\r"),
-            0x0a => out.extend_from_slice(b"\\n\n"),
-            0x09 => out.extend_from_slice(b"\\t"),
-            0x00..=0x1f | 0x7f => out.extend_from_slice(format!("\\x{:02x}", b).as_bytes()),
-            _ => out.push(b),
-        }
-    }
-    out
-}
-
-fn dbg_truncate(header: &str) {
-    if let Ok(mut f) = std::fs::File::create(DBG_PATH) {
-        let _ = f.write_all(header.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
-
-fn dbg_line(line: &str) {
-    if let Ok(meta) = std::fs::metadata(DBG_PATH) {
-        if meta.len() > 8 * 1024 * 1024 {
-            return; // 暴走防止（8MB上限）
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(DBG_PATH) {
-        let _ = f.write_all(line.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
-
-fn dbg_data(prefix: &str, data: &[u8]) {
-    if let Ok(meta) = std::fs::metadata(DBG_PATH) {
-        if meta.len() > 8 * 1024 * 1024 {
-            return;
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(DBG_PATH) {
-        let _ = f.write_all(prefix.as_bytes());
-        let _ = f.write_all(&esc_bytes(data));
-        let _ = f.write_all(b"\n");
-    }
-}
-
 struct PtyEntry {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -119,11 +63,6 @@ pub fn pty_open(
     #[cfg(not(target_os = "windows"))]
     let resolved = program.clone();
 
-    // 診断ログを毎セッション頭で初期化（クリーンな1回分を取る）。
-    dbg_truncate(&format!(
-        "=== OPEN id={id} program={resolved} cols={cols} rows={rows} ==="
-    ));
-
     let pty = native_pty_system();
     let pair = pty
         .openpty(PtySize {
@@ -147,16 +86,12 @@ pub fn pty_open(
     }
     // PTY 上で動く対話 TUI（claude/Ink 等）が方向キーと複数行編集を正しく扱えるよう
     // TERM を明示する。GUI 親プロセス（unicrew.exe）は TERM を持たないことが多く、
-    // 未設定のままだと Ink の入力エディタが劣化モードになり、入力欄での ↑↓ が
-    // 「行内のカーソル移動」ではなく「プロンプト履歴送り（＝別の会話に飛ぶ）」に
-    // なってしまう。フロントは xterm.js なので xterm-256color を名乗らせる。
-    // 親から継承した値があっても、フロント実装に合わせて上書きするため loop の後に置く。
+    // 未設定のままだと Ink の入力エディタが劣化モードになる。フロントは xterm.js なので
+    // xterm-256color を名乗らせる。親から継承した値があっても上書きするため loop の後に置く。
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    // VSCode 統合ターミナル相当の識別子を名乗る。claude(Ink) は端末を識別して
-    // カーソル/IME まわりの描画モードを変えるとみられ、無名だと劣化モードになり
-    // 本物のカーソルをステータス行に置く（＝日本語IME未確定文字がそこに出てズレる）。
-    // VSCode と同じ TERM_PROGRAM を渡して、入力欄にカーソルを保つ描画を促す。
+    // VSCode 統合ターミナル相当の識別子を名乗る。claude(Ink) は端末を識別して描画モードを
+    // 変えるため（同期描画 ?2026 等）、VSCode と同じ TERM_PROGRAM を渡してリッチ描画を促す。
     cmd.env("TERM_PROGRAM", "vscode");
     cmd.env("TERM_PROGRAM_VERSION", "1.96.0");
 
@@ -184,8 +119,6 @@ pub fn pty_open(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // 診断: claude が出した生の ANSI を記録
-                    dbg_data("OUT| ", &buf[..n]);
                     let b64 = base64::engine::general_purpose::STANDARD
                         .encode(&buf[..n]);
                     if app_r
@@ -227,8 +160,6 @@ pub fn pty_write(id: String, data: String) -> Result<(), String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data.as_bytes())
         .map_err(|e| format!("base64 デコード失敗: {e}"))?;
-    // 診断: フロントから PTY へ送る入力を記録
-    dbg_data("IN | ", &bytes);
     let mut reg = registry().lock().map_err(|_| "registry lock".to_string())?;
     let entry = reg
         .get_mut(&id)
@@ -244,7 +175,6 @@ pub fn pty_write(id: String, data: String) -> Result<(), String> {
 /// 端末リサイズ（cols/rows）を PTY に伝える（SIGWINCH 相当）。
 #[tauri::command]
 pub fn pty_resize(id: String, cols: u16, rows: u16) -> Result<(), String> {
-    dbg_line(&format!("RESIZE id={id} cols={cols} rows={rows}"));
     let reg = registry().lock().map_err(|_| "registry lock".to_string())?;
     if let Some(entry) = reg.get(&id) {
         entry
