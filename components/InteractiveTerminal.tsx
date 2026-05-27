@@ -121,8 +121,36 @@ export function InteractiveTerminal({
         import("@xterm/addon-fit"),
       ]);
       if (disposed || !ref.current) return;
+
+      // Windows の ConPTY 行折り返し対策（最重要）。
+      // ConPTY は折り返し（line wrap）やスクロールを“自分側”で処理して出力する。
+      // xterm.js は既定だと「unix pty が自前で reflow する」前提で動くため、ConPTY と
+      // 二重に折り返し解釈してしまい、入力中の文字が本来と違う行に描かれる
+      // （上に出たり下に出たり、起動バナーやスクロールバックの行位置までズレる）。
+      // xterm の windowsPty オプションに backend:"conpty" と OS ビルド番号を渡すと、
+      // 「折り返しは backend 側が担当する」と認識して reflow を二重にせず、行位置が揃う。
+      // （VSCode 統合ターミナルが正常に出るのはこの設定をしているため。）
+      let windowsPty:
+        | { backend: "conpty" | "winpty"; buildNumber?: number }
+        | undefined;
+      try {
+        const os = await import("@tauri-apps/plugin-os");
+        if (os.platform() === "windows") {
+          // version() は同期。Windows では "10.0.22631" 等 → 末尾が build 番号。
+          const ver = os.version() || "";
+          const build = Number(ver.split(".").pop());
+          windowsPty = Number.isFinite(build)
+            ? { backend: "conpty", buildNumber: build }
+            : { backend: "conpty" };
+        }
+      } catch {
+        /* OS 取得不可（非 Windows / プラグイン未初期化）時は未設定でよい */
+      }
+      if (disposed || !ref.current) return;
+
       term = new Terminal({
         cursorBlink: true,
+        windowsPty,
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
         fontSize: 13,
