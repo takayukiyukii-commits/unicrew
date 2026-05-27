@@ -84,6 +84,14 @@ pub fn pty_open(
     for (k, v) in std::env::vars() {
         cmd.env(k, v);
     }
+    // PTY 上で動く対話 TUI（claude/Ink 等）が方向キーと複数行編集を正しく扱えるよう
+    // TERM を明示する。GUI 親プロセス（unicrew.exe）は TERM を持たないことが多く、
+    // 未設定のままだと Ink の入力エディタが劣化モードになり、入力欄での ↑↓ が
+    // 「行内のカーソル移動」ではなく「プロンプト履歴送り（＝別の会話に飛ぶ）」に
+    // なってしまう。フロントは xterm.js なので xterm-256color を名乗らせる。
+    // 親から継承した値があっても、フロント実装に合わせて上書きするため loop の後に置く。
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 
     let child = pair
         .slave

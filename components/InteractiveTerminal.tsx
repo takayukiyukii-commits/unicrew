@@ -162,9 +162,15 @@ export function InteractiveTerminal({
         /* registerLinkProvider 非対応版では何もしない */
       }
 
-      // コピー＆ペースト（Ctrl/Cmd + C / V）。
-      // - Ctrl/Cmd+C: 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
-      // - Ctrl/Cmd+V: クリップボードから貼り付け（term.paste でブラケットペースト対応）
+      // コピー処理（Ctrl/Cmd + C）。
+      // - 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
+      //
+      // ※ 貼り付け（Ctrl/Cmd+V）はここで扱わない。xterm.js はブラウザ/WebView の
+      //   ネイティブ paste イベントを標準でハンドリングして貼り付ける（ブラケット
+      //   ペーストも対応済み）。ここで term.paste() を二重に呼ぶと、ネイティブ paste と
+      //   合わせて同じ文字列が 2 回入力されてしまう（= 二重貼り付けバグ）。
+      //   attachCustomKeyEventHandler で return false しても keydown 段階の話で、
+      //   別イベントである paste は抑止できないため、V 分岐は持たないのが正解。
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true;
         const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
@@ -176,17 +182,6 @@ export function InteractiveTerminal({
             return false; // SIGINT を送らずコピーを優先
           }
           return true; // 選択が無ければ通常どおり SIGINT
-        }
-        if (mod && (e.key === "v" || e.key === "V")) {
-          void navigator.clipboard
-            .readText()
-            .then((text) => {
-              if (text) term.paste(text);
-            })
-            .catch(() => {
-              /* クリップボード読取り不可時は無視 */
-            });
-          return false;
         }
         return true;
       });
