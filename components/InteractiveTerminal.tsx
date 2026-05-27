@@ -368,30 +368,48 @@ export function InteractiveTerminal({
           const cols: number = term.cols;
           if (!buf || !rows || !cols) return null;
           const base: number = buf.baseY;
-          let promptY: number | null = null;
-          let promptLine: ReturnType<typeof buf.getLine> | null = null;
-          for (let y = rows - 1; y >= 0; y--) {
+          // 入力ボックス開始行（❯ の行）。これ以降が入力領域（折り返し含む）。
+          let promptStartY: number | null = null;
+          for (let y = 0; y < rows; y++) {
+            const line = buf.getLine(base + y);
+            if (line && line.translateToString(true).includes("❯")) {
+              promptStartY = y;
+              break;
+            }
+          }
+          if (promptStartY == null) return null;
+          // 実際の挿入点＝claude が描く反転(reverse-video)カーソルブロック。
+          // 入力が複数行に折り返すと下の行へ来るため、入力領域を下から走査して
+          // 最下の反転セルを採る（＝カーソル）。緑タグ等は反転でないので拾わない。
+          let curY = -1;
+          let curX = -1;
+          for (let y = rows - 1; y >= promptStartY; y--) {
             const line = buf.getLine(base + y);
             if (!line) continue;
-            if (line.translateToString(true).includes("❯")) {
-              promptY = y;
-              promptLine = line;
+            let foundX = -1;
+            for (let x = cols - 1; x >= 0; x--) {
+              const cell = line.getCell(x);
+              if (cell && cell.isInverse && cell.isInverse()) {
+                foundX = x;
+                break;
+              }
+            }
+            if (foundX >= 0) {
+              curY = y;
+              curX = foundX;
               break;
             }
           }
-          if (promptY == null || !promptLine) return null;
-          // 挿入列：claude が描く反転(reverse-video)カーソルブロックの列を探す。
-          // 無ければテキスト末尾(trim長)、それも無理なら ❯ の次(col 2)。
-          let col = -1;
-          for (let x = 0; x < cols; x++) {
-            const cell = promptLine.getCell(x);
-            if (cell && cell.isInverse && cell.isInverse()) {
-              col = x;
-              break;
-            }
-          }
-          if (col < 0) {
-            const t = promptLine.translateToString(true);
+          let rowY: number;
+          let col: number;
+          if (curY >= 0) {
+            rowY = curY;
+            col = curX;
+          } else {
+            // フォールバック：❯ 行のテキスト末尾
+            rowY = promptStartY;
+            const t =
+              buf.getLine(base + promptStartY)?.translateToString(true) ?? "";
             col = Math.max(2, t.length);
           }
           const screen = ref.current?.querySelector(
@@ -401,7 +419,7 @@ export function InteractiveTerminal({
           const w = screen?.clientWidth ?? ref.current?.clientWidth ?? 0;
           if (!h || !w) return null;
           return {
-            top: Math.round((promptY * h) / rows),
+            top: Math.round((rowY * h) / rows),
             left: Math.round((col * w) / cols),
           };
         } catch {
