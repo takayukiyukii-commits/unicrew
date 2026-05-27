@@ -104,8 +104,11 @@ export function InteractiveTerminal({
       } catch {
         /* noop */
       }
-      // 実サイズが付くまで数フレーム待つ（hidden 中は付かない＝IO が後で再 fit する）
-      for (let i = 0; i < 30; i++) {
+      // 表示されて実サイズが付くまで待つ。隠れたタブで mount されたまま 80x24 で
+      // PTY を開くと、表示時に resize が走って claude が再描画の嵐になり、カーソルが
+      // ステータス行に取り残されて日本語IME未確定文字がズレる一因になる。
+      // 表示＆サイズ確定まで PTY を開かない＝開いた瞬間から正しい cols/rows にする。
+      while (!disposed) {
         const el = ref.current;
         if (el && el.clientWidth > 0 && el.clientHeight > 0) break;
         await raf();

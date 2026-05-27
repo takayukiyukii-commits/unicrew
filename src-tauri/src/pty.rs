@@ -153,6 +153,12 @@ pub fn pty_open(
     // 親から継承した値があっても、フロント実装に合わせて上書きするため loop の後に置く。
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // VSCode 統合ターミナル相当の識別子を名乗る。claude(Ink) は端末を識別して
+    // カーソル/IME まわりの描画モードを変えるとみられ、無名だと劣化モードになり
+    // 本物のカーソルをステータス行に置く（＝日本語IME未確定文字がそこに出てズレる）。
+    // VSCode と同じ TERM_PROGRAM を渡して、入力欄にカーソルを保つ描画を促す。
+    cmd.env("TERM_PROGRAM", "vscode");
+    cmd.env("TERM_PROGRAM_VERSION", "1.96.0");
 
     let child = pair
         .slave
