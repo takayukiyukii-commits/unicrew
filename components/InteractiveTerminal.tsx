@@ -78,6 +78,43 @@ export function InteractiveTerminal({
       }, 80);
     };
 
+    const raf = () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    /**
+     * PTY を開く「前」に、確実に正しい cols/rows を確定させるための初期 fit。
+     *
+     * これが本コンポーネント最大の地雷だった：term.open() 直後に同期で fit すると、
+     * ① monospace フォントのメトリクスが未確定（document.fonts 未ロード）／
+     * ② Flex レイアウトの実寸が未確定（clientWidth/Height がまだ最終値でない）
+     * のタイミングだと、xterm がセル幅・桁数を誤算出して cols/rows がズレる。
+     * その誤サイズで ptyOpen すると、claude(Ink) は「自分が思う桁数」で折り返し・
+     * カーソル移動するのに xterm は別の実寸で描画するため、
+     * 「打った文字と表示位置がズレる」状態が“開いた直後から常時”発生する。
+     *
+     * → フォント確定（fonts.ready）＋実サイズ確定（rAF を挟む）を待ってから fit し、
+     *   その確定後の cols/rows で PTY を開く。
+     */
+    const fitBeforeOpen = async () => {
+      try {
+        // フォントのメトリクス確定を待つ（system font でも最低1ティック待てる）
+        if (typeof document !== "undefined" && document.fonts?.ready) {
+          await document.fonts.ready;
+        }
+      } catch {
+        /* noop */
+      }
+      // 実サイズが付くまで数フレーム待つ（hidden 中は付かない＝IO が後で再 fit する）
+      for (let i = 0; i < 30; i++) {
+        const el = ref.current;
+        if (el && el.clientWidth > 0 && el.clientHeight > 0) break;
+        await raf();
+      }
+      // レイアウト確定後の1フレームで最終 fit
+      await raf();
+      doFit();
+    };
+
     (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([
         import("@xterm/xterm"),
@@ -119,6 +156,7 @@ export function InteractiveTerminal({
       fit = new FitAddon();
       term.loadAddon(fit);
       term.open(ref.current);
+      // 同期 fit はあくまで暫定。確定 fit は PTY を開く直前に fitBeforeOpen() で行う。
       doFit();
 
       // ターミナル内のファイルパスを Ctrl/Cmd+Click でエディタウィンドウに開く
@@ -213,6 +251,10 @@ export function InteractiveTerminal({
           cwd = null;
         }
       }
+
+      // フォント＆レイアウト確定後に確定 fit してから PTY を開く。
+      // これで「開いた直後から打った文字と表示位置がズレる」現象を防ぐ。
+      await fitBeforeOpen();
       if (disposed) return;
 
       await ptyOpen({
