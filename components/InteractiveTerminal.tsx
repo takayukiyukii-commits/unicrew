@@ -361,41 +361,68 @@ export function InteractiveTerminal({
       // xterm は未確定文字(composition-view)をカーソル位置(buffer.y)に出すため、
       // ステータス行にズレて出る。compositionstart/update の直後に、未確定ビューと
       // textarea を ❯ の行（実際の入力行）の高さへ移動して見た目を合わせる。
-      const promptRowTop = (): number | null => {
+      const promptInputPos = (): { top: number; left: number } | null => {
         try {
           const buf = term.buffer?.active;
           const rows: number = term.rows;
-          if (!buf || !rows) return null;
+          const cols: number = term.cols;
+          if (!buf || !rows || !cols) return null;
           const base: number = buf.baseY;
           let promptY: number | null = null;
+          let promptLine: ReturnType<typeof buf.getLine> | null = null;
           for (let y = rows - 1; y >= 0; y--) {
             const line = buf.getLine(base + y);
             if (!line) continue;
             if (line.translateToString(true).includes("❯")) {
               promptY = y;
+              promptLine = line;
               break;
             }
           }
-          if (promptY == null) return null;
+          if (promptY == null || !promptLine) return null;
+          // 挿入列：claude が描く反転(reverse-video)カーソルブロックの列を探す。
+          // 無ければテキスト末尾(trim長)、それも無理なら ❯ の次(col 2)。
+          let col = -1;
+          for (let x = 0; x < cols; x++) {
+            const cell = promptLine.getCell(x);
+            if (cell && cell.isInverse && cell.isInverse()) {
+              col = x;
+              break;
+            }
+          }
+          if (col < 0) {
+            const t = promptLine.translateToString(true);
+            col = Math.max(2, t.length);
+          }
           const screen = ref.current?.querySelector(
             ".xterm-screen",
           ) as HTMLElement | null;
           const h = screen?.clientHeight ?? ref.current?.clientHeight ?? 0;
-          if (!h) return null;
-          return Math.round((promptY * h) / rows);
+          const w = screen?.clientWidth ?? ref.current?.clientWidth ?? 0;
+          if (!h || !w) return null;
+          return {
+            top: Math.round((promptY * h) / rows),
+            left: Math.round((col * w) / cols),
+          };
         } catch {
           return null;
         }
       };
       const fixComposition = () => {
-        const top = promptRowTop();
-        if (top == null) return;
+        const pos = promptInputPos();
+        if (!pos) return;
         const view = ref.current?.querySelector(
           ".composition-view",
         ) as HTMLElement | null;
         const ta = term.textarea as HTMLTextAreaElement | undefined;
-        if (view) view.style.top = `${top}px`;
-        if (ta) ta.style.top = `${top}px`;
+        if (view) {
+          view.style.top = `${pos.top}px`;
+          view.style.left = `${pos.left}px`;
+        }
+        if (ta) {
+          ta.style.top = `${pos.top}px`;
+          ta.style.left = `${pos.left}px`;
+        }
       };
       const taEl = term.textarea as HTMLTextAreaElement | undefined;
       if (taEl) {
