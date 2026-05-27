@@ -424,16 +424,58 @@ export function InteractiveTerminal({
           ta.style.left = `${pos.left}px`;
         }
       };
+      const cleanups: Array<() => void> = [];
+      // 本命：xterm の位置決め updateCompositionElements をフックし、xterm が位置を
+      // 入れた“同じ同期処理内”で挿入点へ上書きする。後追い(setTimeout)だと誤位置が
+      // 1フレーム描画されて画面が震える（ブルブル）。同期上書きなら誤位置は一度も
+      // 描画されず震えが出ない。
+      let patched = false;
+      try {
+        const core = (term as unknown as { _core?: Record<string, unknown> })
+          ._core;
+        if (core) {
+          for (const k of Object.keys(core)) {
+            const obj = core[k] as
+              | { updateCompositionElements?: (x?: boolean) => void }
+              | null;
+            if (obj && typeof obj.updateCompositionElements === "function") {
+              const orig = obj.updateCompositionElements.bind(obj);
+              obj.updateCompositionElements = (dontRecurse?: boolean) => {
+                orig(dontRecurse);
+                fixComposition();
+              };
+              cleanups.push(() => {
+                obj.updateCompositionElements = orig as never;
+              });
+              patched = true;
+              break;
+            }
+          }
+        }
+      } catch {
+        /* フック不可環境ではフォールバックへ */
+      }
+      // フォールバック：フックできない環境では従来どおりイベントで後追い補正
+      // （位置は合うが震えは残る）。
       const taEl = term.textarea as HTMLTextAreaElement | undefined;
-      if (taEl) {
+      if (!patched && taEl) {
         const onComp = () => setTimeout(fixComposition, 0);
         taEl.addEventListener("compositionstart", onComp);
         taEl.addEventListener("compositionupdate", onComp);
-        compCleanup = () => {
+        cleanups.push(() => {
           taEl.removeEventListener("compositionstart", onComp);
           taEl.removeEventListener("compositionupdate", onComp);
-        };
+        });
       }
+      compCleanup = () => {
+        for (const c of cleanups) {
+          try {
+            c();
+          } catch {
+            /* noop */
+          }
+        }
+      };
 
       term.focus();
     })();
