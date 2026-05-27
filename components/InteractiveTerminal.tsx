@@ -162,15 +162,21 @@ export function InteractiveTerminal({
         /* registerLinkProvider 非対応版では何もしない */
       }
 
-      // コピー処理（Ctrl/Cmd + C）。
-      // - 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
+      // コピー＆ペースト（Ctrl/Cmd + C / V）。
+      // - Ctrl/Cmd+C: 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
+      // - Ctrl/Cmd+V: 実際の貼り付けは xterm.js のネイティブ paste イベントに任せ、
+      //   ここでは「xterm にキー処理させない（false を返す）」だけにする。
       //
-      // ※ 貼り付け（Ctrl/Cmd+V）はここで扱わない。xterm.js はブラウザ/WebView の
-      //   ネイティブ paste イベントを標準でハンドリングして貼り付ける（ブラケット
-      //   ペーストも対応済み）。ここで term.paste() を二重に呼ぶと、ネイティブ paste と
-      //   合わせて同じ文字列が 2 回入力されてしまう（= 二重貼り付けバグ）。
-      //   attachCustomKeyEventHandler で return false しても keydown 段階の話で、
-      //   別イベントである paste は抑止できないため、V 分岐は持たないのが正解。
+      //   なぜ false を返すだけにするか：
+      //   xterm は Ctrl+V を制御文字 ^V(0x16) として PTY に送ってしまう。これが
+      //   直後に届くネイティブ paste（ブラケットペースト）の前に入ると、claude/
+      //   readline の quoted-insert として解釈され、貼り付け全体が壊れる（＝貼れない）。
+      //   かといってここで term.paste() を自前で呼ぶと、ネイティブ paste と合わせて
+      //   同じ文字列が 2 回入る（＝二重貼り付け）。
+      //   よって「^V は送らせない（false）／貼り付けはネイティブ paste 1 本に任せる
+      //   （term.paste は呼ばない）」のが、二重貼り付けにも貼れない問題にもならない正解。
+      //   ※ false を返しても event.preventDefault はされないため、ブラウザ/WebView の
+      //     paste イベントはそのまま発火して 1 回だけ貼り付けられる。
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true;
         const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
@@ -182,6 +188,10 @@ export function InteractiveTerminal({
             return false; // SIGINT を送らずコピーを優先
           }
           return true; // 選択が無ければ通常どおり SIGINT
+        }
+        if (mod && (e.key === "v" || e.key === "V")) {
+          // ^V を PTY に送らせない。貼り付けはネイティブ paste に任せる（二重防止）。
+          return false;
         }
         return true;
       });
