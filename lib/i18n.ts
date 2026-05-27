@@ -441,7 +441,7 @@ const ja: Dict = {
   "page.alert.otelActive": "有効",
   "page.alert.otelInactive": "未設定",
   "page.alert.otelEndpointUnset": "（未設定）",
-  "page.alert.versionInfo": "UNICREW v0.1.0\nあなた専属のAIチームを、5分で。\n\nClaude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。\n\n© 2026 ZUBOLAND / uniLinks",
+  "page.alert.versionInfo": "あなた専属のAIチームを、5分で。\n\nClaude / Codex / スキル / MCP をターミナルなしで使える AI デスクトップ。\n\n© 2026 ZUBOLAND / uniLinks",
 
   // ----- Page assistant injected messages -----
   "page.assistant.startupError": "**起動エラー ({provider})**: {message}\n\n設定から認証状態を確認してください。",
@@ -1531,7 +1531,7 @@ const en: Dict = {
   "page.alert.otelActive": "Active",
   "page.alert.otelInactive": "Not configured",
   "page.alert.otelEndpointUnset": "(not set)",
-  "page.alert.versionInfo": "UNICREW v0.1.0\nYour own AI crew, in 5 minutes.\n\nA desktop app that runs Claude / Codex / skills / MCP without a terminal.\n\n© 2026 ZUBOLAND / uniLinks",
+  "page.alert.versionInfo": "Your own AI crew, in 5 minutes.\n\nA desktop app that runs Claude / Codex / skills / MCP without a terminal.\n\n© 2026 ZUBOLAND / uniLinks",
 
   // ----- Page assistant injected messages -----
   "page.assistant.startupError": "**Startup error ({provider})**: {message}\n\nPlease check your authentication from Settings.",

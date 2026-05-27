@@ -1983,6 +1983,23 @@ function UnicrewSelfUpdateSection({
 }) {
   const { t: tr } = useTranslation();
   const [info, setInfo] = useState<UnicrewUpdateInfo | null>(null);
+  // 表示用の実バージョン（tauri.conf.json の version）。ハードコードでなく実値を出す。
+  const [realVersion, setRealVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const v = await getVersion();
+        if (alive) setRealVersion(v);
+      } catch {
+        /* 非 Tauri 等は currentVersion prop へフォールバック */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<string>("");
@@ -2038,7 +2055,7 @@ function UnicrewSelfUpdateSection({
       <h4 className="font-semibold text-[13px] flex items-center gap-1.5">
         {tr("settings.selfUpdate.heading")}
         <span className="text-[10.5px] font-mono text-[var(--color-muted)]">
-          v{currentVersion}
+          v{realVersion ?? currentVersion}
         </span>
       </h4>
       <p className="text-[11.5px] text-[var(--color-muted)] leading-relaxed">

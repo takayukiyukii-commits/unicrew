@@ -3472,7 +3472,19 @@ ${command}
         {
           label: tr("menu.help.version"),
           onSelect: () => {
-            alert(tr("page.alert.versionInfo"));
+            void (async () => {
+              let v = "";
+              try {
+                const { getVersion } = await import("@tauri-apps/api/app");
+                v = await getVersion();
+              } catch {
+                /* noop */
+              }
+              const head = v ? `UNICREW v${v}
+
+` : "";
+              alert(head + tr("page.alert.versionInfo"));
+            })();
           },
         },
       ],

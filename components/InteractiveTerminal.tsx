@@ -116,10 +116,12 @@ export function InteractiveTerminal({
     };
 
     (async () => {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-      ]);
+      const [{ Terminal }, { FitAddon }, { Unicode11Addon }] =
+        await Promise.all([
+          import("@xterm/xterm"),
+          import("@xterm/addon-fit"),
+          import("@xterm/addon-unicode11"),
+        ]);
       if (disposed || !ref.current) return;
 
       // Windows の ConPTY 行折り返し対策（最重要）。
@@ -183,6 +185,17 @@ export function InteractiveTerminal({
       });
       fit = new FitAddon();
       term.loadAddon(fit);
+      // 全角(CJK)文字幅を Unicode 11 準拠にする。xterm 既定は Unicode 6 のため、
+      // claude(Ink) 側の文字幅(string-width=Unicode 11系)と食い違い、日本語入力時に
+      // カーソル桁数がズレて入力中の文字が別の行へ描かれていた（IME のときだけ起きる）。
+      // activeVersion を "11" に揃えると一致して解消する。
+      try {
+        const u11 = new Unicode11Addon();
+        term.loadAddon(u11);
+        term.unicode.activeVersion = "11";
+      } catch {
+        /* 非対応版では既定のまま */
+      }
       term.open(ref.current);
       // 同期 fit はあくまで暫定。確定 fit は PTY を開く直前に fitBeforeOpen() で行う。
       doFit();
