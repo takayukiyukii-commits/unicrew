@@ -11,8 +11,9 @@ import {
   onPtyData,
   onPtyExit,
 } from "@/lib/pty";
-import { findPathMatches, resolveFilePath } from "@/lib/file-link";
+import { findPathMatches, findUrlMatches, resolveFilePath } from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
+import { openExternal } from "@/lib/preview-window";
 
 /**
  * 本物の対話 Claude Code を擬似端末で動かすターミナル（ハイブリッド B）。
@@ -221,7 +222,11 @@ export function InteractiveTerminal({
       // 同期 fit はあくまで暫定。確定 fit は PTY を開く直前に fitBeforeOpen() で行う。
       doFit();
 
-      // ターミナル内のファイルパスを Ctrl/Cmd+Click でエディタウィンドウに開く
+      // ターミナル内のファイルパス／URL を Ctrl/Cmd+Click で開く（VSCode 統合ターミナル相当）。
+      //  - ファイルパス: openFileInEditorWindow（別ウィンドウのエディタにタブ追加）
+      //  - http(s) URL : openExternal（OS 既定ブラウザ）
+      // URL とファイルパスは互いに排他（findPathMatches/findUrlMatches 双方で URL は除外済）。
+      // 重複行のリンクは「URL を優先」してファイル側の重なる範囲を捨てる（ありえないが念のため）。
       try {
         linkProvider = term.registerLinkProvider({
           provideLinks(
@@ -234,13 +239,29 @@ export function InteractiveTerminal({
               return;
             }
             const text = lineBuf.translateToString(true);
-            const matches = findPathMatches(text);
-            if (matches.length === 0) {
+            const urlMatches = findUrlMatches(text);
+            const pathMatches = findPathMatches(text).filter((p) =>
+              urlMatches.every((u) => p.end <= u.start || p.start >= u.end),
+            );
+            if (urlMatches.length === 0 && pathMatches.length === 0) {
               callback(undefined);
               return;
             }
-            callback(
-              matches.map((mt) => ({
+            const links = [
+              ...urlMatches.map((mt) => ({
+                text: mt.raw,
+                range: {
+                  start: { x: mt.start + 1, y: bufferLineNumber },
+                  end: { x: mt.end, y: bufferLineNumber },
+                },
+                activate: (e: MouseEvent) => {
+                  if (!(e.ctrlKey || e.metaKey)) return;
+                  void openExternal(mt.url).catch(() => {
+                    /* 開けない場合は無視 */
+                  });
+                },
+              })),
+              ...pathMatches.map((mt) => ({
                 text: mt.raw,
                 range: {
                   start: { x: mt.start + 1, y: bufferLineNumber },
@@ -255,7 +276,8 @@ export function InteractiveTerminal({
                   });
                 },
               })),
-            );
+            ];
+            callback(links);
           },
         });
       } catch {

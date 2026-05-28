@@ -225,3 +225,69 @@ export function findPathMatches(line: string): PathMatch[] {
   }
   return out;
 }
+
+/**
+ * ターミナル1行から URL（http / https）を行内インデックス付きで抽出する。
+ * xterm の registerLinkProvider 用。Ctrl/Cmd+Click で OS 既定ブラウザに渡す想定。
+ *
+ * 仕様:
+ * - 対象スキーム: http:// / https:// のみ（file://・data: 等はターミナルからは開かない）
+ * - 末尾の文末記号 ( `.` `,` `;` `:` `!` `?` `)` `]` `>` `}` `'` `"` ` ` )
+ *   は URL から剥がす（「…説明文 https://example.com.」の末尾ピリオド誤吸収を防ぐ）
+ * - ただし URL 内に対応する `(` がある場合は閉じ括弧をペアとして残す
+ *   （Wikipedia の `https://ja.wikipedia.org/wiki/foo_(bar)` 等のため）
+ */
+export interface UrlMatch {
+  /** 行内 0-based 開始インデックス */
+  start: number;
+  /** 行内 0-based 終了インデックス（exclusive） */
+  end: number;
+  /** 表示用の元トークン（末尾整形後と一致） */
+  raw: string;
+  /** OS 既定ブラウザに渡す URL */
+  url: string;
+}
+
+// 行内の http(s) URL ざっくり抽出（後段で末尾整形）。スペース/制御文字/角括弧等で終了。
+const URL_RE = /\bhttps?:\/\/[^\s<>"'`{}|\\^[\]　]+/gi;
+
+const URL_TRAIL_PUNCT = /[.,;:!?）)\]>}'"`、。」』]+$/u;
+
+export function findUrlMatches(line: string): UrlMatch[] {
+  if (!line) return [];
+  const out: UrlMatch[] = [];
+  URL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(line)) !== null) {
+    const start = m.index;
+    let token = m[0];
+    if (!token) continue;
+    // 末尾の文末記号を剥がす。ただし () がペアで閉じてるなら最後の `)` は残す。
+    // 例: https://ja.wikipedia.org/wiki/foo_(bar) はそのまま、
+    //     https://example.com) は `)` を剥がす。
+    // ループで一文字ずつ判定（コーナーケースが少ないので素朴に）。
+    let trimmed = true;
+    while (trimmed) {
+      trimmed = false;
+      const last = token[token.length - 1];
+      if (!last) break;
+      if (URL_TRAIL_PUNCT.test(last)) {
+        if (last === ")") {
+          const opens = (token.match(/\(/g) || []).length;
+          const closes = (token.match(/\)/g) || []).length;
+          // 開きより閉じが多いときだけ余分な閉じを剥がす
+          if (closes > opens) {
+            token = token.slice(0, -1);
+            trimmed = true;
+          }
+        } else {
+          token = token.slice(0, -1);
+          trimmed = true;
+        }
+      }
+    }
+    if (token.length < "https://a".length) continue; // 短すぎる残骸を捨てる
+    out.push({ start, end: start + token.length, raw: token, url: token });
+  }
+  return out;
+}
