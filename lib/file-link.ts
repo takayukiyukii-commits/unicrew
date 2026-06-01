@@ -86,18 +86,42 @@ const CLICKABLE_EXTENSIONS = new Set([
  */
 const PATH_TOKEN = /[\p{L}\p{N}_.:（）()【】「」/\\-]+\.[A-Za-z0-9]{1,8}/gu;
 
+/** Windows ドライブレター（例 `D:\` / `C:/`）を表す強いアンカー。 */
+const DRIVE_ANCHOR = /[A-Za-z]:[\\/]/;
+
+/**
+ * パス候補トークンの先頭にくっついた日本語の地の文を切り離すためのオフセットを返す。
+ *
+ * 日本語は空白で単語が区切られないため、`お見せしますD:\secrets\APIキー一覧.md`
+ * のように地の文とパスが直結すると、`\p{L}`（日本語を含む全 Unicode 文字）を許す
+ * PATH 正規表現が地の文まで貪欲に飲み込み、クリック可能領域がパスではなく手前の
+ * 日本語に乗ってしまう（= パス上をクリックしても反応せず、手前の文がクリック領域に
+ * なる不具合）。ドライブレターが見つかったら、そこをパスの開始位置とみなす。
+ *
+ * 返り値: トークン内のパス開始オフセット（ドライブレターが先頭になければ 0）。
+ */
+export function pathStartOffset(token: string): number {
+  const idx = token.search(DRIVE_ANCHOR);
+  return idx > 0 ? idx : 0;
+}
+
 export interface PathHit {
   /** 元テキスト中のファイルパス候補（そのまま表示する）。 */
   raw: string;
   /** 拡張子（小文字、ドットなし）。 */
   ext: string;
+  /** 元トークン内でのパス開始オフセット（先頭の地の文を切り離した分）。 */
+  offset: number;
 }
 
 /** 1つのトークンがクリック可能ファイルパスかを判定する。 */
 function isClickablePath(token: string): PathHit | null {
+  // ドライブレター（D:\ 等）が途中に出てきたら、その手前の日本語地の文を切り離す。
+  const offset = pathStartOffset(token);
+  const body = offset > 0 ? token.slice(offset) : token;
   // 末尾が句読点等で削れてないように、念のため後ろの punctuation を剥がす。
   // （ReactMarkdown 経由なら最終形が来るのでここでは控えめに）
-  const trimmed = token.replace(/[。、！？!?,;:]+$/, "");
+  const trimmed = body.replace(/[。、！？!?,;:]+$/, "");
   // URL 風（http/https/file://）は除外。リンクとして markdown 側が処理する。
   if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(trimmed)) return null;
   const dot = trimmed.lastIndexOf(".");
@@ -108,7 +132,7 @@ function isClickablePath(token: string): PathHit | null {
   if (dot === 0) return null;
   // バージョン文字列っぽいやつ（4.7、1.2.3 等）は除外
   if (/^\d+(?:\.\d+)+$/.test(trimmed)) return null;
-  return { raw: trimmed, ext };
+  return { raw: trimmed, ext, offset };
 }
 
 export interface TextSegment {
@@ -135,8 +159,10 @@ export function segmentText(text: string): TextSegment[] {
     const end = start + token.length;
     const hit = isClickablePath(token);
     if (!hit) continue;
-    if (start > lastEnd) {
-      segments.push({ kind: "text", text: text.slice(lastEnd, start) });
+    // ドライブレター手前に地の文があった場合、その分はパス開始位置を後ろにずらす。
+    const fileStart = start + hit.offset;
+    if (fileStart > lastEnd) {
+      segments.push({ kind: "text", text: text.slice(lastEnd, fileStart) });
     }
     segments.push({ kind: "file", text: hit.raw, path: hit.raw });
     lastEnd = end;
@@ -201,11 +227,18 @@ export function findPathMatches(line: string): PathMatch[] {
   FILE_PATH_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = FILE_PATH_RE.exec(line)) !== null) {
-    const token = m[0];
-    const start = m.index;
+    let token = m[0];
+    let start = m.index;
     if (token.length === 0) {
       FILE_PATH_RE.lastIndex++;
       continue;
+    }
+    // ドライブレター（D:\ 等）が途中に出てきたら、その手前の日本語地の文を切り離す。
+    // （会話文と同様、日本語直結でクリック領域がパス手前にずれる不具合の防止）
+    const offset = pathStartOffset(token);
+    if (offset > 0) {
+      token = token.slice(offset);
+      start += offset;
     }
     // 直前が / または : の場合は URL や連続トークンの途中とみなしスキップ
     const prev = start > 0 ? line[start - 1] : "";
