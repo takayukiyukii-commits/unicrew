@@ -12,7 +12,7 @@ import {
   onPtyExit,
 } from "@/lib/pty";
 import { findPathMatches, findUrlMatches, resolveFilePath } from "@/lib/file-link";
-import { findPromptInsertPoint } from "@/lib/terminal-ime";
+import { findCompositionOverride } from "@/lib/terminal-ime";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { openExternal } from "@/lib/preview-window";
 
@@ -379,10 +379,12 @@ export function InteractiveTerminal({
       });
       io.observe(ref.current);
 
-      // 日本語IME未確定文字の位置補正。
-      // 挿入点の推定ロジック（❯ 行検出・反転カーソル・実カーソルの優先順位）は
-      // lib/terminal-ime.ts に分離し単体テストで回帰防止している。
-      // 背景・claude 2.1.17x UI刷新での復活バグの詳細も同ファイルのコメント参照。
+      // 日本語IME未確定文字の位置補正（v0.2.30〜 VS Code方式）。
+      // 基本は何もしない：xterm の CompositionHelper は実カーソル位置に未確定文字を
+      // 置き、claude CLI は「実カーソル＝挿入点」を upstream で保守している
+      // （VS Code 統合ターミナルがズレない理由と同じ契約）。
+      // 実カーソルが入力領域の外にある異常時のみヒューリスティックで上書きする。
+      // 判定ロジックは lib/terminal-ime.ts（純関数・単体テストで回帰防止）。
       const promptInputPos = (): { top: number; left: number } | null => {
         try {
           const buf = term.buffer?.active;
@@ -390,7 +392,7 @@ export function InteractiveTerminal({
           const cols: number = term.cols;
           if (!buf || !rows || !cols) return null;
           const base: number = buf.baseY;
-          const pos = findPromptInsertPoint({
+          const pos = findCompositionOverride({
             rows,
             cols,
             lineText: (y: number) =>
@@ -402,7 +404,7 @@ export function InteractiveTerminal({
             cursorY: buf.cursorY,
             cursorX: buf.cursorX,
           });
-          if (!pos) return null;
+          if (!pos) return null; // null = xterm ネイティブ配置を信頼（基本経路）
           const screen = ref.current?.querySelector(
             ".xterm-screen",
           ) as HTMLElement | null;
