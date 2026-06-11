@@ -12,6 +12,7 @@ import {
   onPtyExit,
 } from "@/lib/pty";
 import { findPathMatches, findUrlMatches, resolveFilePath } from "@/lib/file-link";
+import { findPromptInsertPoint } from "@/lib/terminal-ime";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { openExternal } from "@/lib/preview-window";
 
@@ -379,10 +380,9 @@ export function InteractiveTerminal({
       io.observe(ref.current);
 
       // 日本語IME未確定文字の位置補正。
-      // claude(Ink) は入力を ❯ の行に描いた後、本物のカーソルをステータス行へ移す。
-      // xterm は未確定文字(composition-view)をカーソル位置(buffer.y)に出すため、
-      // ステータス行にズレて出る。compositionstart/update の直後に、未確定ビューと
-      // textarea を ❯ の行（実際の入力行）の高さへ移動して見た目を合わせる。
+      // 挿入点の推定ロジック（❯ 行検出・反転カーソル・実カーソルの優先順位）は
+      // lib/terminal-ime.ts に分離し単体テストで回帰防止している。
+      // 背景・claude 2.1.17x UI刷新での復活バグの詳細も同ファイルのコメント参照。
       const promptInputPos = (): { top: number; left: number } | null => {
         try {
           const buf = term.buffer?.active;
@@ -390,50 +390,19 @@ export function InteractiveTerminal({
           const cols: number = term.cols;
           if (!buf || !rows || !cols) return null;
           const base: number = buf.baseY;
-          // 入力ボックス開始行（❯ の行）。これ以降が入力領域（折り返し含む）。
-          let promptStartY: number | null = null;
-          for (let y = 0; y < rows; y++) {
-            const line = buf.getLine(base + y);
-            if (line && line.translateToString(true).includes("❯")) {
-              promptStartY = y;
-              break;
-            }
-          }
-          if (promptStartY == null) return null;
-          // 実際の挿入点＝claude が描く反転(reverse-video)カーソルブロック。
-          // 入力が複数行に折り返すと下の行へ来るため、入力領域を下から走査して
-          // 最下の反転セルを採る（＝カーソル）。緑タグ等は反転でないので拾わない。
-          let curY = -1;
-          let curX = -1;
-          for (let y = rows - 1; y >= promptStartY; y--) {
-            const line = buf.getLine(base + y);
-            if (!line) continue;
-            let foundX = -1;
-            for (let x = cols - 1; x >= 0; x--) {
-              const cell = line.getCell(x);
-              if (cell && cell.isInverse && cell.isInverse()) {
-                foundX = x;
-                break;
-              }
-            }
-            if (foundX >= 0) {
-              curY = y;
-              curX = foundX;
-              break;
-            }
-          }
-          let rowY: number;
-          let col: number;
-          if (curY >= 0) {
-            rowY = curY;
-            col = curX;
-          } else {
-            // フォールバック：❯ 行のテキスト末尾
-            rowY = promptStartY;
-            const t =
-              buf.getLine(base + promptStartY)?.translateToString(true) ?? "";
-            col = Math.max(2, t.length);
-          }
+          const pos = findPromptInsertPoint({
+            rows,
+            cols,
+            lineText: (y: number) =>
+              buf.getLine(base + y)?.translateToString(true) ?? "",
+            isInverse: (y: number, x: number) => {
+              const cell = buf.getLine(base + y)?.getCell(x);
+              return Boolean(cell && cell.isInverse && cell.isInverse());
+            },
+            cursorY: buf.cursorY,
+            cursorX: buf.cursorX,
+          });
+          if (!pos) return null;
           const screen = ref.current?.querySelector(
             ".xterm-screen",
           ) as HTMLElement | null;
@@ -441,8 +410,8 @@ export function InteractiveTerminal({
           const w = screen?.clientWidth ?? ref.current?.clientWidth ?? 0;
           if (!h || !w) return null;
           return {
-            top: Math.round((rowY * h) / rows),
-            left: Math.round((col * w) / cols),
+            top: Math.round((pos.rowY * h) / rows),
+            left: Math.round((pos.col * w) / cols),
           };
         } catch {
           return null;
