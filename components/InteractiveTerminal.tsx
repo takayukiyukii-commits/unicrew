@@ -12,6 +12,7 @@ import {
   onPtyExit,
 } from "@/lib/pty";
 import { findPathMatches, findUrlMatches, resolveFilePath } from "@/lib/file-link";
+import { readLogicalLine, matchToBufferRange } from "@/lib/terminal-links";
 import { findCompositionOverride } from "@/lib/terminal-ime";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { openExternal } from "@/lib/preview-window";
@@ -234,14 +235,21 @@ export function InteractiveTerminal({
             bufferLineNumber: number,
             callback: (links: unknown[] | undefined) => void,
           ) {
-            const lineBuf = term.buffer?.active?.getLine(bufferLineNumber - 1);
-            if (!lineBuf) {
+            // 折り返しを連結した「論理行」で検出する（視覚行単位だと長いパスが
+            // 断片になる）。さらに文字列インデックス→セル座標の変換を行う。
+            // 全角(日本語)は文字列1文字でも2セルを占めるため、変換しないと
+            // 日本語入りパスのクリック領域が短くなる（部分クリックバグ）。
+            // ロジックは lib/terminal-links.ts（純関数・単体テスト済）。
+            const info = readLogicalLine(
+              (r: number) => term.buffer?.active?.getLine(r),
+              bufferLineNumber - 1,
+            );
+            if (!info || !info.text) {
               callback(undefined);
               return;
             }
-            const text = lineBuf.translateToString(true);
-            const urlMatches = findUrlMatches(text);
-            const pathMatches = findPathMatches(text).filter((p) =>
+            const urlMatches = findUrlMatches(info.text);
+            const pathMatches = findPathMatches(info.text).filter((p) =>
               urlMatches.every((u) => p.end <= u.start || p.start >= u.end),
             );
             if (urlMatches.length === 0 && pathMatches.length === 0) {
@@ -250,11 +258,8 @@ export function InteractiveTerminal({
             }
             const links = [
               ...urlMatches.map((mt) => ({
+                range: matchToBufferRange(info, mt.start, mt.end),
                 text: mt.raw,
-                range: {
-                  start: { x: mt.start + 1, y: bufferLineNumber },
-                  end: { x: mt.end, y: bufferLineNumber },
-                },
                 activate: (e: MouseEvent) => {
                   if (!(e.ctrlKey || e.metaKey)) return;
                   void openExternal(mt.url).catch(() => {
@@ -263,11 +268,8 @@ export function InteractiveTerminal({
                 },
               })),
               ...pathMatches.map((mt) => ({
+                range: matchToBufferRange(info, mt.start, mt.end),
                 text: mt.raw,
-                range: {
-                  start: { x: mt.start + 1, y: bufferLineNumber },
-                  end: { x: mt.end, y: bufferLineNumber },
-                },
                 activate: (e: MouseEvent) => {
                   // VSCode 風: 修飾キー付きクリックでのみ開く（誤クリック防止・選択は通常通り）
                   if (!(e.ctrlKey || e.metaKey)) return;
@@ -277,8 +279,14 @@ export function InteractiveTerminal({
                   });
                 },
               })),
-            ];
-            callback(links);
+            ].filter(
+              (l): l is typeof l & { range: NonNullable<typeof l.range> } =>
+                l.range != null &&
+                // 問い合わせ行に重なるリンクだけ返す（他行のものは各行の照会時に返す）
+                l.range.start.y <= bufferLineNumber &&
+                l.range.end.y >= bufferLineNumber,
+            );
+            callback(links.length > 0 ? links : undefined);
           },
         });
       } catch {
