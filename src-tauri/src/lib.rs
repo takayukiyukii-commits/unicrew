@@ -3230,6 +3230,106 @@ struct DirEntry {
     is_dir: bool,
 }
 
+/// ファイル/フォルダ名として安全か（パス区切り・親参照・空を拒否）
+fn validate_entry_name(name: &str) -> Result<&str, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("名前が空です".into());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed == "." || trimmed == ".." {
+        return Err("使用できない名前です".into());
+    }
+    Ok(trimmed)
+}
+
+#[tauri::command]
+async fn fs_rename(path: String, new_name: String) -> Result<String, String> {
+    let src = expand_user_path(&path);
+    let name = validate_entry_name(&new_name)?.to_string();
+    let parent = src
+        .parent()
+        .ok_or_else(|| "親フォルダがありません".to_string())?;
+    let dst = parent.join(&name);
+    if dst.exists() {
+        return Err("同名のファイル/フォルダが既にあります".into());
+    }
+    tokio::fs::rename(&src, &dst)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
+/// OS のゴミ箱へ移動（完全削除はしない）
+#[tauri::command]
+async fn fs_delete(path: String) -> Result<(), String> {
+    let p = expand_user_path(&path);
+    tauri::async_runtime::spawn_blocking(move || trash::delete(&p).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn fs_create_file(dir: String, name: String) -> Result<String, String> {
+    let d = expand_user_path(&dir);
+    let name = validate_entry_name(&name)?.to_string();
+    let target = d.join(&name);
+    if target.exists() {
+        return Err("同名のファイルが既にあります".into());
+    }
+    tokio::fs::write(&target, "")
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn fs_create_dir(dir: String, name: String) -> Result<String, String> {
+    let d = expand_user_path(&dir);
+    let name = validate_entry_name(&name)?.to_string();
+    let target = d.join(&name);
+    if target.exists() {
+        return Err("同名のフォルダが既にあります".into());
+    }
+    tokio::fs::create_dir(&target)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+/// OS のファイルマネージャーで対象を表示（Windows/macOS は選択状態で開く）
+#[tauri::command]
+async fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let p = expand_user_path(&path);
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", p.to_string_lossy()))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let target = if p.is_dir() {
+            p.clone()
+        } else {
+            p.parent().map(|x| x.to_path_buf()).unwrap_or(p.clone())
+        };
+        std::process::Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ---------- App setup ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3280,6 +3380,11 @@ pub fn run() {
             read_text_file,
             write_text_file,
             list_directory,
+            fs_rename,
+            fs_delete,
+            fs_create_file,
+            fs_create_dir,
+            reveal_in_file_manager,
             trust::is_workspace_trusted,
             trust::trust_workspace,
             trust::untrust_workspace,

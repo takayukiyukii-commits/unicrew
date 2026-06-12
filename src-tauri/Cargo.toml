@@ -1,6 +1,6 @@
 [package]
 name = "unicrew"
-version = "0.2.30"
+version = "0.2.31"
 description = "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。"
 authors = ["uniLinks / ZUBOLAND"]
 edition = "2021"
@@ -31,6 +31,7 @@ keyring = { version = "3.6", features = ["windows-native", "apple-native", "linu
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.40", features = ["full"] }
+trash = "5"
 tokio-util = { version = "0.7", features = ["compat"] }
 anyhow = "1.0"
 base64 = "0.22"

@@ -106,6 +106,43 @@ export async function writeTextFile(path: string, contents: string): Promise<voi
   await invoke("write_text_file", { path, contents });
 }
 
+// ---------- エクスプローラーのファイル操作（右クリックメニュー用） ----------
+
+/** 名前を変更し、新しい絶対パスを返す */
+export async function fsRename(path: string, newName: string): Promise<string> {
+  if (!isTauri()) throw new Error("fsRename は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("fs_rename", { path, newName });
+}
+
+/** OS のゴミ箱へ移動（完全削除はしない） */
+export async function fsDelete(path: string): Promise<void> {
+  if (!isTauri()) throw new Error("fsDelete は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  await invoke("fs_delete", { path });
+}
+
+/** 空ファイルを作成し、絶対パスを返す */
+export async function fsCreateFile(dir: string, name: string): Promise<string> {
+  if (!isTauri()) throw new Error("fsCreateFile は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("fs_create_file", { dir, name });
+}
+
+/** フォルダを作成し、絶対パスを返す */
+export async function fsCreateDir(dir: string, name: string): Promise<string> {
+  if (!isTauri()) throw new Error("fsCreateDir は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("fs_create_dir", { dir, name });
+}
+
+/** OS のファイルマネージャーで対象を表示 */
+export async function revealInFileManager(path: string): Promise<void> {
+  if (!isTauri()) return;
+  const invoke = await loadInvoke();
+  await invoke("reveal_in_file_manager", { path });
+}
+
 // ---------- Claude Code (CLI) status & login ----------
 
 export interface ClaudeStatus {

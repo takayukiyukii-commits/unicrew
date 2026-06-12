@@ -79,6 +79,7 @@ export function ExplorerPanel({
           key={`${workspace ?? "none"}::${refreshKey}`}
           workspace={workspace}
           onSelectFile={onSelectFile}
+          restricted={restricted}
         />
       </div>
 
