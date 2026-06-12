@@ -2076,24 +2076,39 @@ async fn claude_status() -> Result<ClaudeStatus, String> {
         _ => (false, None),
     };
 
-    // Detect logged-in state by checking `~/.claude/.credentials.json` (Linux/macOS)
-    // or platform-specific locations; the file's presence is a reasonable proxy.
+    // ログイン判定は `claude auth status --json` を一次情報源にする
+    // （credentials ファイルの場所推測はインストール形態で揺れるため補助に降格）。
     let logged_in = if installed {
-        let home = std::env::var("USERPROFILE")
-            .ok()
-            .or_else(|| std::env::var("HOME").ok())
-            .map(std::path::PathBuf::from);
-        let candidates: Vec<std::path::PathBuf> = home
-            .iter()
-            .flat_map(|h| {
-                vec![
-                    h.join(".claude").join(".credentials.json"),
-                    h.join(".claude").join("credentials.json"),
-                    h.join(".config").join("claude").join(".credentials.json"),
-                ]
-            })
-            .collect();
-        candidates.iter().any(|p| p.exists())
+        let auth_out = build_silent_command("claude")
+            .args(["auth", "status", "--json"])
+            .output()
+            .await;
+        let by_cli = match auth_out {
+            Ok(o) if o.status.success() => {
+                serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                    .ok()
+                    .and_then(|v| v.get("loggedIn").and_then(|b| b.as_bool()))
+            }
+            _ => None,
+        };
+        by_cli.unwrap_or_else(|| {
+            // 旧CLI等で auth status が無い場合は従来のファイル存在チェックに退避
+            let home = std::env::var("USERPROFILE")
+                .ok()
+                .or_else(|| std::env::var("HOME").ok())
+                .map(std::path::PathBuf::from);
+            let candidates: Vec<std::path::PathBuf> = home
+                .iter()
+                .flat_map(|h| {
+                    vec![
+                        h.join(".claude").join(".credentials.json"),
+                        h.join(".claude").join("credentials.json"),
+                        h.join(".config").join("claude").join(".credentials.json"),
+                    ]
+                })
+                .collect();
+            candidates.iter().any(|p| p.exists())
+        })
     } else {
         false
     };
@@ -2221,74 +2236,196 @@ pub fn build_silent_command(program: &str) -> Command {
     cmd
 }
 
-#[tauri::command]
-async fn start_claude_login(app: AppHandle) -> Result<(), String> {
-    // Spawn `claude` silently. Read stdout; when we see a URL, open it in the user's browser.
-    // Emit progress events so the UI can show what's happening.
-    let mut cmd = build_silent_command("claude");
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Claude Code の起動に失敗しました: {}", e))?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
-    let stderr = child.stderr.take().ok_or("no stderr")?;
-
-    // Parse stdout for the OAuth URL and open it in the user's default browser.
-    let app_clone = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        let url_re_chunks = ["https://", "http://"];
-        let mut opened = false;
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = app_clone.emit("claude_login:line", &line);
-            if !opened {
-                for prefix in url_re_chunks {
-                    if let Some(idx) = line.find(prefix) {
-                        let tail = &line[idx..];
-                        let end = tail
-                            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
-                            .unwrap_or(tail.len());
-                        let url = &tail[..end];
-                        // Use Tauri's shell plugin to open in default browser
-                        if let Err(e) = tauri_plugin_shell::ShellExt::shell(&app_clone)
-                            .open(url, None)
-                        {
-                            let _ = app_clone.emit(
-                                "claude_login:line",
-                                format!("ブラウザを開けませんでした: {}", e),
-                            );
-                        } else {
-                            opened = true;
-                            let _ = app_clone.emit(
-                                "claude_login:browser_opened",
-                                url.to_string(),
-                            );
+/// ANSIエスケープ（CSI/OSC等）を素朴に除去する。regex依存なし。
+fn strip_ansi_simple(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            // CSI: ESC [ ... 終端は @-~
+            Some('[') => {
+                chars.next();
+                while let Some(&n) = chars.peek() {
+                    chars.next();
+                    if ('@'..='~').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            // OSC: ESC ] ... BEL または ESC \
+            Some(']') => {
+                chars.next();
+                while let Some(&n) = chars.peek() {
+                    chars.next();
+                    if n == '\u{7}' {
+                        break;
+                    }
+                    if n == '\u{1b}' {
+                        if chars.peek() == Some(&'\\') {
+                            chars.next();
                         }
                         break;
                     }
                 }
             }
+            // 2文字エスケープ（ESC = / ESC > 等）
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
         }
-    });
+    }
+    out
+}
 
-    // Forward stderr lines for debugging
-    let app_err = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut reader = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = app_err.emit("claude_login:stderr", line);
+
+#[cfg(test)]
+mod login_helper_tests {
+    use super::{find_first_url, strip_ansi_simple};
+
+    #[test]
+    fn strip_ansi_removes_csi_and_osc() {
+        let raw = "\u{1b}[2J\u{1b}[1;1H\u{1b}]0;title\u{7}Opening browser to sign in…\u{1b}[0m";
+        assert_eq!(strip_ansi_simple(raw), "Opening browser to sign in…");
+    }
+
+    #[test]
+    fn strip_ansi_passes_plain_text() {
+        assert_eq!(strip_ansi_simple("Login successful."), "Login successful.");
+    }
+
+    #[test]
+    fn find_url_extracts_oauth_url() {
+        let text = "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=abc\nPaste code here";
+        assert_eq!(
+            find_first_url(text).as_deref(),
+            Some("https://claude.com/cai/oauth/authorize?code=true&state=abc")
+        );
+    }
+
+    #[test]
+    fn find_url_rejects_tiny_fragment() {
+        assert_eq!(find_first_url("see https:// for info"), None);
+        assert_eq!(find_first_url("no url here"), None);
+    }
+}
+
+/// 蓄積テキストから最初の https:// URL を抜き出す。
+fn find_first_url(text: &str) -> Option<String> {
+    let idx = text.find("https://")?;
+    let tail = &text[idx..];
+    let end = tail
+        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+        .unwrap_or(tail.len());
+    let url = &tail[..end];
+    // OAuth URLとして妥当な長さのみ採用（描画断片の誤検出を避ける）
+    if url.len() > 12 {
+        Some(url.to_string())
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
+async fn start_claude_login(app: AppHandle) -> Result<(), String> {
+    // 旧実装はパイプ（非TTY）で `claude` を起動していたが、現行 claude CLI は
+    // 非TTYだと print モード扱いになり対話ログインが一切始まらない（無出力で終了
+    // →「ログインに失敗しました」）。TTY必須のため PTY 上で
+    // `claude auth login --claudeai` を実行する。CLI 自身がブラウザを開き、
+    // フォールバックURLも出力するので、それを検出して UI に渡す。
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    #[cfg(target_os = "windows")]
+    let resolved = resolve_on_path("claude")
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "claude".to_string());
+    #[cfg(not(target_os = "windows"))]
+    let resolved = "claude".to_string();
+
+    let pty = native_pty_system();
+    // cols は OAuth URL（400文字超）が折り返されないよう大きく取る
+    let pair = pty
+        .openpty(PtySize {
+            rows: 40,
+            cols: 512,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty 失敗: {e}"))?;
+
+    let mut cmd = CommandBuilder::new(&resolved);
+    cmd.arg("auth");
+    cmd.arg("login");
+    cmd.arg("--claudeai");
+    for (k, v) in std::env::vars() {
+        cmd.env(k, v);
+    }
+    cmd.env("TERM", "xterm-256color");
+
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("Claude Code の起動に失敗しました: {e}"))?;
+    drop(pair.slave);
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("clone_reader 失敗: {e}"))?;
+
+    let app_clone = app.clone();
+    // portable-pty は同期IOのため std::thread で読む（pty.rs と同方針）
+    std::thread::spawn(move || {
+        // master を thread 内で生かしておく（drop すると PTY が閉じる）
+        let master = pair.master;
+        let mut acc = String::new();
+        let mut emitted_len = 0usize;
+        let mut opened = false;
+        let mut success = false;
+        let mut buf = [0u8; 8192];
+        use std::io::Read;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    let clean = strip_ansi_simple(&acc);
+                    // 新規分の行をUIへ（デバッグ表示用）
+                    let from = emitted_len.min(clean.len());
+                    for line in clean[from..].lines() {
+                        let t = line.trim();
+                        if !t.is_empty() {
+                            let _ = app_clone.emit("claude_login:line", t.to_string());
+                        }
+                    }
+                    emitted_len = clean.len();
+                    if !opened {
+                        if let Some(url) = find_first_url(&clean) {
+                            opened = true;
+                            // CLI 自身がブラウザを開くため、ここでは開かず URL を UI に
+                            // 渡すだけにする（二重タブ防止。開かない環境はリンク押下）。
+                            let _ = app_clone
+                                .emit("claude_login:browser_opened", url.clone());
+                        }
+                    }
+                    if !success
+                        && (clean.contains("Login successful")
+                            || clean.contains("Logged in")
+                            || clean.contains("ログインに成功"))
+                    {
+                        success = true;
+                    }
+                }
+                Err(_) => break,
+            }
         }
-    });
-
-    // Wait for child to exit (success means OAuth completed)
-    let app_done = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let exit = child.wait().await;
-        let success = matches!(&exit, Ok(s) if s.success());
-        let _ = app_done.emit("claude_login:done", success);
+        let exit_ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        let _ = app_clone.emit("claude_login:done", success || exit_ok);
+        drop(master);
     });
 
     Ok(())
