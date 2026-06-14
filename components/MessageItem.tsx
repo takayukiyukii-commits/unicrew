@@ -11,6 +11,8 @@ import { UserAvatar } from "./UserAvatar";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { resolveFilePath, segmentText } from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
+import { openPreviewWindow, openExternal } from "@/lib/preview-window";
+import { classifyMarkdownLink } from "@/lib/preview";
 import { useTranslation } from "@/lib/i18n";
 import { avatarSrc } from "@/lib/tauri";
 import clsx from "clsx";
@@ -79,6 +81,11 @@ export function MessageItem({
   const linkify = (children: React.ReactNode): React.ReactNode =>
     isUser ? children : linkifyFilePaths(children, workspace ?? null);
   const renderers = {
+    a: (props: { href?: string; children?: React.ReactNode }) => (
+      <MarkdownLink href={props.href} workspace={workspace ?? null}>
+        {props.children}
+      </MarkdownLink>
+    ),
     code: (props: {
       inline?: boolean;
       className?: string;
@@ -405,6 +412,44 @@ function linkifyFilePaths(
     return React.cloneElement(el, undefined, linkifyFilePaths(children, workspace));
   }
   return node;
+}
+
+/**
+ * AI 応答本文のマークダウンリンク（[ラベル](先)）のクリックを配線する。
+ *
+ * 既定の <a> は Tauri webview 内ではナビゲーションがブロックされ「押しても何も
+ * 起きない」ため、初心者がプレビューリンク（画像/HTML/開発URL）を開けなかった。
+ * classifyMarkdownLink で先を判定し、プレビューウィンドウ / 既定アプリへ振り分ける。
+ */
+function MarkdownLink({
+  href,
+  workspace,
+  children,
+}: {
+  href?: string;
+  workspace: string | null;
+  children?: React.ReactNode;
+}) {
+  const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!href) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = classifyMarkdownLink(href, workspace);
+    if (action.kind === "preview-url") void openPreviewWindow({ url: action.url });
+    else if (action.kind === "preview-file") void openPreviewWindow({ file: action.file });
+    else void openExternal(action.target);
+  };
+
+  return (
+    <a
+      href={href}
+      onClick={onClick}
+      onAuxClick={onClick}
+      className="text-[var(--color-accent)] underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer"
+    >
+      {children}
+    </a>
+  );
 }
 
 /**
