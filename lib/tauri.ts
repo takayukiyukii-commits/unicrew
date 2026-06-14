@@ -100,6 +100,12 @@ export async function readTextFile(path: string): Promise<string> {
   return invoke<string>("read_text_file", { path });
 }
 
+export async function readFileBase64(path: string): Promise<string> {
+  if (!isTauri()) throw new Error("readFileBase64 は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("read_file_base64", { path });
+}
+
 export async function writeTextFile(path: string, contents: string): Promise<void> {
   if (!isTauri()) throw new Error("writeTextFile は Tauri 環境のみ対応");
   const invoke = await loadInvoke();

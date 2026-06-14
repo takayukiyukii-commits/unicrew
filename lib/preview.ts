@@ -97,7 +97,14 @@ export function classifyMarkdownLink(
     return { kind: "external", target: raw };
   }
 
-  const abs = resolveFilePath(raw, workspace);
+  // react-markdown は href の （ ） 等を percent-encoding するため復元する。
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    decoded = raw;
+  }
+  const abs = resolveFilePath(decoded, workspace);
   if (LINK_IMG.test(abs) || LINK_HTML.test(abs)) {
     return { kind: "preview-file", file: abs };
   }

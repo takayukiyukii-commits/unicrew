@@ -1,6 +1,6 @@
 {
   "name": "unicrew",
-  "version": "0.2.34",
+  "version": "0.2.35",
   "private": true,
   "description": "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。公式 claude / codex CLI を subprocess として束ねる Pure CLI Conductor。",
   "scripts": {

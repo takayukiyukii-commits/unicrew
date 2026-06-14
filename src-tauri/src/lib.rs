@@ -308,6 +308,26 @@ fn expand_user_path(input: &str) -> std::path::PathBuf {
             return h.join(rest);
         }
     }
+    // WSL パス /mnt/<drive>/... を Windows パス <DRIVE>:\... に変換する。
+    // Codex は WSL 上で動くため成果物のパスを /mnt/d/... 形式で返すことがあり、
+    // そのままだと Windows 側の fs が読めない（forbidden path / not found）。
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = s.strip_prefix("/mnt/") {
+            let mut it = rest.chars();
+            if let Some(drive) = it.next() {
+                let after = it.as_str();
+                if drive.is_ascii_alphabetic() && (after.is_empty() || after.starts_with('/')) {
+                    let win = format!(
+                        "{}:{}",
+                        drive.to_ascii_uppercase(),
+                        after.replace('/', "\\")
+                    );
+                    return std::path::PathBuf::from(win);
+                }
+            }
+        }
+    }
     std::path::PathBuf::from(s)
 }
 
@@ -2284,6 +2304,33 @@ fn strip_ansi_simple(input: &str) -> String {
 
 
 #[cfg(test)]
+mod path_norm_tests {
+    use super::expand_user_path;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn wsl_mnt_path_to_windows() {
+        let p = expand_user_path("/mnt/d/company/icons/phone.png");
+        assert_eq!(p.to_string_lossy(), "D:\\company\\icons\\phone.png");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn wsl_drive_root() {
+        let p = expand_user_path("/mnt/c");
+        assert_eq!(p.to_string_lossy(), "C:");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn non_wsl_unix_path_untouched_as_pathbuf() {
+        // /mnt 以外の Unix 絶対パスはそのまま
+        let p = expand_user_path("/usr/local/bin");
+        assert_eq!(p.to_string_lossy(), "/usr/local/bin");
+    }
+}
+
+#[cfg(test)]
 mod login_helper_tests {
     use super::{find_first_url, strip_ansi_simple};
 
@@ -3327,6 +3374,17 @@ async fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// 画像など任意のファイルをバイナリ読みして base64 で返す。
+/// プレビュー窓は editor と同じく fs プラグイン(スコープ制限)ではなく
+/// この自前コマンドで読む（plugin-fs 直読みは "forbidden path" になる）。
+#[tauri::command]
+async fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let p = expand_user_path(&path);
+    let bytes = tokio::fs::read(&p).await.map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
 #[tauri::command]
 async fn write_text_file(path: String, contents: String) -> Result<(), String> {
     let p = expand_user_path(&path);
@@ -3515,6 +3573,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             read_text_file,
+            read_file_base64,
             write_text_file,
             list_directory,
             fs_rename,

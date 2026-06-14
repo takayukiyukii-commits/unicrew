@@ -54,4 +54,16 @@ describe("classifyMarkdownLink", () => {
     const a = classifyMarkdownLink("file:///D:/%E3%83%86%E3%82%B9%E3%83%88/a.png", null);
     expect(a).toEqual({ kind: "preview-file", file: "D:/テスト/a.png" });
   });
+
+  it("percent-encodedな全角括弧パス → デコードしてプレビュー(file)", () => {
+    // react-markdown が （ ） を %EF%BC%88 / %EF%BC%89 にエンコードするケース
+    const enc = "/mnt/d/company/CDO%EF%BC%88%E6%8A%80%E8%A1%93%E8%B2%AC%E4%BB%BB%E8%80%85%EF%BC%89/x.png";
+    const a = classifyMarkdownLink(enc, null);
+    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/company/CDO（技術責任者）/x.png" });
+  });
+
+  it("WSL絶対パスの画像 → preview-file（/mnt のまま返しRust側で変換）", () => {
+    const a = classifyMarkdownLink("/mnt/d/company/icons/phone.png", null);
+    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/company/icons/phone.png" });
+  });
 });

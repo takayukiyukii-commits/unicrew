@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { RefreshCw, ExternalLink, AlertCircle } from "lucide-react";
 import { PREVIEW_NAVIGATE_EVENT, openExternal } from "@/lib/preview-window";
-import { isTauri } from "@/lib/tauri";
+import { isTauri, readTextFile, readFileBase64 } from "@/lib/tauri";
 
 type Target = { url: string } | { file: string } | null;
 
@@ -73,16 +73,14 @@ export function PreviewWindow() {
       return;
     }
     try {
-      const fs = await import("@tauri-apps/plugin-fs");
+      // editor と同じ自前 Rust コマンドで読む（plugin-fs 直読みはスコープ制限で
+      // "forbidden path" になる）。WSL パス(/mnt/d/..)や ~ も Rust 側で正規化される。
       if (HTML.test(file)) {
-        const text = await fs.readTextFile(file);
+        const text = await readTextFile(file);
         setHtml(text);
       } else if (IMG.test(file)) {
-        const bytes = await fs.readFile(file);
-        const blob = new Blob([bytes], { type: mimeFromExt(file) });
-        const u = URL.createObjectURL(blob);
-        objUrlRef.current = u;
-        setImgUrl(u);
+        const b64 = await readFileBase64(file);
+        setImgUrl(`data:${mimeFromExt(file)};base64,${b64}`);
       } else {
         setError("このファイルは既定アプリで開きます。");
         await openExternal(file);
