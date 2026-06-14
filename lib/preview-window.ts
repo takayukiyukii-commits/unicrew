@@ -46,8 +46,10 @@ export async function openPreviewWindow(t: PreviewTarget): Promise<void> {
   const { WebviewWindow } = await loadWebviewWindow();
   const existing = await WebviewWindow.getByLabel(PREVIEW_WINDOW_LABEL);
   if (existing) {
-    const { emit } = await loadEvent();
-    await emit(PREVIEW_NAVIGATE_EVENT, t);
+    // グローバル emit ではなく preview ウィンドウ宛てに明示配送する。
+    // （global emit は取りこぼしの温床。対象ラベル指定の emitTo が確実）
+    const { emitTo } = await loadEvent();
+    await emitTo(PREVIEW_WINDOW_LABEL, PREVIEW_NAVIGATE_EVENT, t);
     try {
       await existing.unminimize();
     } catch {

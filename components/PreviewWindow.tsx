@@ -50,6 +50,10 @@ export function PreviewWindow() {
         setHtml(null);
         setImgUrl(null);
         setTarget(e.payload);
+        // 同一URL/同一パスを再クリックしても確実に作り直す。
+        // iframe は src/srcDoc が同値だと React が再読込しないため、
+        // key に効く reloadKey を必ず進めて強制リマウントする。
+        setReloadKey((k) => k + 1);
       });
       un = u;
     })();
