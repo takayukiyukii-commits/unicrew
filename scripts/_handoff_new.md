@@ -4,7 +4,7 @@
 > 自由記述は禁止。各セクションのフォーマットを守る。
 > 詳細議事録は `session_state.md`、決定履歴は `decision_log.md` を参照。
 
-**最終更新**: 2026-06-15 02:10 JST / 更新者: Claude / 状態: DONE（要・実機クリック確認）
+**最終更新**: 2026-06-15 03:00 JST / 更新者: Claude / 状態: DONE（要・実機クリック確認）
 
 > ### Stale判定ルール
 > - 24時間以上経過で **STALE 扱い**
@@ -13,7 +13,7 @@
 ---
 
 ## 現在の作業
-**UNICREW 初心者向けプレビュー/リンク導線の連続バグを根治（v0.2.31 → v0.2.34）**。インストール済み・起動稼働中（PID更新済・Ver 0.2.34）。リリース（タグpush/公開）は**未実施**＝ローカル検証段階。
+**UNICREW 初心者向けプレビュー/リンク導線の連続バグを根治（v0.2.31 → v0.2.35）**。インストール済み・起動稼働中（PID更新済・Ver 0.2.34）。リリース（タグpush/公開）は**未実施**＝ローカル検証段階。
 
 ### 本セッションで直した4件（症状 → 根本原因 → 修正）
 1. **Claudeログインが必ず失敗（v0.2.32 / c6097da）**
@@ -25,6 +25,12 @@
 4. **本文のプレビュー/画像リンクが全部クリックできない（v0.2.34 / 9c37471）★今回の主訴**
    MessageItem の ReactMarkdown renderers に `a` ハンドラが無く、`[ラベル](先)` が素の `<a>` 化 → Tauri webview でナビゲーション沈黙（plain-text linkify は Ctrl+Click 前提で初心者に届かない）。`lib/preview.ts` に純関数 `classifyMarkdownLink` 追加、`a` レンダラ(MarkdownLink)で通常クリック配線（ローカル画像/HTML→プレビュー窓、localhost→プレビュー窓、外部→既定アプリ）。
 
+5. **プレビュー画像が forbidden path / WSLパスで開けない（v0.2.35 / 65e49ab）★最新**
+   リンクは開くが「読み込みに失敗: forbidden path: /mnt/d/company/CDO%EF%BC%88…png」。3原因が重複:
+   (a) PreviewWindow が plugin-fs 直読み→fsスコープ制限で forbidden（editor は自前Rust read_text_file で無制限＝非対称）。
+   (b) Codex は WSL 上で動きパスが /mnt/d/... 形式。(c) react-markdown が （ ） を %EF%BC%88 のまま。
+   修正: Rust に read_file_base64 追加＋expand_user_path に /mnt/<drive>/→<DRIVE>:\ 変換、PreviewWindow を自前Rust読み(画像はdataURL)へ、classifyMarkdownLink でパスも percent-decode。実在PNGで end-to-end 検証OK（85459 bytes→正PNG dataURL）。
+
 ## 担当
 - **結城さん**: v0.2.34 実機で「確認用プレビューPNG」「6アイコンのリンク」を**通常クリック**して開けるか最終確認。問題なければ正式リリース可否の判断
 - **Claude**: 上記4件 修正・ビルド・署名・インストール・起動まで完了。全72テスト pass（preview再読込/リンク分類の回帰テスト含む）。次の指示待ち
@@ -35,6 +41,7 @@
 2. プレビュー窓 capability 登録（Codex）
 3. プレビュー再読込（reloadKey強制bump・emitTo）
 4. 本文リンク配線（classifyMarkdownLink・MarkdownLink）
+4b. プレビュー読込の forbidden path/WSL/encoded 解消（read_file_base64・expand_user_path WSL変換・dataURL）
 5. v0.2.32 → CI 3OS success・署名付きDraft（非公開）。v0.2.33/0.2.34 はローカル署名ビルド＋インストール検証
 6. メモリ蓄積（project_unicrew_v0232_login_fix / _preview_capability に追記）
 
@@ -46,9 +53,9 @@
 - `repos/unicrew/components/MessageItem.tsx` — `a` レンダラ(MarkdownLink)追加
 - `repos/unicrew/lib/preview.ts` — 純関数 classifyMarkdownLink 追加
 - テスト: `tests/preview-window-reload.test.tsx` / `lib/preview-link.test.ts`（計+14）
-- 版: package.json / Cargo.toml / tauri.conf.json → 0.2.34
+- 版: package.json / Cargo.toml / tauri.conf.json → 0.2.35
 
 ## 次アクション
-- [ ] 結城さん: v0.2.34 実機クリック確認（プレビューPNG・アイコンリンク）
-- [ ] OK後: v0.2.34 を正式リリースするか判断（タグpush→3OS CI→署名Draft→公開）
-- [ ] D:\Downloads に UNICREW_0.2.32〜0.2.34 のインストーラー配置済
+- [ ] 結城さん: v0.2.35 実機クリック確認（プレビューPNG・アイコンリンク）
+- [ ] OK後: v0.2.35 を正式リリースするか判断（タグpush→3OS CI→署名Draft→公開）
+- [ ] D:\Downloads に UNICREW_0.2.32〜0.2.35 のインストーラー配置済
