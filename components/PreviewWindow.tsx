@@ -82,13 +82,23 @@ export function PreviewWindow() {
         const b64 = await readFileBase64(file);
         setImgUrl(`data:${mimeFromExt(file)};base64,${b64}`);
       } else {
+        // 画像/HTML 以外は中身に関係なく OS 既定アプリで開く（PDF/動画/zip等も開ける）
         setError("このファイルは既定アプリで開きます。");
         await openExternal(file);
       }
     } catch (e) {
-      setError(
-        `読み込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      // 窓内プレビューに失敗しても「開けない」で終わらせず、OS 既定アプリへ委譲する。
+      // （拡張子は画像/HTMLだが壊れている・権限差・特殊パス等でも何かしら開けるように）
+      try {
+        await openExternal(file);
+        setError(
+          "このファイルは窓内で表示できなかったため、既定アプリで開きます。",
+        );
+      } catch {
+        setError(
+          `開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
   }, []);
 

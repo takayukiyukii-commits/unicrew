@@ -290,6 +290,31 @@ fn home_dir() -> Result<std::path::PathBuf, String> {
 /// - 前後の空白／囲みクォートを除去
 /// - 先頭 `~` / `~/` / `~\` をホームディレクトリへ展開
 /// `~/.claude/...` のようなパスのクリックで os error 3 になる問題を防ぐ。
+/// パス文字列の %XX を UTF-8 として復元する純粋関数（ベストエフォート）。
+/// 例: 全角括弧 （ ） が %EF%BC%88 のまま来ても解決できるようにする。
+fn percent_decode_utf8(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let h = (bytes[i + 1] as char).to_digit(16);
+            let l = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (h, l) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    match String::from_utf8(out) {
+        Ok(decoded) => decoded,
+        Err(_) => input.to_string(),
+    }
+}
+
 fn expand_user_path(input: &str) -> std::path::PathBuf {
     let mut s = input.trim();
     if s.len() >= 2
@@ -298,6 +323,14 @@ fn expand_user_path(input: &str) -> std::path::PathBuf {
     {
         s = &s[1..s.len() - 1];
     }
+    // %XX が残っていれば復元（どの入口でも全角括弧パス等を解決できるように）。
+    let decoded_holder;
+    let s: &str = if s.contains('%') {
+        decoded_holder = percent_decode_utf8(s);
+        &decoded_holder
+    } else {
+        s
+    };
     if s == "~" {
         if let Some(h) = dirs::home_dir() {
             return h;
@@ -2305,7 +2338,22 @@ fn strip_ansi_simple(input: &str) -> String {
 
 #[cfg(test)]
 mod path_norm_tests {
-    use super::expand_user_path;
+    use super::{expand_user_path, percent_decode_utf8};
+
+    #[test]
+    fn percent_decode_fullwidth_parens() {
+        assert_eq!(percent_decode_utf8("CDO%EF%BC%88x%EF%BC%89"), "CDO（x）");
+    }
+
+    #[test]
+    fn percent_decode_noop_when_no_percent() {
+        assert_eq!(percent_decode_utf8("plain/path.png"), "plain/path.png");
+    }
+
+    #[test]
+    fn percent_decode_keeps_literal_when_invalid() {
+        assert_eq!(percent_decode_utf8("100%zz"), "100%zz");
+    }
 
     #[cfg(target_os = "windows")]
     #[test]
