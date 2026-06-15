@@ -4,7 +4,7 @@
 > 自由記述は禁止。各セクションのフォーマットを守る。
 > 詳細議事録は `session_state.md`、決定履歴は `decision_log.md` を参照。
 
-**最終更新**: 2026-06-15 03:00 JST / 更新者: Claude / 状態: DONE（要・実機クリック確認）
+**最終更新**: 2026-06-15 03:40 JST / 更新者: Claude / 状態: DONE（要・実機クリック確認）
 
 > ### Stale判定ルール
 > - 24時間以上経過で **STALE 扱い**
@@ -13,7 +13,7 @@
 ---
 
 ## 現在の作業
-**UNICREW 初心者向けプレビュー/リンク導線の連続バグを根治（v0.2.31 → v0.2.35）**。インストール済み・起動稼働中（PID更新済・Ver 0.2.34）。リリース（タグpush/公開）は**未実施**＝ローカル検証段階。
+**UNICREW 初心者向けプレビュー/リンク導線の連続バグを根治（v0.2.31 → v0.2.36）**。インストール済み・起動稼働中（PID更新済・Ver 0.2.34）。リリース（タグpush/公開）は**未実施**＝ローカル検証段階。
 
 ### 本セッションで直した4件（症状 → 根本原因 → 修正）
 1. **Claudeログインが必ず失敗（v0.2.32 / c6097da）**
@@ -30,6 +30,13 @@
    (a) PreviewWindow が plugin-fs 直読み→fsスコープ制限で forbidden（editor は自前Rust read_text_file で無制限＝非対称）。
    (b) Codex は WSL 上で動きパスが /mnt/d/... 形式。(c) react-markdown が （ ） を %EF%BC%88 のまま。
    修正: Rust に read_file_base64 追加＋expand_user_path に /mnt/<drive>/→<DRIVE>:\ 変換、PreviewWindow を自前Rust読み(画像はdataURL)へ、classifyMarkdownLink でパスも percent-decode。実在PNGで end-to-end 検証OK（85459 bytes→正PNG dataURL）。
+
+6. **全角括弧パスの解決堅牢化＋種類問わず開く（v0.2.36 / 7c063ca）**
+   「ファイルを開く側が （技術責任者） を解決できないとエラー」要望。Rust expand_user_path に
+   percent_decode_utf8 を追加し %EF%BC%88 等を全入口で復元。PreviewWindow は窓内表示に失敗しても
+   OS既定アプリへフォールバック（中身/種類問わず開ける）。Rust14/vitest74 pass。
+   ※ build:tauri の unicrew kill を避け手動ビルド（起動中アプリ非干渉）。なお作業中に旧0.2.35
+   インスタンスが私の明示操作外で落ちた→0.2.36をインストール起動で復帰(PID更新)。
 
 ## 担当
 - **結城さん**: v0.2.34 実機で「確認用プレビューPNG」「6アイコンのリンク」を**通常クリック**して開けるか最終確認。問題なければ正式リリース可否の判断
@@ -56,6 +63,6 @@
 - 版: package.json / Cargo.toml / tauri.conf.json → 0.2.35
 
 ## 次アクション
-- [ ] 結城さん: v0.2.35 実機クリック確認（プレビューPNG・アイコンリンク）
-- [ ] OK後: v0.2.35 を正式リリースするか判断（タグpush→3OS CI→署名Draft→公開）
-- [ ] D:\Downloads に UNICREW_0.2.32〜0.2.35 のインストーラー配置済
+- [ ] 結城さん: v0.2.36 実機クリック確認（プレビューPNG・アイコンリンク）
+- [ ] OK後: v0.2.36 を正式リリースするか判断（タグpush→3OS CI→署名Draft→公開）
+- [ ] D:\Downloads に UNICREW_0.2.32〜0.2.36 のインストーラー配置済
