@@ -84,7 +84,7 @@ const CLICKABLE_EXTENSIONS = new Set([
  *  - 末尾は `.<拡張子>` で終わる
  *  - 区切り文字を含まない単発の `xxx.md` も拾う
  */
-const PATH_TOKEN = /[\p{L}\p{N}_.:（）()【】「」/\\-]+\.[A-Za-z0-9]{1,8}/gu;
+const PATH_TOKEN = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\-]+\.[A-Za-z0-9]{1,8}/gu;
 
 /** Windows ドライブレター（例 `D:\` / `C:/`）を表す強いアンカー。 */
 const DRIVE_ANCHOR = /[A-Za-z]:[\\/]/;
@@ -219,7 +219,7 @@ export interface PathMatch {
 
 // ドライブ接頭辞 + パス本体（`:` は本体に含めない＝行番号と分離）+ 末尾 :line(:col)
 const FILE_PATH_RE =
-  /(?:[A-Za-z]:)?[\p{L}\p{N}_.（）()【】「」/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
+  /(?:[A-Za-z]:)?[\p{L}\p{N}_.（）()【】「」§※・〜＆＃＠&#@/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
 
 export function findPathMatches(line: string): PathMatch[] {
   if (!line) return [];

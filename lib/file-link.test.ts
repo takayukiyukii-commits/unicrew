@@ -82,6 +82,22 @@ describe("findPathMatches - ターミナル側も同じ再アンカー", () => {
   });
 });
 
+describe("§ や記号を含むパスも全体がリンクになる（報告された不具合）", () => {
+  const sectionPath = `D:${BS}company${BS}CDO（技術責任者）${BS}作業中${BS}20260627_提案_UNIHUBマネージドAI料金_§12統合最終プラン表.md`;
+
+  it("segmentText: § で切れず全体が file セグメントになる", () => {
+    const segs = segmentText(`保存しました ${sectionPath} を確認`);
+    const file = segs.find((x) => x.kind === "file");
+    expect(file?.path).toBe(sectionPath);
+  });
+
+  it("findPathMatches: § を含んでも openPath はパス全体", () => {
+    const matches = findPathMatches(`開きました${sectionPath}`);
+    expect(matches.length).toBe(1);
+    expect(matches[0].openPath).toBe(sectionPath);
+  });
+});
+
 describe("resolveFilePath", () => {
   it("Windows 絶対パスはそのまま返す", () => {
     expect(resolveFilePath(winPath, "C:/ws")).toBe(winPath);

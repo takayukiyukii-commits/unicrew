@@ -211,28 +211,80 @@ export function InteractiveTerminal({
       }
       term.open(ref.current);
 
-      // ── ターミナルのコピー対応 ──────────────────────────────────────
-      // claude 等の TUI は CSI ? 1000/1002/1003/1006 h でマウストラッキングを
+      // ── ターミナルのコピー & スクロール対応 ──────────────────────────
+      // claude 等の TUI は CSI ? 1000/1002/1003(+1006) h でマウストラッキングを
       // 有効化する。これが有効だと左ドラッグがアプリ側へ送られ、xterm 内に
-      // テキスト選択が作られず Ctrl+C でコピーできなくなる（本アプリ最大の
-      // コピー不具合の真因）。UNICREW は「普通のドラッグで選択 → Ctrl+C で
-      // コピー」を最優先するため、マウス報告の有効化要求(DECSET)を握りつぶして
-      // 無効化する。代償として TUI 内のマウスクリックは効かないが、マウスホイールは
-      // xterm のバッファスクロールとして機能する。
+      // テキスト選択が作られず Ctrl+C でコピーできない（本アプリ最大のコピー不具合の
+      // 真因）。UNICREW は「普通のドラッグで選択 → Ctrl+C でコピー」を最優先するため、
+      // マウス報告の有効化要求(DECSET)を握りつぶして無効化する。
+      //
+      // ただしマウス報告を全部殺すと TUI がホイールスクロールを受け取れず
+      // 「ターミナルがスクロールできない」状態になる。そこで「アプリがマウスを要求中」
+      // という事実だけ記録し、ホイール操作時のみ こちらで SGR/X10 のホイールイベントを
+      // PTY に注入して TUI にスクロールさせる（＝選択もスクロールも両立）。代償として
+      // TUI 内のマウス「クリック」は効かない（クリックは注入しない）。
+      let appMouseRequested = false;
+      let appMouseSgr = false;
       try {
-        const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
-        // DECSET (CSI ? Pm h): マウスモードを含む要求は飲み込む（有効化させない）
+        const MOUSE_TRACK = new Set([1000, 1001, 1002, 1003]);
+        const MOUSE_ENC = new Set([1005, 1006, 1015, 1016]);
+        const isMouse = (p: number) => MOUSE_TRACK.has(p) || MOUSE_ENC.has(p);
+        const flatten = (params: (number | number[])[]) =>
+          params.map((p) => (Array.isArray(p) ? p[0] : p));
+        // DECSET (CSI ? Pm h): マウス関連は飲み込む（有効化させない）が要求事実は記録
         term.parser.registerCsiHandler(
           { prefix: "?", final: "h" },
           (params: (number | number[])[]) => {
-            const flat = params.map((p) => (Array.isArray(p) ? p[0] : p));
-            // マウスモードが含まれていれば true を返して既定処理を止める＝有効化しない。
-            // それ以外（2004=ブラケットペースト, 1049=代替画面 等）は false でそのまま処理。
-            return flat.some((p) => MOUSE_MODES.has(p));
+            const flat = flatten(params);
+            if (!flat.some(isMouse)) return false; // マウス無関係はそのまま処理
+            if (flat.some((p) => MOUSE_TRACK.has(p))) appMouseRequested = true;
+            if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = true;
+            return true; // 握りつぶす＝xterm では有効化しない
           },
         );
+        // DECRST (CSI ? Pm l): 無効化は観測してフラグを下げる（処理自体は通す）
+        term.parser.registerCsiHandler(
+          { prefix: "?", final: "l" },
+          (params: (number | number[])[]) => {
+            const flat = flatten(params);
+            if (flat.some((p) => MOUSE_TRACK.has(p))) appMouseRequested = false;
+            if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = false;
+            return false; // 無効化はそのまま xterm に処理させる
+          },
+        );
+        // ホイール: アプリがマウス要求中なら PTY にホイールイベントを注入して
+        // TUI をスクロールさせる（xterm 自身のバッファスクロールは抑止）。
+        term.attachCustomWheelEventHandler((e: WheelEvent) => {
+          if (!appMouseRequested) return true; // 通常時は xterm がバッファをスクロール
+          try {
+            const rect = ref.current?.getBoundingClientRect();
+            let col = 1;
+            let row = 1;
+            if (rect && term.cols && term.rows) {
+              col = Math.min(
+                term.cols,
+                Math.max(1, Math.floor(((e.clientX - rect.left) / rect.width) * term.cols) + 1),
+              );
+              row = Math.min(
+                term.rows,
+                Math.max(1, Math.floor(((e.clientY - rect.top) / rect.height) * term.rows) + 1),
+              );
+            }
+            const down = e.deltaY > 0;
+            const lines = Math.max(1, Math.min(5, Math.round(Math.abs(e.deltaY) / 40) || 1));
+            const seq = appMouseSgr
+              ? `\x1b[<${down ? 65 : 64};${col};${row}M`
+              : `\x1b[M${String.fromCharCode(down ? 97 : 96, 32 + col, 32 + row)}`;
+            let payload = "";
+            for (let i = 0; i < lines; i++) payload += seq;
+            void ptyWriteText(id, payload);
+          } catch {
+            /* 失敗時はスクロールしない */
+          }
+          return false; // xterm 側ではスクロールしない（TUI に委ねた）
+        });
       } catch {
-        /* parser API 非対応版では何もしない（その場合は Shift+ドラッグで選択可能） */
+        /* parser/wheel API 非対応版では何もしない（Shift+ドラッグで選択可能） */
       }
       // ────────────────────────────────────────────────────────────────
       // WebGL レンダラ（VSCode 統合ターミナルと同じ方式）。各グリフをセル枠にクリップして
