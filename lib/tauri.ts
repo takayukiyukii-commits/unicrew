@@ -31,6 +31,50 @@ async function loadDialog() {
   return await import("@tauri-apps/plugin-dialog");
 }
 
+// ---------- Clipboard ----------
+// コピー＆ペーストを WebView のネイティブ clipboard / paste イベントに頼ると、
+// WebView2 等で「コピペができない」事例がある。OS レベルの Tauri clipboard-manager
+// プラグインを第一経路にし、失敗時のみ navigator.clipboard へフォールバックする。
+
+export async function writeClipboardText(text: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const mod = await import("@tauri-apps/plugin-clipboard-manager");
+      await mod.writeText(text);
+      return;
+    } catch {
+      /* プラグイン未初期化等はフォールバックへ */
+    }
+  }
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    }
+  } catch {
+    /* 権限なし等は黙って諦める */
+  }
+}
+
+export async function readClipboardText(): Promise<string> {
+  if (isTauri()) {
+    try {
+      const mod = await import("@tauri-apps/plugin-clipboard-manager");
+      const t = await mod.readText();
+      return t ?? "";
+    } catch {
+      /* プラグイン未初期化等はフォールバックへ */
+    }
+  }
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+      return (await navigator.clipboard.readText()) ?? "";
+    }
+  } catch {
+    /* 権限なし等 */
+  }
+  return "";
+}
+
 // ---------- Keychain ----------
 
 export async function getApiKey(): Promise<string | null> {

@@ -1,6 +1,6 @@
 [package]
 name = "unicrew"
-version = "0.2.36"
+version = "0.2.37"
 description = "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。"
 authors = ["uniLinks / ZUBOLAND"]
 edition = "2021"
@@ -50,6 +50,7 @@ agent-client-protocol = "0.11"
 # 対話モード PTY（VSCode 統合ターミナルと同じく本物の対話 CLI を擬似端末で動かす）。
 # ハイブリッド方針 B の土台。providers/ とは独立。
 portable-pty = "0.8"
+tauri-plugin-clipboard-manager = "2"
 
 [features]
 default = ["custom-protocol"]

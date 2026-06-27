@@ -2,7 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { isTauri, defaultWorkspacePath } from "@/lib/tauri";
+import {
+  isTauri,
+  defaultWorkspacePath,
+  readClipboardText,
+  writeClipboardText,
+} from "@/lib/tauri";
 import {
   ptyOpen,
   ptyWriteText,
@@ -293,35 +298,45 @@ export function InteractiveTerminal({
         /* registerLinkProvider 非対応版では何もしない */
       }
 
-      // コピー＆ペースト（Ctrl/Cmd + C / V）。
-      // - Ctrl/Cmd+C: 選択があればクリップボードへコピー（無ければ既定の SIGINT を通す）
-      // - Ctrl/Cmd+V: 実際の貼り付けは xterm.js のネイティブ paste イベントに任せ、
-      //   ここでは「xterm にキー処理させない（false を返す）」だけにする。
+      // コピー＆ペースト（Ctrl/Cmd + C / V）。OS クリップボードを明示的に読み書きする。
+      // - Ctrl/Cmd+C: 選択があれば writeClipboardText でコピー（無ければ既定の SIGINT を通す）
+      // - Ctrl/Cmd+V: readClipboardText で本文を読み、term.paste() で 1 回だけ貼り付ける。
       //
-      //   なぜ false を返すだけにするか：
-      //   xterm は Ctrl+V を制御文字 ^V(0x16) として PTY に送ってしまう。これが
-      //   直後に届くネイティブ paste（ブラケットペースト）の前に入ると、claude/
-      //   readline の quoted-insert として解釈され、貼り付け全体が壊れる（＝貼れない）。
-      //   かといってここで term.paste() を自前で呼ぶと、ネイティブ paste と合わせて
-      //   同じ文字列が 2 回入る（＝二重貼り付け）。
-      //   よって「^V は送らせない（false）／貼り付けはネイティブ paste 1 本に任せる
-      //   （term.paste は呼ばない）」のが、二重貼り付けにも貼れない問題にもならない正解。
-      //   ※ false を返しても event.preventDefault はされないため、ブラウザ/WebView の
-      //     paste イベントはそのまま発火して 1 回だけ貼り付けられる。
+      //   なぜネイティブ paste イベントに任せないか：
+      //   旧実装は「^V を送らせない（false）／貼り付けは WebView のネイティブ paste
+      //   イベント 1 本に任せる」方式だったが、WebView2 ではネイティブ paste イベントや
+      //   navigator.clipboard が届かず「コピペができない」事象が発生した。
+      //   そこで OS レベルの Tauri clipboard-manager を第一経路に据え、貼り付けは
+      //   e.preventDefault() でネイティブ paste を止めてから term.paste() を 1 回だけ呼ぶ。
+      //   preventDefault で native が発火しないので二重貼り付けにならず、xterm 内部の
+      //   ブラケットペースト処理（ESC[200~ … ESC[201~）は term.paste() 側が担うため
+      //   claude/readline でも貼り付けが壊れない。^V(0x16) は return false で送らせない。
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true;
         const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
         if (mod && (e.key === "c" || e.key === "C")) {
           if (term.hasSelection()) {
             const sel = term.getSelection();
-            if (sel) void navigator.clipboard.writeText(sel);
+            if (sel) void writeClipboardText(sel);
             term.clearSelection();
             return false; // SIGINT を送らずコピーを優先
           }
           return true; // 選択が無ければ通常どおり SIGINT
         }
         if (mod && (e.key === "v" || e.key === "V")) {
-          // ^V を PTY に送らせない。貼り付けはネイティブ paste に任せる（二重防止）。
+          // 貼り付けはネイティブ paste イベントに頼らず、OS クリップボードを明示的に
+          // 読んで term.paste() する（WebView2 でネイティブ paste が届かず貼れない事例の対策）。
+          // preventDefault でネイティブ paste を止めるため二重貼り付けにはならない。
+          // ^V(0x16) も return false で PTY に送らせない。
+          e.preventDefault();
+          void (async () => {
+            try {
+              const text = await readClipboardText();
+              if (text) term.paste(text);
+            } catch {
+              /* クリップボード取得不可時は何もしない */
+            }
+          })();
           return false;
         }
         return true;

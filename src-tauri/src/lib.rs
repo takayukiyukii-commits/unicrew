@@ -3585,6 +3585,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
+        // コピー＆ペースト用。WebView のネイティブ clipboard/paste イベント依存だと
+        // WebView2 等でコピペが効かない事例があるため、OS レベルの clipboard-manager を
+        // 第一経路にして readText/writeText を確実に動かす。
+        .plugin(tauri_plugin_clipboard_manager::init())
         // 自動アップデート用。フロントから @tauri-apps/plugin-updater 経由で check / download_and_install を叩く。
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AgentState::default())

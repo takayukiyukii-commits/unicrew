@@ -2,7 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "UNICREW default permission set",
-  "windows": ["main", "editor", "preview"],
+  "windows": [
+    "main",
+    "editor",
+    "preview"
+  ],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -42,6 +46,8 @@
     "os:allow-hostname",
     "process:default",
     "process:allow-restart",
-    "process:allow-exit"
+    "process:allow-exit",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
   ]
 }
