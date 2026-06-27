@@ -7,6 +7,7 @@ import {
   defaultWorkspacePath,
   readClipboardText,
   writeClipboardText,
+  copyTextSync,
 } from "@/lib/tauri";
 import {
   ptyOpen,
@@ -317,7 +318,15 @@ export function InteractiveTerminal({
         if (mod && (e.key === "c" || e.key === "C")) {
           if (term.hasSelection()) {
             const sel = term.getSelection();
-            if (sel) void writeClipboardText(sel);
+            // WebView2 では plugin / navigator.clipboard の書き込みが失敗し
+            // 「Ctrl+C でコピーできない」事象がある。keydown ジェスチャ内で同期実行できる
+            // execCommand("copy") を第一経路にして確実にコピーし、失敗時のみ OS
+            // クリップボード plugin にフォールバックする。
+            if (sel) {
+              e.preventDefault();
+              const ok = copyTextSync(sel);
+              if (!ok) void writeClipboardText(sel);
+            }
             term.clearSelection();
             return false; // SIGINT を送らずコピーを優先
           }

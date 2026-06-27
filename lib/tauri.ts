@@ -75,6 +75,42 @@ export async function readClipboardText(): Promise<string> {
   return "";
 }
 
+// 同期コピー。WebView2 では Tauri plugin / navigator.clipboard の書き込みが
+// （権限・ユーザージェスチャ消失・環境差で）失敗し「コピーできない」事象がある。
+// keydown ジェスチャ内で同期実行できる execCommand("copy") は WebView2 でも確実に
+// 動く最も互換性の高い書き込み方法なので、これを第一経路にする。
+export function copyTextSync(text: string): boolean {
+  try {
+    if (typeof document === "undefined") return false;
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    const prev = document.activeElement as HTMLElement | null;
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    try {
+      prev?.focus?.();
+    } catch {
+      /* フォーカス復帰失敗は無視 */
+    }
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Keychain ----------
 
 export async function getApiKey(): Promise<string | null> {
