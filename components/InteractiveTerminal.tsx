@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import "@xterm/xterm/css/xterm.css";
 import {
   isTauri,
@@ -45,6 +51,69 @@ export function InteractiveTerminal({
   paneKey?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
+  // term インスタンスは effect 内ローカルだったが、ドラッグ操作（React イベント）
+  // から scrollToLine を呼ぶために ref 化する。
+  const termRef = useRef<{
+    rows: number;
+    buffer?: { active?: { length: number; viewportY: number } };
+    scrollToLine(line: number): void;
+  } | null>(null);
+  /** スクロールバック量と表示位置（つまみ描画用）。max=0 のときバー非表示。 */
+  const [scroll, setScroll] = useState({ top: 0, max: 0, rows: 0 });
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  /** トラック上の縦位置 → スクロールバック行へ写像して xterm を移動する。 */
+  const scrollToClientY = useCallback((clientY: number) => {
+    const track = trackRef.current;
+    const term = termRef.current;
+    if (!track || !term) return;
+    const rect = track.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    try {
+      const buf = term.buffer?.active;
+      const max = Math.max(0, (buf?.length ?? 0) - term.rows);
+      term.scrollToLine(Math.round(ratio * max));
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const onTrackPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      // テキスト選択やフォーカス移動を起こさずにドラッグを開始する
+      e.preventDefault();
+      draggingRef.current = true;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* noop */
+      }
+      scrollToClientY(e.clientY);
+    },
+    [scrollToClientY],
+  );
+  const onTrackPointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) return;
+      scrollToClientY(e.clientY);
+    },
+    [scrollToClientY],
+  );
+  const onTrackPointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      draggingRef.current = false;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* noop */
+      }
+    },
+    [],
+  );
+  // ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!isTauri() || !ref.current) return;
@@ -61,6 +130,9 @@ export function InteractiveTerminal({
     let linkProvider: { dispose(): void } | undefined;
     let fitTimer: ReturnType<typeof setTimeout> | undefined;
     let compCleanup: (() => void) | undefined;
+    const scrollDisposables: Array<{ dispose(): void }> = [];
+    // workspace 切替等で PTY を開き直す際、前セッションのバー状態を持ち越さない
+    setScroll({ top: 0, max: 0, rows: 0 });
 
     /**
      * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
@@ -212,6 +284,36 @@ export function InteractiveTerminal({
         /* 非対応版では既定のまま */
       }
       term.open(ref.current);
+      termRef.current = term;
+
+      // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────
+      // buffer.active の length / viewportY を React state に写して、つまみを描画する。
+      // 全画面 TUI（vim 等）中は代替バッファで length==rows → max=0 となり自動的に
+      // バー非表示＝既存挙動に影響しない。ホイールでスクロールしてもつまみが追従する。
+      const updateScroll = () => {
+        try {
+          const buf = term.buffer?.active;
+          if (!buf) return;
+          const rows: number = term.rows;
+          const max = Math.max(0, buf.length - rows);
+          const top: number = buf.viewportY;
+          setScroll((prev) =>
+            prev.top === top && prev.max === max && prev.rows === rows
+              ? prev
+              : { top, max, rows },
+          );
+        } catch {
+          /* noop */
+        }
+      };
+      try {
+        scrollDisposables.push(term.onScroll(updateScroll));
+        scrollDisposables.push(term.onRender(updateScroll));
+        scrollDisposables.push(term.onResize(updateScroll));
+      } catch {
+        /* onScroll/onRender 非対応版ではバー非表示のまま（他機能は維持） */
+      }
+      // ────────────────────────────────────────────────────────────────
 
       // ── ターミナルのコピー & スクロール対応 ──────────────────────────
       // claude 等の TUI は CSI ? 1000/1002/1003(+1006) h でマウストラッキングを
@@ -641,6 +743,14 @@ export function InteractiveTerminal({
       } catch {
         /* noop */
       }
+      for (const d of scrollDisposables) {
+        try {
+          d.dispose();
+        } catch {
+          /* noop */
+        }
+      }
+      termRef.current = null;
       void ptyKill(id);
       try {
         term?.dispose();
@@ -658,9 +768,32 @@ export function InteractiveTerminal({
     );
   }
 
+  // つまみの高さ％（表示行数/全体比・最低8%）と位置％（スクロール位置比）。
+  const thumbPct =
+    scroll.max > 0
+      ? Math.max(8, (scroll.rows / (scroll.max + scroll.rows)) * 100)
+      : 100;
+  const thumbTopPct =
+    scroll.max > 0 ? (scroll.top / scroll.max) * (100 - thumbPct) : 0;
+
   return (
-    <div className="h-full w-full bg-[#faf9f6] p-2">
+    <div className="relative h-full w-full bg-[#faf9f6] p-2">
       <div ref={ref} className="h-full w-full" />
+      {scroll.max > 0 && (
+        <div
+          ref={trackRef}
+          className="absolute top-2 right-0 bottom-2 w-3 cursor-ns-resize select-none touch-none"
+          onPointerDown={onTrackPointerDown}
+          onPointerMove={onTrackPointerMove}
+          onPointerUp={onTrackPointerUp}
+          onPointerCancel={onTrackPointerUp}
+        >
+          <div
+            className="absolute right-0.5 w-1.5 rounded bg-black/20 hover:bg-black/35 transition-colors"
+            style={{ height: `${thumbPct}%`, top: `${thumbTopPct}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
