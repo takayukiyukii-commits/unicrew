@@ -166,3 +166,81 @@ describe("matchToBufferRange（部分クリックバグの回帰テスト）", (
     expect(matchToBufferRange(info, 0, 99)).toBeNull();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 設計書④ B-1: ConPTY ハードラップ（実改行・isWrapped 無し）の連結     */
+/* ------------------------------------------------------------------ */
+
+/** ConPTY のハードラップを再現：幅いっぱいで実改行し、wrapped フラグは立てない。 */
+function layoutHardWrap(text: string, cols: number): LineLike[] {
+  const rows: FakeCell[][] = [[]];
+  let cur = rows[0];
+  for (const ch of text) {
+    const w = isWide(ch) ? 2 : 1;
+    if (cur.length + w > cols) {
+      cur = [];
+      rows.push(cur);
+    }
+    cur.push(cell(ch, w));
+    for (let i = 1; i < w; i++) cur.push(cell("", 0));
+  }
+  return rows.map((cells) => ({
+    isWrapped: false,
+    length: cols,
+    getCell: (x: number) => cells[x] ?? cell("", 1),
+  }));
+}
+
+describe("readLogicalLine - ConPTY ハードラップ連結（設計書④ B-1）", () => {
+  const BS2 = "\\";
+  const longPath = `C:${BS2}Users${BS2}takay${BS2}repos${BS2}unicrew${BS2}components${BS2}InteractiveTerminal.tsx`;
+
+  it("isWrapped が立たない幅いっぱいの行も連結して全長1本のパスを検出できる", () => {
+    const lines = layoutHardWrap(longPath, 20);
+    expect(lines.length).toBeGreaterThan(1);
+    // どの視覚行から照会しても同じ論理行に解決される
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe(longPath);
+    const infoMid = readLogicalLine(asGetLine(lines), 1)!;
+    expect(infoMid.text).toBe(longPath);
+    // 連結テキスト上でパスが1本のリンクとして検出でき、セル範囲へ変換できる
+    const hits = findPathMatches(info.text);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(longPath);
+    const range = matchToBufferRange(info, hits[0].start, hits[0].end)!;
+    expect(range.start.y).toBe(1);
+    expect(range.end.y).toBe(lines.length);
+  });
+
+  it("日本語（全角）入りパスのハードラップも連結できる", () => {
+    const jpPath = `D:${BS2}company${BS2}CDO一二三${BS2}成果物一二${BS2}20260702_設計書.md`;
+    const lines = layoutHardWrap(jpPath, 16);
+    expect(lines.length).toBeGreaterThan(1);
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe(jpPath);
+    const hits = findPathMatches(info.text);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(jpPath);
+  });
+
+  it("行末が埋まっていない（実改行のみの）行は連結しない", () => {
+    const lines = [
+      ...layoutHardWrap("short.md", 20), // 1行・行末は null セル
+      ...layoutHardWrap("next-file.md", 20),
+    ];
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe("short.md");
+    expect(info.endRow).toBe(0);
+  });
+
+  it("罫線などパス構成文字でない行末は連結しない", () => {
+    const border = "─".repeat(10); // cols=20 で全角10文字＝幅いっぱい
+    const lines = [
+      ...layoutHardWrap(border, 20),
+      ...layoutHardWrap("file.md", 20),
+    ];
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe(border);
+    expect(info.endRow).toBe(0);
+  });
+});

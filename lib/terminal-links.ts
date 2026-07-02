@@ -56,6 +56,60 @@ export interface LogicalLineInfo {
 const MAX_LOGICAL_ROWS = 40;
 
 /**
+ * パス構成文字（lib/file-link.ts の PATH_TOKEN と揃える）。
+ * ConPTY ハードラップ連結（下記 isHardWrapContinuation）の誤爆を抑えるために使う。
+ */
+const PATH_EDGE_CHAR = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\~-]/u;
+
+/** 行の「最後の実セル」の文字を返す（全角の後半セルはスキップ。空行なら ""）。 */
+function lastCellChars(line: LineLike): string {
+  for (let x = line.length - 1; x >= 0; x--) {
+    const cell = line.getCell(x);
+    if (!cell) continue;
+    if (cell.getWidth() === 0) continue; // 全角の後半セル
+    return cell.getChars(); // null セルは "" が返る＝行末まで埋まっていない
+  }
+  return "";
+}
+
+/** 行の先頭セルの文字を返す（空なら ""）。 */
+function firstCellChars(line: LineLike): string {
+  const cell = line.getCell(0);
+  if (!cell || cell.getWidth() === 0) return "";
+  return cell.getChars();
+}
+
+/**
+ * ConPTY のハードラップ（設計書④ B-1）を「論理行の継続」とみなすか判定する。
+ *
+ * Windows の ConPTY は reflow を持たず、端末幅で出力を物理的に折り返して
+ * 「実改行」として寄越すため、xterm の isWrapped フラグが立たない。
+ * その場合でも「前行が端末幅いっぱいまで埋まっていて、行末がパス構成文字」かつ
+ * 「当該行の先頭もパス構成文字」なら、折り返された1本のパスとみなして連結する。
+ * （罫線・空白終わりの行は PATH_EDGE_CHAR に落ちるので連結されない）
+ */
+function isHardWrapContinuation(
+  prev: LineLike | undefined,
+  cur: LineLike | undefined,
+): boolean {
+  if (!prev || !cur) return false;
+  const tail = lastCellChars(prev);
+  if (!tail || !PATH_EDGE_CHAR.test(tail)) return false;
+  const head = firstCellChars(cur);
+  return Boolean(head) && PATH_EDGE_CHAR.test(head);
+}
+
+/** cur 行が prev 行の続き（ソフトラップ or ConPTY ハードラップ）か。 */
+function continuesFrom(
+  prev: LineLike | undefined,
+  cur: LineLike | undefined,
+): boolean {
+  if (!cur) return false;
+  if (cur.isWrapped) return true;
+  return isHardWrapContinuation(prev, cur);
+}
+
+/**
  * 指定バッファ行を含む「論理行」（折り返し連結）を読み取る。
  * @param getLine バッファ絶対行(0-based) → 行。範囲外は undefined。
  * @param row 起点のバッファ絶対行（0-based）
@@ -66,12 +120,13 @@ export function readLogicalLine(
 ): LogicalLineInfo | null {
   if (!getLine(row)) return null;
 
-  // 折り返しの先頭まで遡る（isWrapped = この行が前行の続き）
+  // 折り返しの先頭まで遡る（isWrapped = この行が前行の続き。
+  // ConPTY ハードラップは isWrapped が立たないため continuesFrom で吸収する）
   let startRow = row;
   while (
     row - startRow < MAX_LOGICAL_ROWS &&
-    getLine(startRow)?.isWrapped &&
-    getLine(startRow - 1)
+    getLine(startRow - 1) &&
+    continuesFrom(getLine(startRow - 1), getLine(startRow))
   ) {
     startRow--;
   }
@@ -82,7 +137,8 @@ export function readLogicalLine(
   for (let r = startRow; r - startRow < MAX_LOGICAL_ROWS; r++) {
     const line = getLine(r);
     if (!line) break;
-    if (r !== startRow && !line.isWrapped) break; // 次の論理行に入った
+    // 次の論理行に入った（ソフトラップでも ConPTY ハードラップ継続でもない）
+    if (r !== startRow && !continuesFrom(getLine(r - 1), line)) break;
     endRow = r;
     const rowText: string[] = [];
     const rowMap: CellRef[] = [];
