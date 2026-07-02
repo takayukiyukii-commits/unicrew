@@ -9,7 +9,12 @@ import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { UserAvatar } from "./UserAvatar";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
-import { resolveFilePath, segmentText } from "@/lib/file-link";
+import {
+  escapeMarkdownInPaths,
+  resolveFilePath,
+  segmentText,
+  unwrapPaths,
+} from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { openPreviewWindow, openExternal } from "@/lib/preview-window";
 import { classifyMarkdownLink } from "@/lib/preview";
@@ -80,6 +85,12 @@ export function MessageItem({
   // 差し替える共通レンダラを用意し、ブロック要素ごとに適用する。
   const linkify = (children: React.ReactNode): React.ReactNode =>
     isUser ? children : linkifyFilePaths(children, workspace ?? null);
+  // 設計書②-B/④-A: ReactMarkdown 解析「前」の前処理（AI発言のみ適用）。
+  // 折り返し改行で分断されたパスを接合（unwrapPaths）し、パス内の markdown 活性文字を
+  // エスケープ（escapeMarkdownInPaths）して、パスが装飾で複数ノードに分断されず
+  // 単一テキストノードのまま linkifyFilePaths に届くようにする。見た目は不変。
+  const prepMarkdown = (src: string): string =>
+    escapeMarkdownInPaths(unwrapPaths(src));
   const renderers = {
     a: (props: { href?: string; children?: React.ReactNode }) => (
       <MarkdownLink href={props.href} workspace={workspace ?? null}>
@@ -95,6 +106,7 @@ export function MessageItem({
         inline={props.inline}
         className={props.className}
         onExecute={isUser ? undefined : onExecute}
+        linkify={isUser ? undefined : linkify}
       >
         {props.children}
       </CodeRenderer>
@@ -158,7 +170,7 @@ export function MessageItem({
                   remarkPlugins={[remarkGfm]}
                   components={renderers}
                 >
-                  {b.text}
+                  {prepMarkdown(b.text)}
                 </ReactMarkdown>
               ) : (
                 <ToolUseBubble key={i} block={b} />
@@ -169,7 +181,7 @@ export function MessageItem({
               remarkPlugins={[remarkGfm]}
               components={renderers}
             >
-              {message.content || "…"}
+              {prepMarkdown(message.content) || "…"}
             </ReactMarkdown>
           )}
         </div>
@@ -269,11 +281,18 @@ function CodeRenderer({
   className,
   children,
   onExecute,
+  linkify,
 }: {
   inline?: boolean;
   className?: string;
   children?: React.ReactNode;
   onExecute?: (command: string, lang: string) => void;
+  /**
+   * 設計書②-A: インラインコード（バッククォート内）のファイルパスもリンク化する。
+   * Claude/CLI はパスを高頻度でバッククォート表記するため、ここを通さないと
+   * 「クリックできる箇所が限定的」になる（AI発言のみ渡される）。
+   */
+  linkify?: (children: React.ReactNode) => React.ReactNode;
 }) {
   const lang = (className ?? "")
     .replace("language-", "")
@@ -281,7 +300,9 @@ function CodeRenderer({
     .trim();
   const text = String(children ?? "").replace(/\n$/, "");
   if (inline || !text.includes("\n") && !lang) {
-    return <code className={className}>{children}</code>;
+    // 設計書②-A: インラインコードは通常1つの文字列ノードなので、
+    // segmentText がパス全体を1リンク化できる（linkify 未指定なら従来通り）。
+    return <code className={className}>{linkify ? linkify(children) : children}</code>;
   }
   const executable = EXECUTABLE_LANGS.has(lang);
   return (

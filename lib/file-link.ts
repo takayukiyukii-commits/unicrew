@@ -324,3 +324,147 @@ export function findUrlMatches(line: string): UrlMatch[] {
   }
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* チャット（AI発言）描画前の前処理（設計書②-B / ④-A）                  */
+/* ------------------------------------------------------------------ */
+
+/** markdown で意味を持つ活性文字（パス内に現れると装飾解釈でノードが分断される）。 */
+const MD_ACTIVE = /[\\`*_~[\]]/g;
+
+/** コードフェンス開始/終了行（``` / ~~~）。フェンス内は前処理の対象外。 */
+const FENCE_LINE = /^\s{0,3}(?:```|~~~)/;
+
+/** 1行ぶんのプレーンテキスト中のパス範囲だけ markdown 活性文字をエスケープする。 */
+function escapeInlineSegment(seg: string): string {
+  if (!seg) return seg;
+  const hits = findPathMatches(seg);
+  if (hits.length === 0) return seg;
+  let out = "";
+  let last = 0;
+  for (const h of hits) {
+    out += seg.slice(last, h.start);
+    out += seg.slice(h.start, h.end).replace(MD_ACTIVE, (m) => "\\" + m);
+    last = h.end;
+  }
+  return out + seg.slice(last);
+}
+
+/**
+ * ReactMarkdown に渡す前に、生テキスト中のファイルパス内の markdown 活性文字
+ * （`_ * ~ \ [ ]` など）をバックスラッシュエスケープする。
+ *
+ * 目的: `**D:\...\x.md**` や `file_name.md` のようにパスが装飾記号を含む/挟まれると
+ * ReactMarkdown がパスを複数ノード（text + <strong> + text）に分断し、
+ * linkifyFilePaths（文字列ノード単位）が全長を1リンクにできない。
+ * エスケープすれば CommonMark 上 `\_` は文字 `_` として描画される＝見た目不変のまま
+ * パスが単一テキストノードで届く。
+ *
+ * ガード:
+ *  - コードフェンス（``` / ~~~）内はエスケープが文字として見えてしまうため触らない
+ *  - インラインコード（`...`）内も触らない（そちらは CodeRenderer 側の linkify が担当）
+ */
+export function escapeMarkdownInPaths(src: string): string {
+  if (!src) return src;
+  let inFence = false;
+  return src
+    .split("\n")
+    .map((line) => {
+      if (FENCE_LINE.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      // バッククォートで分割し、偶数インデックス（インラインコード外）だけ処理する。
+      const parts = line.split("`");
+      for (let i = 0; i < parts.length; i += 2) {
+        parts[i] = escapeInlineSegment(parts[i]);
+      }
+      return parts.join("`");
+    })
+    .join("\n");
+}
+
+/** 行末が「パス構成文字」で終わるか（PATH_TOKEN の文字クラスと揃える）。 */
+const WRAP_TAIL = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\-]$/u;
+/** 継続行の先頭（インデント除去後）が「パス構成文字」で始まるか。 */
+const WRAP_HEAD = /^[\p{L}\p{N}_.:／/\\-]/u;
+/** リスト・番号付きリストのマーカー（継続行と誤認して接合しない）。 */
+const LIST_MARKER = /^(?:[-*+][ \t]|\d+[.)][ \t])/;
+
+/**
+ * 折り返し（実改行＋インデント）で分断されたファイルパスを1本に戻す（設計書④-A）。
+ *
+ * AI応答やツール結果には、端末幅などで物理的に折り返された実改行入りのパスが
+ * 混ざることがある。そのままだと segmentText が改行を跨げず複数断片に割れて
+ * クリック不可＆コピペに改行が混入する。
+ *
+ * 誤爆防止（本文の意味的改行は消さない）:
+ *  - 「行末がパス構成文字」かつ「次行がインデント空白＋パス構成文字」のときだけ候補にする
+ *  - リストマーカー（`- ` `1. ` 等）で始まる次行は接合しない
+ *  - コードフェンス内は触らない
+ *  - 接合した結果、改行位置を跨ぐ「区切り文字（/ or \）入りのパス」が実際に成立する
+ *    改行だけ接合を確定する（findPathMatches で検証）。中間断片に拡張子が無い
+ *    多行折り返しに対応するため、候補行を先読みで集めてから一括検証する。
+ */
+export function unwrapPaths(src: string): string {
+  if (!src || !src.includes("\n")) return src;
+  const lines = src.split("\n");
+  const out: string[] = [];
+  let inFence = false;
+  /** 先読みする継続行の上限（暴走防止） */
+  const MAX_JOIN_LINES = 8;
+  for (let i = 0; i < lines.length; i++) {
+    let cur = lines[i];
+    if (FENCE_LINE.test(cur)) {
+      inFence = !inFence;
+      out.push(cur);
+      continue;
+    }
+    if (inFence) {
+      out.push(cur);
+      continue;
+    }
+    // 1) 構文条件（インデント＋パス構成文字…）を満たす継続候補行を先読みで集める。
+    const rests: string[] = [];
+    let acc = cur;
+    while (i + 1 + rests.length < lines.length && rests.length < MAX_JOIN_LINES) {
+      const next = lines[i + 1 + rests.length];
+      if (FENCE_LINE.test(next)) break;
+      const m = next.match(/^[ \t]+(.*)$/);
+      if (!m) break;
+      const rest = m[1];
+      if (
+        !rest ||
+        !WRAP_TAIL.test(acc) ||
+        !WRAP_HEAD.test(rest) ||
+        LIST_MARKER.test(rest)
+      ) {
+        break;
+      }
+      rests.push(rest);
+      acc += rest;
+    }
+    // 2) 一括検証: 各改行位置を「区切り文字入りのパス」が跨ぐ改行だけ、先頭から連続して確定する。
+    if (rests.length > 0) {
+      const boundaries: number[] = [];
+      let off = cur.length;
+      for (const r of rests) {
+        boundaries.push(off);
+        off += r.length;
+      }
+      const hits = findPathMatches(acc).filter((h) => /[\\/]/.test(h.raw));
+      let commit = 0;
+      for (const b of boundaries) {
+        if (hits.some((h) => h.start < b && h.end > b)) commit++;
+        else break;
+      }
+      if (commit > 0) {
+        cur += rests.slice(0, commit).join("");
+        i += commit;
+      }
+    }
+    out.push(cur);
+  }
+  return out.join("\n");
+}

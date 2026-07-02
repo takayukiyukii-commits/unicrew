@@ -4,6 +4,8 @@ import {
   findPathMatches,
   pathStartOffset,
   resolveFilePath,
+  escapeMarkdownInPaths,
+  unwrapPaths,
 } from "./file-link";
 
 // バックスラッシュをテスト文字列にそのまま埋めるためのヘルパ。
@@ -104,5 +106,102 @@ describe("resolveFilePath", () => {
   });
   it("相対パスは workspace と結合する", () => {
     expect(resolveFilePath("a.md", "C:/ws")).toBe("C:/ws/a.md");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 設計書②-B: escapeMarkdownInPaths                                    */
+/* ------------------------------------------------------------------ */
+
+describe("escapeMarkdownInPaths - パス内 markdown 活性文字のエスケープ", () => {
+  it("アンダースコア入りパスの _ と \\ をエスケープする（全長1ノード化の前提）", () => {
+    const src = `対象は D:${BS}ws${BS}file_link_test.md です`;
+    const out = escapeMarkdownInPaths(src);
+    expect(out).toBe(
+      `対象は D:${BS}${BS}ws${BS}${BS}file${BS}_link${BS}_test.md です`,
+    );
+  });
+
+  it("太字マーカーに挟まれたパス内の文字もエスケープされる", () => {
+    const src = `**D:${BS}ws${BS}a_b.md**`;
+    const out = escapeMarkdownInPaths(src);
+    // パス範囲内だけがエスケープされ、外側の ** は残る
+    expect(out).toContain(`a${BS}_b.md`);
+    expect(out.startsWith("**")).toBe(true);
+    expect(out.endsWith("**")).toBe(true);
+  });
+
+  it("インラインコード内は触らない（CodeRenderer 側 linkify が担当）", () => {
+    const src = "実体は `D:" + BS + "ws" + BS + "a_b.md` を参照";
+    expect(escapeMarkdownInPaths(src)).toBe(src);
+  });
+
+  it("コードフェンス内は触らない", () => {
+    const src = ["```", `D:${BS}ws${BS}a_b.md`, "```"].join("\n");
+    expect(escapeMarkdownInPaths(src)).toBe(src);
+  });
+
+  it("パスを含まない行は不変", () => {
+    const src = "これは _強調_ を含む普通の文です";
+    expect(escapeMarkdownInPaths(src)).toBe(src);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 設計書④-A: unwrapPaths                                              */
+/* ------------------------------------------------------------------ */
+
+describe("unwrapPaths - 折り返し改行で分断されたパスの接合", () => {
+  it("改行＋インデントで分断されたパスを1本に戻す", () => {
+    const src =
+      `保存先は D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設\n` +
+      `    計書_改善.md です`;
+    const out = unwrapPaths(src);
+    expect(out).toBe(
+      `保存先は D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設計書_改善.md です`,
+    );
+    // 接合後は segmentText が全長を 1 リンク化できる
+    const segs = segmentText(out);
+    const file = segs.find((s) => s.kind === "file");
+    expect(file?.path).toBe(
+      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設計書_改善.md`,
+    );
+  });
+
+  it("3行にまたがる折り返しも接合できる", () => {
+    const src = [
+      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}UNICREW${BS}components`,
+      `    ${BS}InteractiveTermi`,
+      "    nal.tsx",
+    ].join("\n");
+    const out = unwrapPaths(src);
+    expect(out).toBe(
+      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}UNICREW${BS}components${BS}InteractiveTerminal.tsx`,
+    );
+  });
+
+  it("本文の意味的改行（次行がインデントなし）は保持する", () => {
+    const src = `パスは D:${BS}ws${BS}a.md\n次の行の本文です`;
+    expect(unwrapPaths(src)).toBe(src);
+  });
+
+  it("ネストしたリストは接合しない", () => {
+    const src = "- 確認対象:\n    - lib/file-link.ts を読む";
+    expect(unwrapPaths(src)).toBe(src);
+  });
+
+  it("番号付きリストは接合しない", () => {
+    const src = "手順:\n    1. まず file.md を開く";
+    expect(unwrapPaths(src)).toBe(src);
+  });
+
+  it("パスが成立しない接合候補（ただの文章）は接合しない", () => {
+    const src = "これは設計\n  資料.md です";
+    expect(unwrapPaths(src)).toBe(src);
+  });
+
+  it("コードフェンス内は接合しない", () => {
+    const src = ["```js", "const x = foo(a)", "    .then(b)", "```"].join("\n");
+    expect(unwrapPaths(src)).toBe(src);
   });
 });
