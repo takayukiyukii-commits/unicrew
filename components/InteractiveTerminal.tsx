@@ -17,10 +17,10 @@ import {
   onPtyData,
   onPtyExit,
 } from "@/lib/pty";
-import { findPathMatches, findUrlMatches, resolveFilePath } from "@/lib/file-link";
+import { findPathMatches, findUrlMatches } from "@/lib/file-link";
 import { readLogicalLine, matchToBufferRange } from "@/lib/terminal-links";
 import { findCompositionOverride } from "@/lib/terminal-ime";
-import { openFileInEditorWindow } from "@/lib/editor-window";
+import { openFileSmart } from "@/lib/open-file";
 import { openExternal } from "@/lib/preview-window";
 
 /**
@@ -129,6 +129,8 @@ export function InteractiveTerminal({
     };
 
     (async () => {
+      // PTY の作業ディレクトリ（後段で確定）。リンク activate の解決フォールバックに使う。
+      let ptyCwd: string | null = null;
       const [{ Terminal }, { FitAddon }, { Unicode11Addon }] =
         await Promise.all([
           import("@xterm/xterm"),
@@ -356,10 +358,14 @@ export function InteractiveTerminal({
                 activate: (e: MouseEvent) => {
                   // VSCode 風: 修飾キー付きクリックでのみ開く（誤クリック防止・選択は通常通り）
                   if (!(e.ctrlKey || e.metaKey)) return;
-                  const abs = resolveFilePath(mt.openPath, workspace ?? null);
-                  void openFileInEditorWindow(abs).catch(() => {
-                    /* 開けない場合は無視 */
-                  });
+                  // 設計書③: workspace 直下に無ければ Rust 側で配下を探索し、
+                  // 見つからなければトースト表示（無言握り潰しをやめる）。
+                  // workspace が null の時は PTY の cwd を基準にフォールバックする。
+                  void openFileSmart(mt.openPath, workspace ?? null, ptyCwd).catch(
+                    () => {
+                      /* openFileSmart 内でトースト表示済み */
+                    },
+                  );
                 },
               })),
             ].filter(
@@ -445,6 +451,8 @@ export function InteractiveTerminal({
           cwd = null;
         }
       }
+
+      ptyCwd = cwd;
 
       // フォント＆レイアウト確定後に確定 fit してから PTY を開く。
       // これで「開いた直後から打った文字と表示位置がズレる」現象を防ぐ。

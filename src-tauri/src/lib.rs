@@ -3422,6 +3422,153 @@ async fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// 設計書③: workspace 配下で相対パス／裸ファイル名の実体を探索する。
+/// 1) workspace/rel が存在すればそれを返す（絶対パスは呼び出し側でスキップ済み）
+/// 2) 無ければ workspace 配下を BFS 探索し、rel をサフィックスとして含む最初の一致、
+///    無ければベース名一致を返す。BFS（浅い階層優先）なので workspace 直下に近い
+///    ものが優先される。見つからなければ None。
+#[tauri::command]
+async fn resolve_file_candidate(
+    workspace: String,
+    rel: String,
+) -> Result<Option<String>, String> {
+    let ws = expand_user_path(&workspace);
+    let rel = rel.trim().to_string();
+    if rel.is_empty() {
+        return Ok(None);
+    }
+    let rel_clean = rel
+        .trim_start_matches("./")
+        .trim_start_matches(".\\")
+        .to_string();
+    let direct = ws.join(&rel_clean);
+    if tokio::fs::try_exists(&direct).await.unwrap_or(false) {
+        return Ok(Some(direct.to_string_lossy().into_owned()));
+    }
+    // 再帰探索はブロッキング IO なので専用スレッドで行う（ランタイムを塞がない）。
+    let found = tokio::task::spawn_blocking(move || find_file_candidate(&ws, &rel_clean))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(found.map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// 候補探索から除外するディレクトリ（暴走・誤爆防止）。
+const CANDIDATE_SKIP_DIRS: [&str; 9] = [
+    "node_modules",
+    ".git",
+    "target",
+    "out",
+    ".next",
+    "dist",
+    "build",
+    ".venv",
+    "__pycache__",
+];
+/// BFS の深さ上限。
+const CANDIDATE_MAX_DEPTH: usize = 6;
+/// 走査エントリ数の上限。
+const CANDIDATE_MAX_ENTRIES: usize = 5000;
+
+/// workspace 配下を幅優先で探索し、rel（相対パス or 裸ファイル名）の実体を返す。
+/// 同期・純関数（単体テスト可）。resolve_file_candidate から spawn_blocking で呼ぶ。
+fn find_file_candidate(ws: &std::path::Path, rel: &str) -> Option<std::path::PathBuf> {
+    use std::collections::VecDeque;
+    let rel_norm = rel.replace('\\', "/");
+    let base = std::path::Path::new(&rel_norm)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())?;
+    let suffix = format!("/{rel_norm}");
+    let mut queue: VecDeque<(std::path::PathBuf, usize)> = VecDeque::new();
+    queue.push_back((ws.to_path_buf(), 0));
+    let mut seen = 0usize;
+    let mut base_hit: Option<std::path::PathBuf> = None;
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for ent in rd.flatten() {
+            seen += 1;
+            if seen > CANDIDATE_MAX_ENTRIES {
+                return base_hit;
+            }
+            let path = ent.path();
+            let name = ent.file_name().to_string_lossy().into_owned();
+            let is_dir = ent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if depth + 1 <= CANDIDATE_MAX_DEPTH
+                    && !CANDIDATE_SKIP_DIRS.contains(&name.as_str())
+                {
+                    queue.push_back((path, depth + 1));
+                }
+            } else if name == base {
+                // rel がサブパス付き（lib/file-link.ts 等）ならサフィックス一致を優先
+                let full_norm = path.to_string_lossy().replace('\\', "/");
+                if full_norm.ends_with(&suffix) {
+                    return Some(path);
+                }
+                if base_hit.is_none() {
+                    base_hit = Some(path);
+                }
+            }
+        }
+    }
+    base_hit
+}
+
+#[cfg(test)]
+mod file_candidate_tests {
+    use super::find_file_candidate;
+
+    fn temp_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "unicrew_cand_{tag}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn 裸ファイル名でサブディレクトリの実体を発見する() {
+        let root = temp_root("bare");
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(root.join("lib").join("file-link.ts"), "a").unwrap();
+        let hit = find_file_candidate(&root, "file-link.ts").unwrap();
+        assert!(hit.ends_with(std::path::Path::new("lib").join("file-link.ts")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn サブパス付きはサフィックス一致を優先する() {
+        let root = temp_root("suffix");
+        std::fs::create_dir_all(root.join("src").join("lib")).unwrap();
+        std::fs::create_dir_all(root.join("other")).unwrap();
+        std::fs::write(root.join("other").join("mod.ts"), "x").unwrap();
+        std::fs::write(root.join("src").join("lib").join("mod.ts"), "y").unwrap();
+        let hit = find_file_candidate(&root, "lib/mod.ts").unwrap();
+        let norm = hit.to_string_lossy().replace('\\', "/");
+        assert!(norm.ends_with("src/lib/mod.ts"), "{norm}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 存在しない名前は_none() {
+        let root = temp_root("none");
+        assert!(find_file_candidate(&root, "nope.md").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn node_modules_は探索しない() {
+        let root = temp_root("skip");
+        std::fs::create_dir_all(root.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(root.join("node_modules").join("pkg").join("index.js"), "x").unwrap();
+        assert!(find_file_candidate(&root, "index.js").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 /// 画像など任意のファイルをバイナリ読みして base64 で返す。
 /// プレビュー窓は editor と同じく fs プラグイン(スコープ制限)ではなく
 /// この自前コマンドで読む（plugin-fs 直読みは "forbidden path" になる）。
@@ -3625,6 +3772,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             read_text_file,
+            resolve_file_candidate,
             read_file_base64,
             write_text_file,
             list_directory,

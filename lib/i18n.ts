@@ -886,6 +886,7 @@ const ja: Dict = {
   "terminal.splitAria": "新しいターミナルを開く",
   "terminal.closePaneTitle": "このターミナルを閉じる",
   "terminal.closePaneAria": "このターミナルを閉じる",
+  "fileOpen.notFound": "ファイルが見つかりません: {path}",
 
   // ----- Slash command picker -----
   "slash.tooltip": "スラッシュコマンドを挿入",
@@ -1993,6 +1994,7 @@ const en: Dict = {
   "terminal.splitAria": "Open a new terminal pane",
   "terminal.closePaneTitle": "Close this terminal",
   "terminal.closePaneAria": "Close this terminal",
+  "fileOpen.notFound": "File not found: {path}",
 
   // ----- Slash command picker -----
   "slash.tooltip": "Insert a slash command",

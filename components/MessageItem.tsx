@@ -16,6 +16,7 @@ import {
   unwrapPaths,
 } from "@/lib/file-link";
 import { openFileInEditorWindow } from "@/lib/editor-window";
+import { openFileSmart } from "@/lib/open-file";
 import { openPreviewWindow, openExternal } from "@/lib/preview-window";
 import { classifyMarkdownLink } from "@/lib/preview";
 import { useTranslation } from "@/lib/i18n";
@@ -500,10 +501,11 @@ function FilePathLink({
     if (!isModifierClick(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    const absolute = resolveFilePath(path, workspace);
-    void openFileInEditorWindow(absolute).catch((err) => {
+    // 設計書③: workspace 直下に無ければ Rust 側で配下を探索して開く。
+    // 見つからない/開けない場合は openFileSmart がトーストで可視化する。
+    void openFileSmart(path, workspace).catch((err) => {
       // eslint-disable-next-line no-console
-      console.error("[file-link] failed to open", absolute, err);
+      console.error("[file-link] failed to open", path, err);
     });
   };
 
