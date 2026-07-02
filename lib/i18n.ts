@@ -887,6 +887,9 @@ const ja: Dict = {
   "terminal.closePaneTitle": "このターミナルを閉じる",
   "terminal.closePaneAria": "このターミナルを閉じる",
   "fileOpen.notFound": "ファイルが見つかりません: {path}",
+  "terminal.newShellTitle": "シェル（bash / PowerShell 等）を新しいペインで開く",
+  "terminal.newShellAria": "新しいシェルを開く",
+  "terminal.shellBadge": "shell",
 
   // ----- Slash command picker -----
   "slash.tooltip": "スラッシュコマンドを挿入",
@@ -1995,6 +1998,9 @@ const en: Dict = {
   "terminal.closePaneTitle": "Close this terminal",
   "terminal.closePaneAria": "Close this terminal",
   "fileOpen.notFound": "File not found: {path}",
+  "terminal.newShellTitle": "Open a shell (bash / PowerShell) in a new pane",
+  "terminal.newShellAria": "Open a new shell pane",
+  "terminal.shellBadge": "shell",
 
   // ----- Slash command picker -----
   "slash.tooltip": "Insert a slash command",

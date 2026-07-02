@@ -42,6 +42,7 @@ import { openExternal } from "@/lib/preview-window";
 export function InteractiveTerminal({
   workspace,
   paneKey,
+  kind = "claude",
 }: {
   workspace?: string | null;
   /**
@@ -49,6 +50,12 @@ export function InteractiveTerminal({
    * 起動するための識別子。指定が無ければ自動生成（後方互換）。
    */
   paneKey?: string;
+  /**
+   * 設計書⑤: 起動対象。既定は "claude"（後方互換）。"shell" なら OS 既定の
+   * シェル（Git Bash / PowerShell / cmd / $SHELL）を Rust 側 default_shell で
+   * 解決して起動する。PTY 基盤・IME・コピー・リンク等の既存処理は共通。
+   */
+  kind?: "claude" | "shell";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
@@ -561,10 +568,35 @@ export function InteractiveTerminal({
       await fitBeforeOpen();
       if (disposed) return;
 
+      // 設計書⑤: 起動プログラムの決定。shell は Rust 側でOS別に解決する。
+      let program = "claude";
+      let args: string[] = [];
+      if (kind === "shell") {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          const info = await invoke<{
+            program: string;
+            args: string[];
+            label: string;
+          }>("default_shell");
+          program = info.program;
+          args = info.args ?? [];
+        } catch (err) {
+          // 無言で失敗させない（③と同方針）。Git Bash 等が無い環境で明示する。
+          term.write(
+            "\r\n\x1b[31m[シェルが見つかりません] " +
+              String(err) +
+              "\x1b[0m\r\n",
+          );
+          return;
+        }
+      }
+      if (disposed) return;
+
       await ptyOpen({
         id,
-        program: "claude",
-        args: [],
+        program,
+        args,
         cwd,
         cols: term.cols,
         rows: term.rows,
@@ -758,7 +790,7 @@ export function InteractiveTerminal({
         /* noop */
       }
     };
-  }, [workspace, paneKey]);
+  }, [workspace, paneKey, kind]);
 
   if (!isTauri()) {
     return (

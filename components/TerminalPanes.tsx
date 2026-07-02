@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Columns2, X, FolderOpen } from "lucide-react";
+import { Columns2, X, FolderOpen, SquareTerminal } from "lucide-react";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { useTranslation } from "@/lib/i18n";
 
@@ -17,6 +17,8 @@ const COLS = 3;
 interface Pane {
   /** PTY ID にも使う一意なキー。タブを閉じるまで PTY を保持する。 */
   key: string;
+  /** 設計書⑤: ペインで起動するプログラム。claude（既定）または OS シェル。 */
+  kind: "claude" | "shell";
 }
 
 interface Props {
@@ -59,15 +61,21 @@ function placement(index: number, total: number): { row: number; col: number } {
 export function TerminalPanes({ workspace = null }: Props) {
   const { t } = useTranslation();
   const [panes, setPanes] = useState<Pane[]>(() => [
-    { key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+    {
+      key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      kind: "claude",
+    },
   ]);
 
-  const handleSplit = useCallback(() => {
+  const handleSplit = useCallback((kind: "claude" | "shell" = "claude") => {
     setPanes((prev) => {
       if (prev.length >= MAX_PANES) return prev;
       return [
         ...prev,
-        { key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}` },
+        {
+          key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          kind,
+        },
       ];
     });
   }, []);
@@ -113,11 +121,27 @@ export function TerminalPanes({ workspace = null }: Props) {
                   </span>
                 </span>
               )}
+              {pane.kind === "shell" && (
+                <span className="shrink-0 px-1 rounded bg-[var(--color-surface)] border border-[var(--color-border)] font-mono text-[10px]">
+                  {t("terminal.shellBadge")}
+                </span>
+              )}
               <span className="ml-auto flex items-center gap-0.5 shrink-0">
                 {canSplit && (
                   <button
                     type="button"
-                    onClick={handleSplit}
+                    onClick={() => handleSplit("shell")}
+                    className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)] transition"
+                    title={t("terminal.newShellTitle")}
+                    aria-label={t("terminal.newShellAria")}
+                  >
+                    <SquareTerminal size={13} />
+                  </button>
+                )}
+                {canSplit && (
+                  <button
+                    type="button"
+                    onClick={() => handleSplit("claude")}
                     className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)] transition"
                     title={t("terminal.splitTitle")}
                     aria-label={t("terminal.splitAria")}
@@ -141,7 +165,11 @@ export function TerminalPanes({ workspace = null }: Props) {
             <div className="flex-1 min-h-0">
               {/* workspace に連動：値が変われば PTY を開き直す（key には含めない＝
                   ペイン自体は維持しつつ InteractiveTerminal の effect で cwd 切替） */}
-              <InteractiveTerminal workspace={workspace} paneKey={pane.key} />
+              <InteractiveTerminal
+                workspace={workspace}
+                paneKey={pane.key}
+                kind={pane.kind}
+              />
             </div>
           </div>
         );

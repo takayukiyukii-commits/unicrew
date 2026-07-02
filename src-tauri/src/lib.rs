@@ -3452,6 +3452,97 @@ async fn resolve_file_candidate(
     Ok(found.map(|p| p.to_string_lossy().into_owned()))
 }
 
+
+/// 設計書⑤: シェル情報（default_shell の返り値）。
+#[derive(serde::Serialize, Clone)]
+struct ShellInfo {
+    program: String,
+    args: Vec<String>,
+    label: String,
+}
+
+/// 設計書⑤: ターミナルで claude 以外に bash 等のシェルを起動するための既定シェル解決。
+/// Windows: Git Bash（明示パスのみ。System32 の bash.exe は WSL ランチャーなので使わない）
+///          → PowerShell → %ComSpec%（cmd）。
+/// macOS / Linux: $SHELL → /bin/bash。
+#[tauri::command]
+fn default_shell() -> Result<ShellInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut git_bash: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            git_bash.push(
+                std::path::PathBuf::from(&pf)
+                    .join("Git")
+                    .join("bin")
+                    .join("bash.exe"),
+            );
+        }
+        if let Some(pf86) = std::env::var_os("ProgramFiles(x86)") {
+            git_bash.push(
+                std::path::PathBuf::from(&pf86)
+                    .join("Git")
+                    .join("bin")
+                    .join("bash.exe"),
+            );
+        }
+        if let Some(la) = std::env::var_os("LOCALAPPDATA") {
+            git_bash.push(
+                std::path::PathBuf::from(&la)
+                    .join("Programs")
+                    .join("Git")
+                    .join("bin")
+                    .join("bash.exe"),
+            );
+        }
+        for p in git_bash {
+            if p.is_file() {
+                return Ok(ShellInfo {
+                    program: p.to_string_lossy().into_owned(),
+                    // -l: login シェルにして Git Bash の /etc/profile を読ませ、
+                    // /usr/bin 等の PATH（ls / git などの Unix コマンド）を整える。
+                    args: vec!["-l".into()],
+                    label: "Git Bash".into(),
+                });
+            }
+        }
+        if let Some(p) = resolve_on_path("powershell") {
+            return Ok(ShellInfo {
+                program: p.to_string_lossy().into_owned(),
+                args: vec!["-NoLogo".into()],
+                label: "PowerShell".into(),
+            });
+        }
+        if let Ok(comspec) = std::env::var("ComSpec") {
+            if !comspec.is_empty() {
+                return Ok(ShellInfo {
+                    program: comspec,
+                    args: Vec::new(),
+                    label: "cmd".into(),
+                });
+            }
+        }
+        Err("シェルが見つかりません（Git Bash / PowerShell / cmd のいずれも検出できませんでした）"
+            .into())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let sh = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/bin/bash".to_string());
+        let label = std::path::Path::new(&sh)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "shell".to_string());
+        Ok(ShellInfo {
+            program: sh,
+            args: Vec::new(),
+            label,
+        })
+    }
+}
+
 /// 候補探索から除外するディレクトリ（暴走・誤爆防止）。
 const CANDIDATE_SKIP_DIRS: [&str; 9] = [
     "node_modules",
@@ -3773,6 +3864,7 @@ pub fn run() {
             pty::pty_kill,
             read_text_file,
             resolve_file_candidate,
+            default_shell,
             read_file_base64,
             write_text_file,
             list_directory,
