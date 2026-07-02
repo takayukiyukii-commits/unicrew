@@ -76,6 +76,38 @@ const CLICKABLE_EXTENSIONS = new Set([
   "map",
 ]);
 
+/**
+ * テキストエディタではなく OS 既定アプリで開くべき拡張子（PDF・画像・Office等）。
+ * リンク判定は CLICKABLE ∪ EXTERNAL の和集合で行い、開く経路だけ分岐する。
+ */
+const EXTERNAL_EXTENSIONS = new Set([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "docx",
+  "xlsx",
+  "pptx",
+  "zip",
+  "mp4",
+  "mp3",
+  "wav",
+]);
+
+/** リンク化してよい拡張子か（エディタ用＋外部アプリ用の和集合）。 */
+function isLinkableExt(ext: string): boolean {
+  return CLICKABLE_EXTENSIONS.has(ext) || EXTERNAL_EXTENSIONS.has(ext);
+}
+
+/** このパスは OS 既定アプリで開くべきか（openFileSmart の分岐に使う）。 */
+export function isExternalOpenPath(path: string): boolean {
+  const m = path.match(/\.([A-Za-z0-9]{1,8})(?::\d+(?::\d+)?)?$/);
+  return m != null && EXTERNAL_EXTENSIONS.has(m[1].toLowerCase());
+}
+
 /** ファイルパスっぽい文字列の正規表現。
  *
  *  - 区切り文字: `/` または `\`
@@ -128,7 +160,7 @@ function isClickablePath(token: string): PathHit | null {
   const dot = trimmed.lastIndexOf(".");
   if (dot < 0 || dot === trimmed.length - 1) return null;
   const ext = trimmed.slice(dot + 1).toLowerCase();
-  if (!CLICKABLE_EXTENSIONS.has(ext)) return null;
+  if (!isLinkableExt(ext)) return null;
   // 拡張子だけ（`.md` 等）はスキップ
   if (dot === 0) return null;
   // バージョン文字列っぽいやつ（4.7、1.2.3 等）は除外
@@ -150,23 +182,47 @@ export interface TextSegment {
  */
 export function segmentText(text: string): TextSegment[] {
   if (!text) return [];
-  const segments: TextSegment[] = [];
-  let lastEnd = 0;
+  interface Hit {
+    start: number;
+    end: number;
+    display: string;
+    path: string;
+  }
+  // 1) ドライブレター起点の貪欲展開（「。」「、」空白入り日本語ファイル名対応）を優先
+  const hits: Hit[] = findDrivePathMatches(text).map((h) => ({
+    start: h.start,
+    end: h.end,
+    display: h.raw,
+    path: h.openPath,
+  }));
+  // 2) 従来の PATH_TOKEN 検出（相対パス・裸ファイル名）。展開済み範囲と重なるものは捨てる
   PATH_TOKEN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = PATH_TOKEN.exec(text)) !== null) {
     const token = match[0];
     const start = match.index;
     const end = start + token.length;
+    if (hits.some((h) => start < h.end && end > h.start)) continue;
     const hit = isClickablePath(token);
     if (!hit) continue;
     // ドライブレター手前に地の文があった場合、その分はパス開始位置を後ろにずらす。
-    const fileStart = start + hit.offset;
-    if (fileStart > lastEnd) {
-      segments.push({ kind: "text", text: text.slice(lastEnd, fileStart) });
+    hits.push({
+      start: start + hit.offset,
+      end,
+      display: hit.raw,
+      path: hit.raw,
+    });
+  }
+  hits.sort((a, b) => a.start - b.start);
+  const segments: TextSegment[] = [];
+  let lastEnd = 0;
+  for (const h of hits) {
+    if (h.start < lastEnd) continue;
+    if (h.start > lastEnd) {
+      segments.push({ kind: "text", text: text.slice(lastEnd, h.start) });
     }
-    segments.push({ kind: "file", text: hit.raw, path: hit.raw });
-    lastEnd = end;
+    segments.push({ kind: "file", text: h.display, path: h.path });
+    lastEnd = h.end;
   }
   if (lastEnd < text.length) {
     segments.push({ kind: "text", text: text.slice(lastEnd) });
@@ -218,13 +274,87 @@ export interface PathMatch {
   openPath: string;
 }
 
+/** パス本体1文字（PATH_TOKEN と同クラス、ドライブ展開ウォーク用）。 */
+const PATH_BODY_CHAR = /[\p{L}\p{N}_.:+（）()【】「」§※・〜＆＃＠&#@/\\~-]/u;
+/**
+ * ドライブレター起点の貪欲展開でのみ追加で許す文字。
+ * 日本語ファイル名には「。」「、」や空白が普通に入る（例: 運命は変えられる。魂の建築学 習慣.pdf）。
+ * 通常の正規表現クラスにこれらを入れると地の文を丸飲みするため、
+ * 「D:\ 等の強いアンカーで始まる場合だけ」「最初の有効拡張子まで」に限定して許可する。
+ */
+const PATH_EXTRA_CHAR = /[、。]/u;
+
+/**
+ * ドライブレター（D:\ / C:/）起点のパスを貪欲に検出する。
+ *
+ * アルゴリズム: アンカーから 1 文字ずつ進み、
+ *  - パス構成文字・「。」「、」・単一の空白は取り込む（連続2空白は区切りとみなし打ち切り）
+ *  - 「.拡張子(ホワイトリスト内)＋境界」に到達したら**そこで停止**して確定する
+ *    （最初の有効拡張子で止まる＝`D:\a.md と D:\b.md` を丸飲みしない）
+ *  - 有効拡張子に到達しないまま途切れたら不採用（従来の正規表現パスに委ねる）
+ */
+export function findDrivePathMatches(line: string): PathMatch[] {
+  if (!line) return [];
+  const out: PathMatch[] = [];
+  const anchorRe = /[A-Za-z]:[\\/]/g;
+  let am: RegExpExecArray | null;
+  while ((am = anchorRe.exec(line)) !== null) {
+    const start = am.index;
+    // 直前が英数字ならスキーム（https:// 等）や識別子の一部なので除外
+    const prev = start > 0 ? line[start - 1] : "";
+    if (/[A-Za-z0-9]/.test(prev)) continue;
+    let i = start + am[0].length;
+    let end = -1;
+    let spaceRun = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      if (ch === " ") {
+        spaceRun++;
+        if (spaceRun >= 2) break; // 連続空白＝カラム区切り/行末パディング
+        i++;
+        continue;
+      }
+      // 別のドライブアンカーが始まったら打ち切り（複数パスの併記）
+      if (
+        i > start + am[0].length &&
+        /^[A-Za-z]:[\\/]/.test(line.slice(i, i + 3))
+      ) {
+        break;
+      }
+      if (!PATH_BODY_CHAR.test(ch) && !PATH_EXTRA_CHAR.test(ch)) break;
+      spaceRun = 0;
+      if (ch === ".") {
+        const m2 = line
+          .slice(i)
+          .match(/^\.([A-Za-z0-9]{1,8})(?![A-Za-z0-9])/);
+        if (m2 && isLinkableExt(m2[1].toLowerCase())) {
+          end = i + m2[0].length;
+          break; // 最初の有効拡張子で停止（誤爆防止の要）
+        }
+      }
+      i++;
+    }
+    if (end < 0) continue;
+    const openPath = line.slice(start, end);
+    let raw = openPath;
+    // :line(:col) サフィックスは表示に含め、開くパスからは除外（従来仕様と同じ）
+    const lc = line.slice(end).match(/^:(\d+)(?::\d+)?/);
+    if (lc) raw += lc[0];
+    out.push({ start, end: start + raw.length, raw, openPath });
+    anchorRe.lastIndex = start + raw.length;
+  }
+  return out;
+}
+
 // ドライブ接頭辞 + パス本体（`:` は本体に含めない＝行番号と分離）+ 末尾 :line(:col)
 const FILE_PATH_RE =
   /(?:[A-Za-z]:)?[\p{L}\p{N}_.+（）()【】「」§※・〜＆＃＠&#@/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
 
 export function findPathMatches(line: string): PathMatch[] {
   if (!line) return [];
-  const out: PathMatch[] = [];
+  // ドライブレター起点は貪欲展開（「。」「、」空白入りの日本語ファイル名対応）を優先
+  const driveHits = findDrivePathMatches(line);
+  const out: PathMatch[] = [...driveHits];
   FILE_PATH_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = FILE_PATH_RE.exec(line)) !== null) {
@@ -252,11 +382,15 @@ export function findPathMatches(line: string): PathMatch[] {
     const dot = openPath.lastIndexOf(".");
     if (dot <= 0) continue;
     const ext = openPath.slice(dot + 1).toLowerCase();
-    if (!CLICKABLE_EXTENSIONS.has(ext)) continue;
+    if (!isLinkableExt(ext)) continue;
     // バージョン文字列(1.2.3 等)を除外
     if (/^\d+(?:\.\d+)+$/.test(openPath)) continue;
-    out.push({ start, end: start + token.length, raw: token, openPath });
+    // ドライブ展開で確定済みの範囲と重なるものは捨てる（二重リンク防止）
+    const end = start + token.length;
+    if (driveHits.some((h) => start < h.end && end > h.start)) continue;
+    out.push({ start, end, raw: token, openPath });
   }
+  out.sort((a, b) => a.start - b.start);
   return out;
 }
 

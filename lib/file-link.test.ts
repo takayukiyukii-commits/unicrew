@@ -6,6 +6,7 @@ import {
   resolveFilePath,
   escapeMarkdownInPaths,
   unwrapPaths,
+  isExternalOpenPath,
 } from "./file-link";
 
 // バックスラッシュをテスト文字列にそのまま埋めるためのヘルパ。
@@ -247,5 +248,78 @@ describe("pnpm パス（+ 入り）の全長リンク化", () => {
   it(".d.ts.map もクリック可能拡張子として拾う", () => {
     const segs = segmentText(`x.d.ts.map を確認`);
     expect(segs.find((s) => s.kind === "file")?.path).toBe("x.d.ts.map");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 回帰: 「。」「、」空白入り日本語ファイル名（2026-07-03 結城さん報告 意地悪ケース） */
+/* ------------------------------------------------------------------ */
+
+describe("findDrivePathMatches - 。、空白入りパスの貪欲展開", () => {
+  const pdfPath =
+    `D:${BS}company${BS}CDO（技術責任者）${BS}参考資料${BS}AI作成ファイル` +
+    `${BS}マインドセット、メンタル管理` +
+    `${BS}運命は変えられる。性格は作れる。魂の建築学 習慣と思考のコントロール.pdf`;
+
+  it("「。」「、」空白入りの実在系パスを全長1本で検出する（findPathMatches）", () => {
+    const hits = findPathMatches(`- ${pdfPath}`);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(pdfPath);
+  });
+
+  it("segmentText でも全長1リンクになる", () => {
+    const segs = segmentText(`- ${pdfPath}（145文字）`);
+    const file = segs.find((s) => s.kind === "file");
+    expect(file?.path).toBe(pdfPath);
+  });
+
+  it("複数パス併記は最初の有効拡張子で止まり丸飲みしない", () => {
+    const line = `D:${BS}a.md と D:${BS}b.md`;
+    const hits = findPathMatches(line);
+    expect(hits.length).toBe(2);
+    expect(hits[0].openPath).toBe(`D:${BS}a.md`);
+    expect(hits[1].openPath).toBe(`D:${BS}b.md`);
+  });
+
+  it("パスの後の地の文（を確認して…）を飲み込まない", () => {
+    const line = `D:${BS}dir${BS}file.md を確認して other.md も見る`;
+    const hits = findPathMatches(line);
+    expect(hits[0].openPath).toBe(`D:${BS}dir${BS}file.md`);
+    // 後続の other.md は独立したリンク
+    expect(hits.some((h) => h.openPath === "other.md")).toBe(true);
+  });
+
+  it("連続2空白（カラム区切り/パディング）で展開を打ち切る", () => {
+    const line = `D:${BS}dir${BS}名前  ここは表の隣列.md`;
+    const hits = findPathMatches(line);
+    // D:\\dir\\名前 は拡張子に到達しないので不採用。隣列の .md だけが独立検出される
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe("ここは表の隣列.md");
+  });
+
+  it("https:// の「s:/」をドライブと誤認しない", () => {
+    const line = "参照: https://example.com/docs/a.md";
+    const hits = findPathMatches(line);
+    expect(hits.length).toBe(0); // URL は除外（findUrlMatches の担当）
+  });
+
+  it("バージョン番号入りディレクトリ（.7 等）で早期停止しない", () => {
+    const p = `D:${BS}pkg${BS}v2.7.0_lib${BS}file.md`;
+    const hits = findPathMatches(p);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(p);
+  });
+
+  it("pdf / 画像は外部アプリ判定（isExternalOpenPath）", () => {
+    expect(isExternalOpenPath(pdfPath)).toBe(true);
+    expect(isExternalOpenPath(`D:${BS}x.png`)).toBe(true);
+    expect(isExternalOpenPath(`D:${BS}x.md`)).toBe(false);
+  });
+
+  it(":line:col サフィックスも従来通り扱える", () => {
+    const line = `D:${BS}src${BS}app.ts:12:3 でエラー`;
+    const hits = findPathMatches(line);
+    expect(hits[0].openPath).toBe(`D:${BS}src${BS}app.ts`);
+    expect(hits[0].raw).toBe(`D:${BS}src${BS}app.ts:12:3`);
   });
 });

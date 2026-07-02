@@ -3453,6 +3453,13 @@ async fn resolve_file_candidate(
 }
 
 
+/// パスの実在確認（③改: 実在しない絶対パスで壊れたエディタ画面を開かないための事前チェック）。
+#[tauri::command]
+async fn path_exists(path: String) -> Result<bool, String> {
+    let p = expand_user_path(&path);
+    Ok(tokio::fs::try_exists(&p).await.unwrap_or(false))
+}
+
 /// 設計書⑤: シェル情報（default_shell の返り値）。
 #[derive(serde::Serialize, Clone)]
 struct ShellInfo {
@@ -3864,6 +3871,7 @@ pub fn run() {
             pty::pty_kill,
             read_text_file,
             resolve_file_candidate,
+            path_exists,
             default_shell,
             read_file_base64,
             write_text_file,

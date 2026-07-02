@@ -74,6 +74,8 @@ export function InteractiveTerminal({
    * イベント注入に変換して TUI 側をスクロールさせる（ホイール対応と同方式）。
    */
   const [tuiMouse, setTuiMouse] = useState(false);
+  /** TUI モード時のつまみ位置（%）。ドラッグ中は指に追従し、離すと中央へ戻る。 */
+  const [tuiThumbTop, setTuiThumbTop] = useState(40);
   /** TUI へのホイール注入関数（effect 内で生成・cleanup で null）。 */
   const tuiInjectRef = useRef<((down: boolean, lines: number) => void) | null>(
     null,
@@ -143,12 +145,19 @@ export function InteractiveTerminal({
         tuiInjectRef.current(n > 0, Math.min(Math.abs(n), 10));
         dragLastYRef.current += n * STEP_PX;
       }
+      // つまみは指に追従させる（TUI は絶対位置を持たないため視覚フィードバックのみ）
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (rect && rect.height > 0) {
+        const pct = ((e.clientY - rect.top) / rect.height) * 100 - 10;
+        setTuiThumbTop(Math.min(80, Math.max(0, pct)));
+      }
     },
     [hasScrollback, scrollToClientY],
   );
   const onTrackPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       draggingRef.current = false;
+      setTuiThumbTop(40); // TUI つまみは離したら中央へ戻す
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -892,7 +901,7 @@ export function InteractiveTerminal({
             // ドラッグ量をホイール注入に変換して TUI をスクロールさせる
             <div
               className="absolute right-0.5 w-1.5 rounded bg-black/15 hover:bg-black/30 transition-colors"
-              style={{ height: "20%", top: "40%" }}
+              style={{ height: "20%", top: `${tuiThumbTop}%` }}
             />
           )}
         </div>

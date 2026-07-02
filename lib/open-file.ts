@@ -15,7 +15,8 @@
  */
 
 import { openFileInEditorWindow } from "./editor-window";
-import { resolveFilePath } from "./file-link";
+import { isExternalOpenPath, resolveFilePath } from "./file-link";
+import { openExternal } from "./preview-window";
 import { showToast } from "./toast";
 import { t } from "./i18n";
 
@@ -31,7 +32,20 @@ export async function openFileSmart(
 ): Promise<void> {
   const base = workspace ?? cwd ?? null;
   let target = resolveFilePath(raw, base);
-  if (!isAbsoluteLike(raw) && base) {
+  if (isAbsoluteLike(raw)) {
+    // 絶対パスは実在を事前チェック。AI が実在しないパスを出力した場合に
+    // 「読み込み失敗」の壊れたエディタ画面を開かず、トーストで明示する。
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const exists = await invoke<boolean>("path_exists", { path: target });
+      if (!exists) {
+        showToast(t("fileOpen.notFoundAbs", { path: raw }), "error");
+        return;
+      }
+    } catch {
+      /* チェック不可の環境では従来どおり開きに行く */
+    }
+  } else if (base) {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const found = await invoke<string | null>("resolve_file_candidate", {
@@ -48,6 +62,11 @@ export async function openFileSmart(
     } catch {
       /* 探索コマンド自体が使えない環境では従来解決で続行 */
     }
+  }
+  // PDF・画像・Office 等はテキストエディタでなく OS 既定アプリで開く
+  if (isExternalOpenPath(target)) {
+    await openExternal(target);
+    return;
   }
   try {
     await openFileInEditorWindow(target);

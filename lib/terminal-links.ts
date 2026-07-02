@@ -207,11 +207,30 @@ export function readLogicalLine(
         rowIsNull.pop();
       }
     } else if (isHardWrapContinuation(line, nextLine)) {
-      // ハードラップ継続前の行末の空白/空セル（slack 分）も除去して密着させる
-      while (rowText.length > 0 && rowText[rowText.length - 1] === " ") {
+      // ハードラップ継続前の行末処理:
+      //  - null セル（未書込）は常に除去（内容ではありえない）
+      //  - 実スペースは「2個以上＝パディング」のときだけ除去。
+      //    1個だけなら「ファイル名内の空白」（例: 魂の建築学 習慣.pdf）の可能性が
+      //    あるため保持する（リンク検出側のドライブ展開が単一空白を跨げる）。
+      while (rowIsNull.length > 0 && rowIsNull[rowIsNull.length - 1]) {
         rowText.pop();
         rowMap.pop();
         rowIsNull.pop();
+      }
+      let spaces = 0;
+      for (
+        let k = rowText.length - 1;
+        k >= 0 && rowText[k] === " ";
+        k--
+      ) {
+        spaces++;
+      }
+      if (spaces >= 2) {
+        for (let k = 0; k < spaces; k++) {
+          rowText.pop();
+          rowMap.pop();
+          rowIsNull.pop();
+        }
       }
     }
     text += rowText.join("");
