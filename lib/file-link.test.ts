@@ -205,3 +205,47 @@ describe("unwrapPaths - 折り返し改行で分断されたパスの接合", ()
     expect(unwrapPaths(src)).toBe(src);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 回帰: pnpm パス（+ を含む）: 2026-07-03 結城さん報告                  */
+/* ------------------------------------------------------------------ */
+
+describe("pnpm パス（+ 入り）の全長リンク化", () => {
+  const pnpmPath =
+    `D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm` +
+    `${BS}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0` +
+    `${BS}node_modules${BS}@sentry${BS}nextjs${BS}build${BS}types-ts3.8` +
+    `${BS}wrapDocumentGetInitialPropsWithSentry.d.ts`;
+
+  it("segmentText: + で分断されず全長が 1 リンクになる", () => {
+    const segs = segmentText(`1. ${pnpmPath}（298文字）`);
+    const file = segs.find((s) => s.kind === "file");
+    expect(file?.path).toBe(pnpmPath);
+  });
+
+  it("findPathMatches: + 入りパスを 1 本で検出する", () => {
+    const hits = findPathMatches(`  1. ${pnpmPath}（298文字）`);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(pnpmPath);
+  });
+
+  it("unwrapPaths: インデント付き実改行で 3 分割された + 入りパスを接合する", () => {
+    const src = [
+      `  1. D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core`,
+      `  @2.7.0_@opentelemetry+api@1.9.1${BS}node_modules${BS}@sentry${BS}nextjs${BS}b`,
+      `  uild${BS}types-ts3.8${BS}wrapDocumentGetInitialPropsWithSentry.d.ts（298文字）`,
+    ].join("\n");
+    const out = unwrapPaths(src);
+    expect(out).not.toContain("\n");
+    const hits = findPathMatches(out);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(
+      `D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0_@opentelemetry+api@1.9.1${BS}node_modules${BS}@sentry${BS}nextjs${BS}build${BS}types-ts3.8${BS}wrapDocumentGetInitialPropsWithSentry.d.ts`,
+    );
+  });
+
+  it(".d.ts.map もクリック可能拡張子として拾う", () => {
+    const segs = segmentText(`x.d.ts.map を確認`);
+    expect(segs.find((s) => s.kind === "file")?.path).toBe("x.d.ts.map");
+  });
+});

@@ -244,3 +244,71 @@ describe("readLogicalLine - ConPTY ハードラップ連結（設計書④ B-1�
     expect(info.endRow).toBe(0);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 回帰: Ink 折り返し（実改行＋2スペースインデント）: 2026-07-03 報告    */
+/* ------------------------------------------------------------------ */
+
+/** Ink 風のハードラップ再現: 継続行の先頭に indent 個のスペースを付ける。 */
+function layoutInkWrap(
+  text: string,
+  cols: number,
+  indent: number,
+): LineLike[] {
+  const rows: FakeCell[][] = [[]];
+  let cur = rows[0];
+  for (const ch of text) {
+    const w = isWide(ch) ? 2 : 1;
+    if (cur.length + w > cols) {
+      cur = [];
+      rows.push(cur);
+      for (let i = 0; i < indent; i++) cur.push(cell(" ", 1));
+    }
+    cur.push(cell(ch, w));
+    for (let i = 1; i < w; i++) cur.push(cell("", 0));
+  }
+  return rows.map((cells) => ({
+    isWrapped: false,
+    length: cols,
+    getCell: (x: number) => cells[x] ?? cell("", 1),
+  }));
+}
+
+describe("readLogicalLine - Ink 折り返し（インデント付き継続行）の連結", () => {
+  const BS3 = "\\";
+  const pnpmPath =
+    `D:${BS3}company${BS3}unistep${BS3}node_modules${BS3}.pnpm` +
+    `${BS3}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0` +
+    `${BS3}nextjs${BS3}build${BS3}wrapDocumentGetInitialPropsWithSentry.d.ts`;
+
+  it("2スペースインデントの継続行を接合して + 入りパスを全長1本で検出できる", () => {
+    const lines = layoutInkWrap(pnpmPath, 40, 2);
+    expect(lines.length).toBeGreaterThan(2);
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe(pnpmPath);
+    const hits = findPathMatches(info.text);
+    expect(hits.length).toBe(1);
+    expect(hits[0].openPath).toBe(pnpmPath);
+    // クリック範囲は先頭行〜最終行まで届く
+    const range = matchToBufferRange(info, hits[0].start, hits[0].end)!;
+    expect(range.start.y).toBe(1);
+    expect(range.end.y).toBe(lines.length);
+  });
+
+  it("行末が2セルまで空いていても（幅-1折り返し）連結できる", () => {
+    // cols=41 のうち 40 文字で折り返し → 最終セル1つが空く状況を再現
+    const lines = layoutInkWrap(pnpmPath, 41, 2);
+    // layoutInkWrap は詰めて置くため、意図的に 1 行目の最終セルを空にする
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe(pnpmPath);
+  });
+
+  it("インデント後が箇条書き等の別内容なら（前行が空白終わり）連結しない", () => {
+    const l1 = layoutInkWrap("項目1です。", 40, 0); // 短い行＝行末が空きすぎ
+    const l2 = layoutInkWrap("  2. next.md", 40, 0);
+    const lines = [...l1, ...l2];
+    const info = readLogicalLine(asGetLine(lines), 0)!;
+    expect(info.text).toBe("項目1です。");
+    expect(info.endRow).toBe(0);
+  });
+});

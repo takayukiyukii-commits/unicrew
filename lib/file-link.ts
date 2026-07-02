@@ -73,6 +73,7 @@ const CLICKABLE_EXTENSIONS = new Set([
   "csv",
   "tsv",
   "xml",
+  "map",
 ]);
 
 /** ファイルパスっぽい文字列の正規表現。
@@ -84,7 +85,7 @@ const CLICKABLE_EXTENSIONS = new Set([
  *  - 末尾は `.<拡張子>` で終わる
  *  - 区切り文字を含まない単発の `xxx.md` も拾う
  */
-const PATH_TOKEN = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\-]+\.[A-Za-z0-9]{1,8}/gu;
+const PATH_TOKEN = /[\p{L}\p{N}_.:+（）()【】「」§※・〜＆＃＠&#@/\\-]+\.[A-Za-z0-9]{1,8}/gu;
 
 /** Windows ドライブレター（例 `D:\` / `C:/`）を表す強いアンカー。 */
 const DRIVE_ANCHOR = /[A-Za-z]:[\\/]/;
@@ -219,7 +220,7 @@ export interface PathMatch {
 
 // ドライブ接頭辞 + パス本体（`:` は本体に含めない＝行番号と分離）+ 末尾 :line(:col)
 const FILE_PATH_RE =
-  /(?:[A-Za-z]:)?[\p{L}\p{N}_.（）()【】「」§※・〜＆＃＠&#@/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
+  /(?:[A-Za-z]:)?[\p{L}\p{N}_.+（）()【】「」§※・〜＆＃＠&#@/\\~-]*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?/gu;
 
 export function findPathMatches(line: string): PathMatch[] {
   if (!line) return [];
@@ -386,9 +387,9 @@ export function escapeMarkdownInPaths(src: string): string {
 }
 
 /** 行末が「パス構成文字」で終わるか（PATH_TOKEN の文字クラスと揃える）。 */
-const WRAP_TAIL = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\-]$/u;
+const WRAP_TAIL = /[\p{L}\p{N}_.:+（）()【】「」§※・〜＆＃＠&#@/\\-]$/u;
 /** 継続行の先頭（インデント除去後）が「パス構成文字」で始まるか。 */
-const WRAP_HEAD = /^[\p{L}\p{N}_.:／/\\-]/u;
+const WRAP_HEAD = /^[\p{L}\p{N}_.:+（）()【】「」§※・〜＆＃＠&#@／/\\-]/u;
 /** リスト・番号付きリストのマーカー（継続行と誤認して接合しない）。 */
 const LIST_MARKER = /^(?:[-*+][ \t]|\d+[.)][ \t])/;
 

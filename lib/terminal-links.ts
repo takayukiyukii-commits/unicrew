@@ -59,24 +59,51 @@ const MAX_LOGICAL_ROWS = 40;
  * パス構成文字（lib/file-link.ts の PATH_TOKEN と揃える）。
  * ConPTY ハードラップ連結（下記 isHardWrapContinuation）の誤爆を抑えるために使う。
  */
-const PATH_EDGE_CHAR = /[\p{L}\p{N}_.:（）()【】「」§※・〜＆＃＠&#@/\\~-]/u;
+const PATH_EDGE_CHAR = /[\p{L}\p{N}_.:+（）()【】「」§※・〜＆＃＠&#@/\\~-]/u;
 
-/** 行の「最後の実セル」の文字を返す（全角の後半セルはスキップ。空行なら ""）。 */
-function lastCellChars(line: LineLike): string {
+/** ハードラップ継続行の先頭で許容するインデント幅（Ink 等の折り返しインデント吸収）。 */
+const MAX_HARD_WRAP_INDENT = 8;
+/** 行末側で許容する未使用セル数（Ink は幅-1〜-2 で折り返すことがある）。 */
+const MAX_TAIL_SLACK = 2;
+
+/**
+ * 行末側の「最後の実文字セル」を返す。末尾の空セル/空白は MAX_TAIL_SLACK 個まで
+ * 許容し、それより空いている行は「幅いっぱいまで埋まっていない＝折り返しではない」
+ * として null を返す（誤連結防止の要）。
+ */
+function lastContentChar(line: LineLike): { chars: string; x: number } | null {
+  let skipped = 0;
   for (let x = line.length - 1; x >= 0; x--) {
     const cell = line.getCell(x);
     if (!cell) continue;
     if (cell.getWidth() === 0) continue; // 全角の後半セル
-    return cell.getChars(); // null セルは "" が返る＝行末まで埋まっていない
+    const ch = cell.getChars();
+    if (ch === "" || ch === " ") {
+      skipped++;
+      if (skipped > MAX_TAIL_SLACK) return null;
+      continue;
+    }
+    return { chars: ch, x };
   }
-  return "";
+  return null;
 }
 
-/** 行の先頭セルの文字を返す（空なら ""）。 */
-function firstCellChars(line: LineLike): string {
-  const cell = line.getCell(0);
-  if (!cell || cell.getWidth() === 0) return "";
-  return cell.getChars();
+/**
+ * 継続行の先頭インデント（空白/空セル、MAX_HARD_WRAP_INDENT 個まで）をスキップした
+ * 最初の実文字セルを返す。claude(Ink) は折り返し継続行に 2 スペースのインデントを
+ * 付けるため、先頭セル固定の判定だと連結できない。
+ */
+function firstContentChar(line: LineLike): { chars: string; x: number } | null {
+  const limit = Math.min(line.length, MAX_HARD_WRAP_INDENT + 1);
+  for (let x = 0; x < limit; x++) {
+    const cell = line.getCell(x);
+    if (!cell) continue;
+    if (cell.getWidth() === 0) continue;
+    const ch = cell.getChars();
+    if (ch === "" || ch === " ") continue;
+    return { chars: ch, x };
+  }
+  return null;
 }
 
 /**
@@ -93,10 +120,10 @@ function isHardWrapContinuation(
   cur: LineLike | undefined,
 ): boolean {
   if (!prev || !cur) return false;
-  const tail = lastCellChars(prev);
-  if (!tail || !PATH_EDGE_CHAR.test(tail)) return false;
-  const head = firstCellChars(cur);
-  return Boolean(head) && PATH_EDGE_CHAR.test(head);
+  const tail = lastContentChar(prev);
+  if (!tail || !PATH_EDGE_CHAR.test(tail.chars)) return false;
+  const head = firstContentChar(cur);
+  return head != null && PATH_EDGE_CHAR.test(head.chars);
 }
 
 /** cur 行が prev 行の続き（ソフトラップ or ConPTY ハードラップ）か。 */
@@ -143,6 +170,10 @@ export function readLogicalLine(
     const rowText: string[] = [];
     const rowMap: CellRef[] = [];
     const rowIsNull: boolean[] = [];
+    // ConPTY/Ink ハードラップの継続行は先頭インデント（空白）をスキップして接合する
+    // （インデント込みだと空白がパスを分断する）。ソフトラップ行はそのまま。
+    let skipIndent =
+      r !== startRow && !line.isWrapped ? MAX_HARD_WRAP_INDENT : 0;
     for (let x = 0; x < line.length; x++) {
       const cell = line.getCell(x);
       if (!cell) continue;
@@ -150,6 +181,13 @@ export function readLogicalLine(
       // width 0 = 全角文字の後半セル（実体は前のセル）→ スキップ
       if (width === 0) continue;
       const raw = cell.getChars();
+      if (skipIndent > 0) {
+        if (raw === "" || raw === " ") {
+          skipIndent--;
+          continue;
+        }
+        skipIndent = 0;
+      }
       const chars = raw || " "; // 空(null)セルはスペース扱い
       for (let i = 0; i < chars.length; i++) {
         rowText.push(chars[i]);
@@ -160,9 +198,17 @@ export function readLogicalLine(
     // 全角文字が行末1セルに収まらず折り返したとき、xterm は行末に null セルを
     // 残す。次行へ続く行（=最終行以外）の末尾 null セルはこのパディングなので
     // 取り除く（残すと論理行テキストに幽霊スペースが入りパスが分断される）。
-    const nextWrapped = getLine(r + 1)?.isWrapped === true;
+    const nextLine = getLine(r + 1);
+    const nextWrapped = nextLine?.isWrapped === true;
     if (nextWrapped) {
       while (rowIsNull.length > 0 && rowIsNull[rowIsNull.length - 1]) {
+        rowText.pop();
+        rowMap.pop();
+        rowIsNull.pop();
+      }
+    } else if (isHardWrapContinuation(line, nextLine)) {
+      // ハードラップ継続前の行末の空白/空セル（slack 分）も除去して密着させる
+      while (rowText.length > 0 && rowText[rowText.length - 1] === " ") {
         rowText.pop();
         rowMap.pop();
         rowIsNull.pop();

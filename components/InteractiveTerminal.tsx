@@ -66,10 +66,21 @@ export function InteractiveTerminal({
     buffer?: { active?: { length: number; viewportY: number } };
     scrollToLine(line: number): void;
   } | null>(null);
-  /** スクロールバック量と表示位置（つまみ描画用）。max=0 のときバー非表示。 */
+  /** スクロールバック量と表示位置（つまみ描画用）。 */
   const [scroll, setScroll] = useState({ top: 0, max: 0, rows: 0 });
+  /**
+   * TUI（claude 等）がマウストラッキングを要求中か。true の間はスクロールバックが
+   * 無くても（＝TUI が画面を管理していても）バーを出し、ドラッグ量をホイール
+   * イベント注入に変換して TUI 側をスクロールさせる（ホイール対応と同方式）。
+   */
+  const [tuiMouse, setTuiMouse] = useState(false);
+  /** TUI へのホイール注入関数（effect 内で生成・cleanup で null）。 */
+  const tuiInjectRef = useRef<((down: boolean, lines: number) => void) | null>(
+    null,
+  );
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const dragLastYRef = useRef(0);
 
   /** トラック上の縦位置 → スクロールバック行へ写像して xterm を移動する。 */
   const scrollToClientY = useCallback((clientY: number) => {
@@ -88,26 +99,52 @@ export function InteractiveTerminal({
     }
   }, []);
 
+  /** いま xterm バッファにスクロールバックがあるか（TUI 相対モードとの切替判定）。 */
+  const hasScrollback = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return false;
+    try {
+      const buf = term.buffer?.active;
+      return Math.max(0, (buf?.length ?? 0) - term.rows) > 0;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const onTrackPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       // テキスト選択やフォーカス移動を起こさずにドラッグを開始する
       e.preventDefault();
       draggingRef.current = true;
+      dragLastYRef.current = e.clientY;
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {
         /* noop */
       }
-      scrollToClientY(e.clientY);
+      if (hasScrollback()) scrollToClientY(e.clientY);
     },
-    [scrollToClientY],
+    [hasScrollback, scrollToClientY],
   );
   const onTrackPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (!draggingRef.current) return;
-      scrollToClientY(e.clientY);
+      if (hasScrollback()) {
+        // スクロールバックあり: トラック位置→行の絶対写像
+        scrollToClientY(e.clientY);
+        dragLastYRef.current = e.clientY;
+        return;
+      }
+      // TUI モード: ドラッグ移動量をホイールイベント注入に変換（相対スクロール）
+      const STEP_PX = 8; // 8px ごとに 1 行ぶん注入
+      const delta = e.clientY - dragLastYRef.current;
+      const n = Math.trunc(delta / STEP_PX);
+      if (n !== 0 && tuiInjectRef.current) {
+        tuiInjectRef.current(n > 0, Math.min(Math.abs(n), 10));
+        dragLastYRef.current += n * STEP_PX;
+      }
     },
-    [scrollToClientY],
+    [hasScrollback, scrollToClientY],
   );
   const onTrackPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -140,6 +177,7 @@ export function InteractiveTerminal({
     const scrollDisposables: Array<{ dispose(): void }> = [];
     // workspace 切替等で PTY を開き直す際、前セッションのバー状態を持ち越さない
     setScroll({ top: 0, max: 0, rows: 0 });
+    setTuiMouse(false);
 
     /**
      * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
@@ -348,7 +386,10 @@ export function InteractiveTerminal({
           (params: (number | number[])[]) => {
             const flat = flatten(params);
             if (!flat.some(isMouse)) return false; // マウス無関係はそのまま処理
-            if (flat.some((p) => MOUSE_TRACK.has(p))) appMouseRequested = true;
+            if (flat.some((p) => MOUSE_TRACK.has(p))) {
+              appMouseRequested = true;
+              setTuiMouse(true); // TUI用ドラッグスクロールバーを出す
+            }
             if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = true;
             return true; // 握りつぶす＝xterm では有効化しない
           },
@@ -358,11 +399,31 @@ export function InteractiveTerminal({
           { prefix: "?", final: "l" },
           (params: (number | number[])[]) => {
             const flat = flatten(params);
-            if (flat.some((p) => MOUSE_TRACK.has(p))) appMouseRequested = false;
+            if (flat.some((p) => MOUSE_TRACK.has(p))) {
+              appMouseRequested = false;
+              setTuiMouse(false);
+            }
             if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = false;
             return false; // 無効化はそのまま xterm に処理させる
           },
         );
+        // ドラッグスクロールバー（TUIモード）からも使うホイール注入関数。
+        // 位置は画面中央を名乗る（claude 等はホイールの座標を見ないため十分）。
+        tuiInjectRef.current = (down: boolean, lines: number) => {
+          if (!appMouseRequested) return;
+          try {
+            const col = Math.max(1, Math.floor((term.cols || 2) / 2));
+            const row = Math.max(1, Math.floor((term.rows || 2) / 2));
+            const seq = appMouseSgr
+              ? `\x1b[<${down ? 65 : 64};${col};${row}M`
+              : `\x1b[M${String.fromCharCode(down ? 97 : 96, 32 + col, 32 + row)}`;
+            let payload = "";
+            for (let i = 0; i < lines; i++) payload += seq;
+            void ptyWriteText(id, payload);
+          } catch {
+            /* 失敗時はスクロールしない */
+          }
+        };
         // ホイール: アプリがマウス要求中なら PTY にホイールイベントを注入して
         // TUI をスクロールさせる（xterm 自身のバッファスクロールは抑止）。
         term.attachCustomWheelEventHandler((e: WheelEvent) => {
@@ -783,6 +844,7 @@ export function InteractiveTerminal({
         }
       }
       termRef.current = null;
+      tuiInjectRef.current = null;
       void ptyKill(id);
       try {
         term?.dispose();
@@ -811,7 +873,7 @@ export function InteractiveTerminal({
   return (
     <div className="relative h-full w-full bg-[#faf9f6] p-2">
       <div ref={ref} className="h-full w-full" />
-      {scroll.max > 0 && (
+      {(scroll.max > 0 || tuiMouse) && (
         <div
           ref={trackRef}
           className="absolute top-2 right-0 bottom-2 w-3 cursor-ns-resize select-none touch-none"
@@ -820,10 +882,19 @@ export function InteractiveTerminal({
           onPointerUp={onTrackPointerUp}
           onPointerCancel={onTrackPointerUp}
         >
-          <div
-            className="absolute right-0.5 w-1.5 rounded bg-black/20 hover:bg-black/35 transition-colors"
-            style={{ height: `${thumbPct}%`, top: `${thumbTopPct}%` }}
-          />
+          {scroll.max > 0 ? (
+            <div
+              className="absolute right-0.5 w-1.5 rounded bg-black/20 hover:bg-black/35 transition-colors"
+              style={{ height: `${thumbPct}%`, top: `${thumbTopPct}%` }}
+            />
+          ) : (
+            // TUI（claude等）モード: 位置の概念が無いので中央固定のハンドルを出し、
+            // ドラッグ量をホイール注入に変換して TUI をスクロールさせる
+            <div
+              className="absolute right-0.5 w-1.5 rounded bg-black/15 hover:bg-black/30 transition-colors"
+              style={{ height: "20%", top: "40%" }}
+            />
+          )}
         </div>
       )}
     </div>
