@@ -2242,6 +2242,11 @@ fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
     // (root_prefix, relative_path_template, exe_name) のテーブル。
     // `{name}` プレースホルダを引数で置換。プロバイダ追加時はここに 1 行足す。
     let recipes: Vec<(Option<&std::path::PathBuf>, &str)> = vec![
+        // winget portable パッケージ共通のシム置き場（Anthropic.ClaudeCode 等）。
+        // winget はユーザー PATH（レジストリ）に Links を足すが、起動中プロセスの
+        // PATH には反映されないため、ここを直接探す。
+        // ＝「ワンクリックインストール成功直後なのに claude が見つからない」の根治。
+        (local_appdata.as_ref(), "Microsoft/WinGet/Links"),
         // winget の Ollama.Ollama 既定
         (local_appdata.as_ref(), "Programs/Ollama"),
         // 一般的な ProgramFiles 配置
@@ -2526,42 +2531,90 @@ async fn start_claude_login(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// インストールコマンドを隠しウィンドウで実行し、stdout / stderr の両方を
+/// `claude_install:line` としてフロントに流す。終了コード成功なら true。
+/// （旧実装は stderr を読み捨てており、失敗理由がユーザーに見えなかった）
+#[cfg(target_os = "windows")]
+async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> bool {
+    let mut cmd = build_silent_command(program);
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = app.emit(
+                "claude_install:line",
+                format!("{program} の起動に失敗しました: {e}"),
+            );
+            return false;
+        }
+    };
+    if let Some(out) = child.stdout.take() {
+        let a = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut r = BufReader::new(out).lines();
+            while let Ok(Some(l)) = r.next_line().await {
+                let _ = a.emit("claude_install:line", l);
+            }
+        });
+    }
+    if let Some(err) = child.stderr.take() {
+        let a = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut r = BufReader::new(err).lines();
+            while let Ok(Some(l)) = r.next_line().await {
+                let _ = a.emit("claude_install:line", l);
+            }
+        });
+    }
+    matches!(child.wait().await, Ok(s) if s.success())
+}
+
 #[tauri::command]
 async fn install_claude_code(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let mut cmd = build_silent_command("winget");
-        cmd.args([
-            "install",
-            "--silent",
-            "--id",
-            "Anthropic.ClaudeCode",
-            "--accept-source-agreements",
-            "--accept-package-agreements",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-        let mut child = cmd.spawn().map_err(|e| {
-            format!(
-                "winget の起動に失敗しました（Windows 10 1809以降が必要）: {}",
-                e
-            )
-        })?;
-        let stdout = child.stdout.take().ok_or("no stdout")?;
-
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = app_clone.emit("claude_install:line", line);
-            }
-        });
-
+        // ワンクリックインストール（Windows）:
+        //   第1経路: winget (Anthropic.ClaudeCode / portable)
+        //   第2経路: 公式ネイティブインストーラ irm https://claude.ai/install.ps1 | iex
+        //            （winget が無い/古い/失敗した PC の救済。%USERPROFILE%\.local\bin に入る）
+        // どちらも完了後に resolve_on_path("claude") で「本当に検出できるか」を検証して
+        // から done を通知する（インストーラの成功コードだけを信用しない）。
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
-            let exit = child.wait().await;
-            let success = matches!(&exit, Ok(s) if s.success());
+            let winget_ok = run_streamed_install(
+                &app_done,
+                "winget",
+                &[
+                    "install",
+                    "--silent",
+                    "--id",
+                    "Anthropic.ClaudeCode",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ],
+            )
+            .await;
+            let mut success = winget_ok && resolve_on_path("claude").is_some();
+            if !success {
+                let _ = app_done.emit(
+                    "claude_install:line",
+                    "winget での導入に失敗または検出できませんでした。公式インストーラで再試行します…"
+                        .to_string(),
+                );
+                let ps_ok = run_streamed_install(
+                    &app_done,
+                    "powershell",
+                    &[
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        "irm https://claude.ai/install.ps1 | iex",
+                    ],
+                )
+                .await;
+                success = ps_ok && resolve_on_path("claude").is_some();
+            }
             let _ = app_done.emit("claude_install:done", success);
         });
 
