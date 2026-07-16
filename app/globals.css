@@ -65,6 +65,21 @@ html, body {
   scrollbar-color: #cbd5e1 transparent;
 }
 
+/*
+  対話ターミナル（InteractiveTerminal）: xterm 標準の縦スクロールバーを隠し、
+  右端のカスタムバー（つまみオーバーレイ）に一本化する。
+  2本並ぶと標準バーの右半分がオーバーレイ・トラックに覆われ、
+  「ドラッグしても動かないバー」に見える（結城さん報告 2026-07-16）。
+*/
+.unicrew-term .xterm-viewport {
+  scrollbar-width: none;
+}
+.unicrew-term .xterm-viewport::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none;
+}
+
 /* Markdown content basics */
 .md-body p { margin: 0.5rem 0; line-height: 1.7; }
 .md-body h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }

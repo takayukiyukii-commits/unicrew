@@ -242,17 +242,26 @@ export function SettingsModal({
     [refreshStatus, tr],
   );
 
+  // モーダルを開くたびに「保存済みの settings」から編集用 state を再同期する。
+  // 本コンポーネントはアプリ起動時に常駐マウントされるため、useState 初期値は
+  // 「localStorage 読込前のデフォルト settings」を掴んでいる。ここで beginnerMode /
+  // advancedMode / appearance を同期しないと、保存ボタンで古い値（beginnerMode:true 等）を
+  // 上書きしてしまい、ターミナル等の上級者UIがサイドバーから消える
+  // （結城さん報告 2026-07-16 の真因）。
   useEffect(() => {
     if (open) {
       setAuthMode(settings.authMode);
       setShowActivity(settings.showActivity ?? true);
+      setAdvancedMode(settings.advancedMode ?? false);
+      setBeginnerMode(settings.beginnerMode ?? true);
+      setAppearance(settings.appearance ?? DEFAULT_APPEARANCE);
       getApiKey().then((k) => setApiKeyLocal(k ?? ""));
       getOpenAiApiKey()
         .then((k) => setOpenaiKeyLocal(k ?? ""))
         .catch(() => {});
       refreshStatus();
     }
-  }, [open, settings.authMode, settings.showActivity, refreshStatus]);
+  }, [open, settings, refreshStatus]);
 
   // Subscribe to install progress
   useEffect(() => {

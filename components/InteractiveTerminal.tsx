@@ -29,6 +29,11 @@ import { findCompositionOverride } from "@/lib/terminal-ime";
 import { openFileSmart } from "@/lib/open-file";
 import { openExternal } from "@/lib/preview-window";
 
+/** TUI モード疑似つまみの高さ（%）。 */
+const TUI_THUMB_HEIGHT_PCT = 20;
+/** TUI モード疑似つまみ top の最大値（% = 100 - 高さ）。最下部を表す。 */
+const TUI_THUMB_MAX_TOP = 100 - TUI_THUMB_HEIGHT_PCT;
+
 /**
  * 本物の対話 Claude Code を擬似端末で動かすターミナル（ハイブリッド B）。
  *
@@ -74,8 +79,15 @@ export function InteractiveTerminal({
    * イベント注入に変換して TUI 側をスクロールさせる（ホイール対応と同方式）。
    */
   const [tuiMouse, setTuiMouse] = useState(false);
-  /** TUI モード時のつまみ位置（%）。ドラッグ中は指に追従し、離すと中央へ戻る。 */
-  const [tuiThumbTop, setTuiThumbTop] = useState(40);
+  /**
+   * TUI モード時のつまみ位置（%・0=最上 80=最下）。TUI は絶対スクロール位置を
+   * 報告しないため「推定位置」を描く：
+   *  - ホイール／ドラッグで注入した行数ぶんつまみを動かす（方向は正確・量は目安）
+   *  - 離してもその場に留まる（以前は 40% へスナップバックし「固定されたバー」に
+   *    見えていた＝結城さん報告 2026-07-16 の直接原因）
+   *  - キー入力すると claude 側が最下部へ飛ぶので、つまみも最下部へ戻す
+   */
+  const [tuiThumbTop, setTuiThumbTop] = useState(TUI_THUMB_MAX_TOP);
   /** TUI へのホイール注入関数（effect 内で生成・cleanup で null）。 */
   const tuiInjectRef = useRef<((down: boolean, lines: number) => void) | null>(
     null,
@@ -83,6 +95,14 @@ export function InteractiveTerminal({
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const dragLastYRef = useRef(0);
+
+  /** TUI つまみの推定位置を注入行数ぶん動かす（ホイール／トラッククリック共用）。 */
+  const nudgeTuiThumb = useCallback((down: boolean, lines: number) => {
+    setTuiThumbTop((prev) => {
+      const next = prev + (down ? 1 : -1) * lines * 1.5;
+      return Math.min(TUI_THUMB_MAX_TOP, Math.max(0, next));
+    });
+  }, []);
 
   /** トラック上の縦位置 → スクロールバック行へ写像して xterm を移動する。 */
   const scrollToClientY = useCallback((clientY: number) => {
@@ -124,9 +144,22 @@ export function InteractiveTerminal({
       } catch {
         /* noop */
       }
-      if (hasScrollback()) scrollToClientY(e.clientY);
+      if (hasScrollback()) {
+        scrollToClientY(e.clientY);
+        return;
+      }
+      // TUI モード: つまみの外（トラック余白）クリックはページスクロール注入
+      const rect = trackRef.current?.getBoundingClientRect();
+      if (rect && rect.height > 0) {
+        const pct = ((e.clientY - rect.top) / rect.height) * 100;
+        if (pct < tuiThumbTop || pct > tuiThumbTop + TUI_THUMB_HEIGHT_PCT) {
+          const down = pct > tuiThumbTop + TUI_THUMB_HEIGHT_PCT;
+          tuiInjectRef.current?.(down, 10);
+          nudgeTuiThumb(down, 10);
+        }
+      }
     },
-    [hasScrollback, scrollToClientY],
+    [hasScrollback, scrollToClientY, tuiThumbTop, nudgeTuiThumb],
   );
   const onTrackPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -145,19 +178,22 @@ export function InteractiveTerminal({
         tuiInjectRef.current(n > 0, Math.min(Math.abs(n), 10));
         dragLastYRef.current += n * STEP_PX;
       }
-      // つまみは指に追従させる（TUI は絶対位置を持たないため視覚フィードバックのみ）
+      // つまみは指に追従させる（TUI は絶対位置を持たないため視覚フィードバック）
       const rect = trackRef.current?.getBoundingClientRect();
       if (rect && rect.height > 0) {
-        const pct = ((e.clientY - rect.top) / rect.height) * 100 - 10;
-        setTuiThumbTop(Math.min(80, Math.max(0, pct)));
+        const pct =
+          ((e.clientY - rect.top) / rect.height) * 100 -
+          TUI_THUMB_HEIGHT_PCT / 2;
+        setTuiThumbTop(Math.min(TUI_THUMB_MAX_TOP, Math.max(0, pct)));
       }
     },
     [hasScrollback, scrollToClientY],
   );
   const onTrackPointerUp = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
+      // つまみはその場に留める（スナップバックさせない）。claude 側の実位置とは
+      // ズレ得るが、「離した瞬間に元へ戻る＝壊れて見える」よりはるかに自然。
       draggingRef.current = false;
-      setTuiThumbTop(40); // TUI つまみは離したら中央へ戻す
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -293,6 +329,9 @@ export function InteractiveTerminal({
 
       term = new Terminal({
         cursorBlink: true,
+        // claude の長い応答でも履歴を保てるよう既定(1000)から拡大。
+        // 上限到達時の行トリムでスクロール位置が天井へ張り付く現象も緩和される。
+        scrollback: 10000,
         windowsPty,
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
@@ -399,7 +438,8 @@ export function InteractiveTerminal({
               appMouseRequested = true;
               setTuiMouse(true); // TUI用ドラッグスクロールバーを出す
             }
-            if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = true;
+            if (flat.some((p) => p === 1006 || p === 1015 || p === 1016))
+              appMouseSgr = true;
             return true; // 握りつぶす＝xterm では有効化しない
           },
         );
@@ -412,7 +452,8 @@ export function InteractiveTerminal({
               appMouseRequested = false;
               setTuiMouse(false);
             }
-            if (flat.includes(1006) || flat.includes(1015)) appMouseSgr = false;
+            if (flat.some((p) => p === 1006 || p === 1015 || p === 1016))
+              appMouseSgr = false;
             return false; // 無効化はそのまま xterm に処理させる
           },
         );
@@ -459,6 +500,9 @@ export function InteractiveTerminal({
             let payload = "";
             for (let i = 0; i < lines; i++) payload += seq;
             void ptyWriteText(id, payload);
+            // つまみ（推定位置）もホイール方向へ追従させる。
+            // これが無いと「ホイールで中身は動くのに右のバーは固定のまま」に見える。
+            nudgeTuiThumb(down, lines);
           } catch {
             /* 失敗時はスクロールしない */
           }
@@ -674,6 +718,9 @@ export function InteractiveTerminal({
 
       term.onData((d: string) => {
         void ptyWriteText(id, d);
+        // 文字入力・Enter で claude(TUI) は自動的に最下部へ戻るため、
+        // 推定つまみも最下部へ同期する（ESC始まりの制御列は除外）。
+        if (d && !d.startsWith("\x1b")) setTuiThumbTop(TUI_THUMB_MAX_TOP);
       });
       let lastCols = term.cols;
       let lastRows = term.rows;
@@ -880,12 +927,15 @@ export function InteractiveTerminal({
     scroll.max > 0 ? (scroll.top / scroll.max) * (100 - thumbPct) : 0;
 
   return (
-    <div className="relative h-full w-full bg-[#faf9f6] p-2">
+    // unicrew-term: globals.css で xterm 標準スクロールバーを隠すためのスコープ。
+    // 標準バーとカスタムバーが二重に出ると、標準バーの右半分がオーバーレイに
+    // 覆われて「押しても動かないバー」に見えるため、カスタムバーへ一本化する。
+    <div className="unicrew-term relative h-full w-full bg-[#faf9f6] p-2">
       <div ref={ref} className="h-full w-full" />
       {(scroll.max > 0 || tuiMouse) && (
         <div
           ref={trackRef}
-          className="absolute top-2 right-0 bottom-2 w-3 cursor-ns-resize select-none touch-none"
+          className="absolute top-2 right-0 bottom-2 w-3 z-10 cursor-ns-resize select-none touch-none"
           onPointerDown={onTrackPointerDown}
           onPointerMove={onTrackPointerMove}
           onPointerUp={onTrackPointerUp}
@@ -893,15 +943,18 @@ export function InteractiveTerminal({
         >
           {scroll.max > 0 ? (
             <div
-              className="absolute right-0.5 w-1.5 rounded bg-black/20 hover:bg-black/35 transition-colors"
+              className="absolute right-0.5 w-2 rounded bg-black/20 hover:bg-black/35 transition-colors"
               style={{ height: `${thumbPct}%`, top: `${thumbTopPct}%` }}
             />
           ) : (
-            // TUI（claude等）モード: 位置の概念が無いので中央固定のハンドルを出し、
-            // ドラッグ量をホイール注入に変換して TUI をスクロールさせる
+            // TUI（claude等）モード: 推定位置つまみ。ドラッグ／ホイール注入に
+            // 追従し、離してもその場に留まる（入力時に最下部へ戻る）。
             <div
-              className="absolute right-0.5 w-1.5 rounded bg-black/15 hover:bg-black/30 transition-colors"
-              style={{ height: "20%", top: `${tuiThumbTop}%` }}
+              className="absolute right-0.5 w-2 rounded bg-black/15 hover:bg-black/30 transition-colors"
+              style={{
+                height: `${TUI_THUMB_HEIGHT_PCT}%`,
+                top: `${tuiThumbTop}%`,
+              }}
             />
           )}
         </div>
