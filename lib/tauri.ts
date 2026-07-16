@@ -1274,6 +1274,8 @@ export interface RemoteExecResult {
   output: string;
   /** タイムアウト or トグルOFFで打ち切った場合 true */
   killed: boolean;
+  /** 開発モード（許可フォルダ配下・acceptEdits）で実行した場合 true */
+  dev_mode: boolean;
 }
 
 /** UNIHUB から届いたジョブを `claude -p` の一発実行で処理する。 */
@@ -1282,6 +1284,8 @@ export async function remoteExecClaude(args: {
   prompt: string;
   cwd?: string | null;
   timeoutSecs?: number;
+  /** 開発モード（P3-M6）: 編集・ビルドを許可するフォルダ。cwd がこの配下なら acceptEdits で実行 */
+  devFolders?: string[];
 }): Promise<RemoteExecResult> {
   if (!isTauri()) {
     throw new Error("リモート受付は Tauri アプリ起動時のみ利用できます");
@@ -1292,6 +1296,7 @@ export async function remoteExecClaude(args: {
     prompt: args.prompt,
     cwd: args.cwd ?? null,
     timeoutSecs: args.timeoutSecs ?? null,
+    devFolders: args.devFolders ?? [],
   });
 }
 

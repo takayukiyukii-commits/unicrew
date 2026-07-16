@@ -52,6 +52,11 @@ export interface RemoteNodeConfig {
   pollIntervalSec: number;
   /** UNIHUB 側で解除された（401）→ 再ペアリングが必要 */
   revoked?: boolean;
+  /**
+   * 開発モード（P3-M6）: 編集・ビルド（acceptEdits）を許可するフォルダの明示リスト。
+   * ジョブの cwd がこの配下のときだけ権限昇格する（判定は Rust 側で canonicalize 前方一致）。
+   */
+  devFolders?: string[];
 }
 
 export type RemoteNodeStatus =
@@ -68,6 +73,8 @@ export interface RemoteJobLogEntry {
   result: string;
   startedAt: number;
   finishedAt: number;
+  /** 開発モード（acceptEdits）で実行したジョブ */
+  devMode?: boolean;
 }
 
 interface RemoteJob {
@@ -241,6 +248,14 @@ class RemoteNodeManager {
     void this.pollOnce();
   }
 
+  /** 開発モードの許可フォルダを更新（P3-M6）。 */
+  setDevFolders(folders: string[]) {
+    if (!this.config) return;
+    this.config = { ...this.config, devFolders: folders };
+    saveRemoteNodeConfig(this.config);
+    this.emit();
+  }
+
   // ---- 内部 ----
 
   private emit() {
@@ -375,6 +390,7 @@ class RemoteNodeManager {
     this.emit();
     let ok = false;
     let result = "";
+    let devMode = false;
     try {
       if (!isTauri()) {
         throw new Error("リモート実行は UNICREW アプリ起動時のみ利用できます");
@@ -383,9 +399,11 @@ class RemoteNodeManager {
         jobId: job.id,
         prompt: job.prompt,
         cwd: job.cwd,
+        devFolders: this.config?.devFolders ?? [],
       });
       ok = r.ok;
       result = r.output;
+      devMode = r.dev_mode;
     } catch (e) {
       ok = false;
       result = `実行に失敗しました: ${e instanceof Error ? e.message : String(e)}`;
@@ -401,6 +419,7 @@ class RemoteNodeManager {
       result,
       startedAt,
       finishedAt: Date.now(),
+      devMode,
     });
     await this.reportResult(job.id, ok, result);
     this.emit();

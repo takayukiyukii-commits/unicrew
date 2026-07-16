@@ -12,9 +12,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  Code,
+  FolderPlus,
   Loader2,
   MonitorSmartphone,
   RefreshCw,
+  X,
   XCircle,
 } from "lucide-react";
 import clsx from "clsx";
@@ -24,7 +27,7 @@ import {
   type RemoteJobLogEntry,
   type RemoteNodeStatus,
 } from "@/lib/remote-node";
-import { isTauri } from "@/lib/tauri";
+import { isTauri, pickWorkspace } from "@/lib/tauri";
 
 const STATUS_META: Record<
   RemoteNodeStatus,
@@ -209,6 +212,64 @@ export function RemoteAccessSection() {
             接続名: <span className="font-mono">{config.nodeName}</span>
           </p>
 
+          {/* 開発モード（P3-M6）: 編集・ビルドを許可するフォルダ */}
+          <div className="border border-[var(--color-border)] rounded-md px-2.5 py-2 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-semibold">
+                <Code size={12} className="text-[var(--color-accent)]" />
+                開発モード（編集を許可するフォルダ）
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void (async () => {
+                    const path = await pickWorkspace();
+                    if (!path) return;
+                    const current = config.devFolders ?? [];
+                    if (current.includes(path)) return;
+                    remoteNodeManager.setDevFolders([...current, path]);
+                  })()
+                }
+                className="px-2 py-1 text-[11px] rounded border border-[var(--color-border)] hover:bg-[var(--color-surface)] transition flex items-center gap-1"
+              >
+                <FolderPlus size={11} />
+                フォルダを追加
+              </button>
+            </div>
+            <p className="text-[10.5px] text-[var(--color-muted)] leading-relaxed">
+              ここに登録したフォルダ配下の依頼だけ、Claude
+              Codeがファイル編集・ビルドまで実行できます（コード修正などの開発作業向け）。それ以外の場所は従来どおり調査・読み取り中心です。
+            </p>
+            {(config.devFolders ?? []).length === 0 ? (
+              <p className="text-[10.5px] text-[var(--color-muted)] italic">
+                未登録（開発モード無効）
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {(config.devFolders ?? []).map((f) => (
+                  <li
+                    key={f}
+                    className="flex items-center justify-between gap-2 text-[11px] font-mono bg-[var(--color-surface)] rounded px-2 py-1"
+                  >
+                    <span className="truncate">{f}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        remoteNodeManager.setDevFolders(
+                          (config.devFolders ?? []).filter((x) => x !== f),
+                        )
+                      }
+                      className="p-0.5 text-[var(--color-muted)] hover:text-red-600 transition shrink-0"
+                      aria-label="削除"
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {status === "error" && lastError && (
             <p className="text-[11px] text-amber-700 flex items-start gap-1">
               <AlertCircle size={12} className="mt-0.5 shrink-0" />
@@ -254,6 +315,11 @@ export function RemoteAccessSection() {
                       <span className="text-[var(--color-muted)] shrink-0 font-mono">
                         {formatTime(entry.finishedAt)}
                       </span>
+                      {entry.devMode && (
+                        <span className="shrink-0 text-[9.5px] px-1 py-0.5 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold">
+                          開発
+                        </span>
+                      )}
                       <span className="truncate flex-1">{entry.prompt}</span>
                     </button>
                     <div

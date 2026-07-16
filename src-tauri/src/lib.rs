@@ -3893,10 +3893,31 @@ struct RemoteExecResult {
     output: String,
     /// タイムアウト or トグルOFFで打ち切った場合 true
     killed: bool,
+    /// 開発モード（許可フォルダ配下・acceptEdits）で実行した場合 true
+    #[serde(default)]
+    dev_mode: bool,
 }
 
 /// リモートジョブの既定タイムアウト（サーバー側 expires=30分より必ず短くする）
 const REMOTE_JOB_TIMEOUT_SECS: u64 = 20 * 60;
+
+/// 開発モード（P3-M6・結城さん承認済み 2026-07-16）:
+/// cwd がユーザーが明示登録した許可フォルダ配下なら acceptEdits で編集・ビルドを許可する。
+/// 判定は canonicalize 同士の前方一致（`..` やシンボリックリンクでの脱出を防ぐ）。
+fn is_inside_dev_folder(cwd: &std::path::Path, dev_folders: &[String]) -> bool {
+    let Ok(cwd_canon) = std::fs::canonicalize(cwd) else {
+        return false;
+    };
+    for f in dev_folders {
+        let folder = expand_user_path(f.trim());
+        if let Ok(folder_canon) = std::fs::canonicalize(&folder) {
+            if cwd_canon.starts_with(&folder_canon) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 #[tauri::command]
 async fn remote_exec_claude(
@@ -3905,6 +3926,7 @@ async fn remote_exec_claude(
     prompt: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
+    dev_folders: Option<Vec<String>>,
 ) -> Result<RemoteExecResult, String> {
     let prompt_trim = prompt.trim().to_string();
     if prompt_trim.is_empty() {
@@ -3912,6 +3934,7 @@ async fn remote_exec_claude(
             ok: false,
             output: "（依頼内容が空でした）".into(),
             killed: false,
+            dev_mode: false,
         });
     }
 
@@ -3927,12 +3950,16 @@ async fn remote_exec_claude(
                         p.to_string_lossy()
                     ),
                     killed: false,
+                    dev_mode: false,
                 });
             }
             p
         }
         None => home_dir()?,
     };
+
+    // 開発モード判定: 許可フォルダ配下のジョブだけ編集・ビルドを許可（それ以外は読み取り中心の通常権限）
+    let dev_mode = is_inside_dev_folder(&workdir, &dev_folders.unwrap_or_default());
 
     let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
     {
@@ -3941,9 +3968,12 @@ async fn remote_exec_claude(
     }
 
     let mut cmd = build_silent_command("claude");
-    cmd.arg("-p")
-        .arg(&prompt_trim)
-        .current_dir(&workdir)
+    cmd.arg("-p").arg(&prompt_trim);
+    if dev_mode {
+        // acceptEdits: 編集系は自動許可・危険なBashコマンド等は引き続き確認対象（非対話では拒否）
+        cmd.args(["--permission-mode", "acceptEdits"]);
+    }
+    cmd.current_dir(&workdir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -3955,7 +3985,10 @@ async fn remote_exec_claude(
         let mut map = state.cancels.lock().await;
         map.remove(&job_id);
     }
-    result
+    result.map(|mut r| {
+        r.dev_mode = dev_mode;
+        r
+    })
 }
 
 async fn run_remote_job(
@@ -3975,6 +4008,7 @@ async fn run_remote_job(
                     e
                 ),
                 killed: false,
+                dev_mode: false,
             })
         }
     };
@@ -4024,6 +4058,7 @@ async fn run_remote_job(
                 timeout_secs / 60
             ),
             killed: true,
+            dev_mode: false,
         });
     }
     if killed {
@@ -4031,6 +4066,7 @@ async fn run_remote_job(
             ok: false,
             output: "リモート受付がオフにされたため、実行を中断しました。".into(),
             killed: true,
+            dev_mode: false,
         });
     }
 
@@ -4054,7 +4090,7 @@ async fn run_remote_job(
             st.code().unwrap_or(-1)
         )
     };
-    Ok(RemoteExecResult { ok, output, killed: false })
+    Ok(RemoteExecResult { ok, output, killed: false, dev_mode: false })
 }
 
 /// 実行中のリモートジョブを全て kill（トグルOFF＝緊急停止用）。
