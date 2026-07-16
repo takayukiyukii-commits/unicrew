@@ -26,6 +26,7 @@ import {
 import { findPathMatches, findUrlMatches } from "@/lib/file-link";
 import { readLogicalLine, matchToBufferRange } from "@/lib/terminal-links";
 import { findCompositionOverride } from "@/lib/terminal-ime";
+import { joinHardWrappedLines } from "@/lib/terminal-copy";
 import { openFileSmart } from "@/lib/open-file";
 import { openExternal } from "@/lib/preview-window";
 
@@ -331,7 +332,10 @@ export function InteractiveTerminal({
         cursorBlink: true,
         // claude の長い応答でも履歴を保てるよう既定(1000)から拡大。
         // 上限到達時の行トリムでスクロール位置が天井へ張り付く現象も緩和される。
-        scrollback: 10000,
+        // 2026-07-16: 10000 → 50000。上限到達後は claude の出力のたびに先頭行が
+        // トリムされ、xterm は選択範囲が押し出されると選択を全クリアする仕様のため、
+        // 長時間セッションで「ドラッグ選択が勝手に終わる」直接原因になっていた。
+        scrollback: 50000,
         windowsPty,
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
@@ -623,7 +627,10 @@ export function InteractiveTerminal({
         const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
         if (mod && (e.key === "c" || e.key === "C")) {
           if (term.hasSelection()) {
-            const sel = term.getSelection();
+            // claude(Ink) は本文を端末幅で折り返す際に実改行を挿入して描画するため、
+            // そのままコピーすると画面上の折返し改行が混入して他アプリで崩れる。
+            // 幅いっぱいの行だけ次行と連結して原文の改行に近づける（terminal-copy.ts）。
+            const sel = joinHardWrappedLines(term.getSelection(), term.cols);
             // WebView2 では plugin / navigator.clipboard の書き込みが失敗し
             // 「Ctrl+C でコピーできない」事象がある。keydown ジェスチャ内で同期実行できる
             // execCommand("copy") を第一経路にして確実にコピーし、失敗時のみ OS
@@ -834,6 +841,27 @@ export function InteractiveTerminal({
       } catch {
         /* フック不可環境ではフォールバックへ */
       }
+      // 【2026-07-16 修正】ビューポートが上にスクロールされたまま IME 合成を始めると、
+      // xterm の CompositionHelper は isCursorInViewport=false で位置決めを丸ごと
+      // スキップし、合成ボックスが既定位置（画面左上 0,0）に出る。通常キーは
+      // scrollOnUserInput で最下部へ戻るが、IME 合成キー（keyCode 229）はその経路を
+      // 通らない。合成開始時に明示的に最下部へ戻して実カーソルを視界に入れる
+      //（通常キー入力と同じ挙動に揃えるだけなので副作用なし）。
+      const taForScroll = term.textarea as HTMLTextAreaElement | undefined;
+      if (taForScroll) {
+        const scrollOnCompose = () => {
+          try {
+            term.scrollToBottom();
+          } catch {
+            /* noop */
+          }
+        };
+        taForScroll.addEventListener("compositionstart", scrollOnCompose);
+        cleanups.push(() =>
+          taForScroll.removeEventListener("compositionstart", scrollOnCompose),
+        );
+      }
+
       // フォールバック：フックできない環境では従来どおりイベントで後追い補正
       // （位置は合うが震えは残る）。
       const taEl = term.textarea as HTMLTextAreaElement | undefined;
