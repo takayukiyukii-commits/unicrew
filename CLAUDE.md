@@ -12,6 +12,7 @@
 - IMEカーソルは実カーソル信頼（VS Code方式）。スクレイピング補正はclaude UI刷新で壊れる
 - リリース手順: 版数3ファイル更新→タグpush→CI 3OS success確認→Draft/Publish判断は結城さん
 - 2026-07-02時点で未push2コミットあり（push判断は結城さん）
+- 🚨 `npm run build:tauri` は前処理で実行中の unicrew.exe を強制終了する（stopDevServers）。結城さんがアプリ使用中に実行しない（2026-07-16 実害あり：作業中のアプリを落とした）
 
 ## 全社共通（要遵守）
 - DB変更は手動SQL運用：SQLファイルの絶対パスを1行ずつ提示し、結城さんがSupabase SQL Editorで実行
