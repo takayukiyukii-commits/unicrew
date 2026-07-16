@@ -56,6 +56,7 @@ import {
   MOBILE_TOKEN_LS_KEY,
   type MobileStateSnapshot,
 } from "@/lib/mobile-bridge";
+import { remoteNodeManager } from "@/lib/remote-node";
 import {
   isCloudConfigured,
   joinPairChannel,
@@ -563,6 +564,12 @@ export default function Page() {
   useEffect(() => {
     applyAppearance(settings.appearance);
   }, [settings.appearance]);
+
+  // UNIHUB リモート受付（UNIPILOT P3-M3）: 有効設定が残っていれば起動時に受付を再開。
+  // ポーリング/Realtime購読/実行は lib/remote-node.ts のシングルトンが常駐管理する。
+  useEffect(() => {
+    remoteNodeManager.init();
+  }, []);
 
   // /mcp 等の REPL コマンド横取り（ChatPane が dispatch）→ 対応画面へ
   useEffect(() => {

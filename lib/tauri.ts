@@ -1265,3 +1265,39 @@ export async function listenAgentStderr(
   );
   return unlisten;
 }
+
+// ---------- UNIHUB リモート受付（UNIPILOT P3-M3） ----------
+
+export interface RemoteExecResult {
+  ok: boolean;
+  /** claude -p の標準出力（失敗時は日本語のエラーメッセージ） */
+  output: string;
+  /** タイムアウト or トグルOFFで打ち切った場合 true */
+  killed: boolean;
+}
+
+/** UNIHUB から届いたジョブを `claude -p` の一発実行で処理する。 */
+export async function remoteExecClaude(args: {
+  jobId: string;
+  prompt: string;
+  cwd?: string | null;
+  timeoutSecs?: number;
+}): Promise<RemoteExecResult> {
+  if (!isTauri()) {
+    throw new Error("リモート受付は Tauri アプリ起動時のみ利用できます");
+  }
+  const invoke = await loadInvoke();
+  return invoke<RemoteExecResult>("remote_exec_claude", {
+    jobId: args.jobId,
+    prompt: args.prompt,
+    cwd: args.cwd ?? null,
+    timeoutSecs: args.timeoutSecs ?? null,
+  });
+}
+
+/** 実行中のリモートジョブを全て kill（トグルOFF＝緊急停止用）。 */
+export async function remoteExecKillAll(): Promise<void> {
+  if (!isTauri()) return;
+  const invoke = await loadInvoke();
+  await invoke("remote_exec_kill_all");
+}

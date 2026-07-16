@@ -59,6 +59,7 @@ import {
 } from "@/lib/tauri";
 import clsx from "clsx";
 import { CharactersSection } from "./CharactersSection";
+import { RemoteAccessSection } from "./RemoteAccessSection";
 import { UserAvatar } from "./UserAvatar";
 import {
   pickAndSaveAvatar,
@@ -1391,6 +1392,8 @@ export function SettingsModal({
           </section>
 
           <UnicrewSelfUpdateSection currentVersion="0.2.1" />
+
+          <RemoteAccessSection />
 
           <div className="border-t border-[var(--color-border)] pt-5">
             <CharactersSection onCharactersChanged={onCharactersChanged} />

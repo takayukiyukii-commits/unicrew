@@ -3871,6 +3871,202 @@ async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- UNIHUB リモート受付（UNIPILOT P3-M3・結城さん承認済み 2026-07-16） ----------
+//
+// UNIHUB の AI 秘書から届いたジョブを `claude -p "<prompt>"` の一発実行で処理する。
+// ジョブは UNIHUB 側で本人が承認カードを承認したものだけが届く（無差別実行ではない）。
+// 非TTYで claude CLI は print モードになるため、ジョブ実行にはそのまま使える
+// （ログインは既存の UNICREW 上で済んでいる前提。未ログイン時はエラーを正直に返す）。
+// ペアリング／ポーリング／結果報告はフロント（lib/remote-node.ts）が担い、
+// Rust 側は「1ジョブの実行と kill」だけに徹する。
+
+#[derive(Default)]
+struct RemoteJobState {
+    /// job_id → キャンセル通知。トグルOFF（remote_exec_kill_all）で実行中プロセスを殺す。
+    cancels: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Notify>>>,
+}
+
+#[derive(Debug, Serialize)]
+struct RemoteExecResult {
+    ok: bool,
+    /// claude -p の標準出力（失敗時は日本語のエラーメッセージ）
+    output: String,
+    /// タイムアウト or トグルOFFで打ち切った場合 true
+    killed: bool,
+}
+
+/// リモートジョブの既定タイムアウト（サーバー側 expires=30分より必ず短くする）
+const REMOTE_JOB_TIMEOUT_SECS: u64 = 20 * 60;
+
+#[tauri::command]
+async fn remote_exec_claude(
+    state: State<'_, RemoteJobState>,
+    job_id: String,
+    prompt: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<RemoteExecResult, String> {
+    let prompt_trim = prompt.trim().to_string();
+    if prompt_trim.is_empty() {
+        return Ok(RemoteExecResult {
+            ok: false,
+            output: "（依頼内容が空でした）".into(),
+            killed: false,
+        });
+    }
+
+    // 作業ディレクトリ: 指定があれば存在確認、無ければホーム直下（安全な既定）。
+    let workdir = match cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => {
+            let p = expand_user_path(raw);
+            if !p.is_dir() {
+                return Ok(RemoteExecResult {
+                    ok: false,
+                    output: format!(
+                        "指定された作業フォルダが見つかりません: {}",
+                        p.to_string_lossy()
+                    ),
+                    killed: false,
+                });
+            }
+            p
+        }
+        None => home_dir()?,
+    };
+
+    let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+    {
+        let mut map = state.cancels.lock().await;
+        map.insert(job_id.clone(), cancel.clone());
+    }
+
+    let mut cmd = build_silent_command("claude");
+    cmd.arg("-p")
+        .arg(&prompt_trim)
+        .current_dir(&workdir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let result =
+        run_remote_job(cmd, cancel, timeout_secs.unwrap_or(REMOTE_JOB_TIMEOUT_SECS)).await;
+
+    {
+        let mut map = state.cancels.lock().await;
+        map.remove(&job_id);
+    }
+    result
+}
+
+async fn run_remote_job(
+    mut cmd: Command,
+    cancel: std::sync::Arc<tokio::sync::Notify>,
+    timeout_secs: u64,
+) -> Result<RemoteExecResult, String> {
+    use tokio::io::AsyncReadExt;
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return Ok(RemoteExecResult {
+                ok: false,
+                output: format!(
+                    "claude CLI を起動できませんでした（未インストールの可能性があります）: {}",
+                    e
+                ),
+                killed: false,
+            })
+        }
+    };
+
+    // stdout / stderr は先に take して並行で読み切る（パイプ詰まりによるデッドロック防止）
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let out_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        if let Some(ref mut s) = stdout {
+            let _ = s.read_to_string(&mut buf).await;
+        }
+        buf
+    });
+    let err_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        if let Some(ref mut s) = stderr {
+            let _ = s.read_to_string(&mut buf).await;
+        }
+        buf
+    });
+
+    let mut killed = false;
+    let mut timed_out = false;
+    let status = tokio::select! {
+        st = child.wait() => Some(st.map_err(|e| e.to_string())?),
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+            timed_out = true;
+            let _ = child.kill().await;
+            None
+        }
+        _ = cancel.notified() => {
+            killed = true;
+            let _ = child.kill().await;
+            None
+        }
+    };
+
+    let stdout_text = out_task.await.unwrap_or_default();
+    let stderr_text = err_task.await.unwrap_or_default();
+
+    if timed_out {
+        return Ok(RemoteExecResult {
+            ok: false,
+            output: format!(
+                "タイムアウト（{}分）のため実行を打ち切りました。",
+                timeout_secs / 60
+            ),
+            killed: true,
+        });
+    }
+    if killed {
+        return Ok(RemoteExecResult {
+            ok: false,
+            output: "リモート受付がオフにされたため、実行を中断しました。".into(),
+            killed: true,
+        });
+    }
+
+    let st = status.expect("status exists when not killed");
+    let ok = st.success();
+    let out = stdout_text.trim().to_string();
+    let err = stderr_text.trim().to_string();
+    let output = if !out.is_empty() {
+        out
+    } else if !err.is_empty() {
+        if ok {
+            err
+        } else {
+            format!("claude CLI がエラーを返しました: {}", err)
+        }
+    } else if ok {
+        "（出力はありませんでした）".to_string()
+    } else {
+        format!(
+            "claude CLI が失敗しました（exit={}）。UNICREW で Claude にログイン済みか確認してください。",
+            st.code().unwrap_or(-1)
+        )
+    };
+    Ok(RemoteExecResult { ok, output, killed: false })
+}
+
+/// 実行中のリモートジョブを全て kill（トグルOFF＝緊急停止用）。
+#[tauri::command]
+async fn remote_exec_kill_all(state: State<'_, RemoteJobState>) -> Result<(), String> {
+    let map = state.cancels.lock().await;
+    for cancel in map.values() {
+        cancel.notify_one();
+    }
+    Ok(())
+}
+
 // ---------- App setup ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3890,6 +4086,7 @@ pub fn run() {
         // 自動アップデート用。フロントから @tauri-apps/plugin-updater 経由で check / download_and_install を叩く。
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AgentState::default())
+        .manage(RemoteJobState::default())
         .invoke_handler(tauri::generate_handler![
             get_api_key,
             set_api_key,
@@ -3962,6 +4159,8 @@ pub fn run() {
             fetch_github_avatar,
             graphify_update,
             get_lan_ip,
+            remote_exec_claude,
+            remote_exec_kill_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
