@@ -175,7 +175,7 @@ claude --print \
 
 ## 5b. ACP プロトコル経路（L3）— 業界標準採用
 
-**訂正**: 当初「L4 Goose 内蔵」を計画したが、調査の結果 `goose-sdk` は ACP client 実装であり、本物の embed は V8 同梱・MSRV 1.91.1 強制でコスト過大と判明。代わりに **業界標準 ACP（Agent Client Protocol、Zed 主導）** を採用し、複数の ACP 対応エージェントを1つの実装で束ねる。詳細経緯: `D:\company\CDO（技術責任者）\作業中\20260510_調査ノート_Goose_L4再評価_v2.md`
+**訂正**: 当初「L4 Goose 内蔵」を計画したが、調査の結果 `goose-sdk` は ACP client 実装であり、本物の embed は V8 同梱・MSRV 1.91.1 強制でコスト過大と判明。代わりに **業界標準 ACP（Agent Client Protocol、Zed 主導）** を採用し、複数の ACP 対応エージェントを1つの実装で束ねる。詳細経緯: 社内調査ノート（Goose L4 再評価・2026-05-10）
 
 ### 共通 ACP transport（providers/acp_transport.rs）
 

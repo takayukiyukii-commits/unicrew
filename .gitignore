@@ -38,3 +38,7 @@ next-env.d.ts
 # AI作業メモ（Claude×Codexハンドオフ/執筆ノート）— コード資産ではないため追跡しない（実体は保持）
 NOTE_*.md
 scripts/_handoff_*.md
+
+# ビルドログ（公開リポジトリに入れない）
+.tsc-out.txt
+*.log

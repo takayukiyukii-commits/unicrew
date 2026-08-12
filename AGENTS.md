@@ -28,7 +28,7 @@ UNICREW は候補ごとに以下の層を使い分ける。**業界標準 ACP（
 | **L2** 自動インストール | UNICREW が初回起動時に裏で `winget` / `npm i -g` 等を実行、以後は subprocess 方式 | 各社独自 stream-json | OSS だが ACP 未対応 | Qwen Code / Kimi |
 | **L3** **業界標準 ACP プロトコル経由** | 自動 install + `<agent> acp` を spawn、`agent-client-protocol` crate で型付き JSON-RPC over stdio | **Zed 主導の業界標準 ACP** | **ACP 対応エージェント全般** | **Goose / OpenCode / Codex-acp / Kiro** |
 
-> **L4（Rust crate 内蔵）は採用見送り**: 検討の結果、`goose-sdk` は ACP client であって embed SDK ではないことが判明。本物の embed には goose 本体 crate が必要だが V8 同梱・MSRV 1.91.1 強制・ビルド時間爆発でコスト対価値が悪い。詳細は `D:\company\CDO（技術責任者）\作業中\20260510_調査ノート_Goose_L4再評価_v2.md` 参照。
+> **L4（Rust crate 内蔵）は採用見送り**: 検討の結果、`goose-sdk` は ACP client であって embed SDK ではないことが判明。本物の embed には goose 本体 crate が必要だが V8 同梱・MSRV 1.91.1 強制・ビルド時間爆発でコスト対価値が悪い。詳細は 社内調査ノート（Goose L4 再評価・2026-05-10） 参照。
 
 ### L3 採用の必須条件
 
