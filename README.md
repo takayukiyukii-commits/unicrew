@@ -11,11 +11,11 @@ UNICREW は **AI を動かすことだけに特化**したデスクトップア�
 コードエディタは VSCode に任せて、AI セッションの起動・並列・切替・可視化を担当します。
 
 - **9 プロバイダ対応** — Claude / Codex / Gemini / Goose / OpenCode / Codex-ACP / Kiro / Qwen / Kimi を同じ UI で
-- **議論モード** — 複数の AI に役割を持たせて議論・相互レビュー（7 プリセット）
+- **議論モード** — 複数の AI に役割を持たせて議論・相互レビュー（9 プリセット）
 - **並列モード** — 2 社以上を同時実行、レスポンスを横並びで比較
 - **Free モード** — 「1 分で始める」ボタン 1 つで Ollama + OpenCode を自動セットアップ。API キー不要・サブスク不要
 - **業界標準 ACP 対応** — Zed Industries 主導の Agent Client Protocol を採用、新エージェントの追加が容易
-- **キャラクター人格 12 種** — role / 口調を切替
+- **キャラクター人格 13 種** — role / 口調を切替
 
 ## 動かす経路は 3 種類
 
@@ -75,7 +75,7 @@ ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apa
 
 ## 必要環境
 
-- **OS**: Windows 10 1809+ / Windows 11（macOS / Linux 版は今後対応）
+- **OS**: Windows 10 1809+ / Windows 11 / macOS / Linux（3 OS 分のインストーラーを Releases で配布）
 - **AI を動かすために、以下のいずれか 1 つ以上**:
   - Claude Pro / Max のサブスクリプション
   - ChatGPT Plus / Pro のサブスクリプション
@@ -92,9 +92,17 @@ ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apa
 
 ### 配布バイナリ
 
-[Releases](https://github.com/takayukiyukii-commits/unicrew/releases) から最新の `.msi` または `.exe` をダウンロードしてインストール。
+[Releases](https://github.com/takayukiyukii-commits/unicrew/releases/latest) から、お使いの OS 向けのファイルをダウンロードしてインストール。
 
-⚠️ 未署名のため初回起動時に SmartScreen 警告が出ます。「詳細情報」→「実行」で起動できます。
+| OS | ファイル |
+|---|---|
+| Windows | `UNICREW_*_x64-setup.exe` / `UNICREW_*_x64_ja-JP.msi` |
+| macOS | `UNICREW_*_universal.dmg` |
+| Linux | `UNICREW_*_amd64.AppImage` / `*_amd64.deb` / `*.x86_64.rpm` |
+
+⚠️ 未署名のため、初回起動時に警告が出ます。
+- **Windows**: SmartScreen →「詳細情報」→「実行」
+- **macOS**: Gatekeeper → アプリを右クリック →「開く」
 
 ### 開発起動
 
@@ -139,7 +147,7 @@ unicrew/
 │   └── ...
 ├── lib/
 │   ├── types.ts
-│   ├── characters.ts          # プリセット 12 体
+│   ├── characters.ts          # プリセット 13 体
 │   ├── providerCategories.ts  # UI 抽象化基盤
 │   ├── providerVisuals.tsx
 │   └── tauri.ts
@@ -167,9 +175,9 @@ unicrew/
 2. または「Claude / Codex / Gemini のサブスクをお持ちの方」から既存契約で接続
 3. **最初の会話を始める** → キャラクター（オプション）→ ワークスペース選択
 4. 会話中に「並列モード」「議論モード」へ自然に拡張
-5. プリセットから議論を始める：7 種のキャストから 1 クリックで選択
+5. プリセットから議論を始める：9 種のキャストから 1 クリックで選択
 
-## キャラクター（プリセット 12 体）
+## キャラクター（プリセット 13 体）
 
 | ID | 名前 | 役割 | プロバイダ |
 |---|---|---|---|
