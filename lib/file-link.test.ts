@@ -12,7 +12,7 @@ import {
 // バックスラッシュをテスト文字列にそのまま埋めるためのヘルパ。
 // （\\ をソース内に書くより事故りにくい）
 const BS = "\\";
-const winPath = `D:${BS}secrets${BS}APIキー一覧.md`;
+const winPath = `D:${BS}work${BS}設定メモ.md`;
 
 describe("pathStartOffset", () => {
   it("ドライブレターが先頭にあれば 0", () => {
@@ -33,7 +33,7 @@ describe("pathStartOffset", () => {
 
 describe("segmentText - 日本語直結パスの再アンカー（報告された不具合）", () => {
   it("句点をはさんでも Windows パスだけが file セグメントになる", () => {
-    const text = `結城さんご自身の認証情報なので、お見せします。${winPath} の cost-dashboard`;
+    const text = `ユーザーご自身の設定なので、お見せします。${winPath} の cost-dashboard`;
     const segs = segmentText(text);
     const file = segs.find((s) => s.kind === "file");
     expect(file?.path).toBe(winPath);
@@ -43,20 +43,20 @@ describe("segmentText - 日本語直結パスの再アンカー（報告され�
   });
 
   it("空白も句読点もなく地の文とパスが直結していてもパスだけを切り出す", () => {
-    const text = `結城さんご自身の認証情報なのでお見せします${winPath}`;
+    const text = `ユーザーご自身の設定なのでお見せします${winPath}`;
     const segs = segmentText(text);
     const file = segs.find((s) => s.kind === "file");
     // ここが不具合の核心：以前は地の文ごと file 化してクリック位置がずれていた
     expect(file?.path).toBe(winPath);
     expect(segs[0].kind).toBe("text");
-    expect(segs[0].text).toBe("結城さんご自身の認証情報なのでお見せします");
+    expect(segs[0].text).toBe("ユーザーご自身の設定なのでお見せします");
   });
 
   it("スラッシュ区切りの Windows パスでも同様", () => {
-    const text = "パスはC:/Users/takay/config.jsonです";
+    const text = "パスはC:/Users/user/config.jsonです";
     const segs = segmentText(text);
     const file = segs.find((s) => s.kind === "file");
-    expect(file?.path).toBe("C:/Users/takay/config.json");
+    expect(file?.path).toBe("C:/Users/user/config.json");
     expect(segs[0].text).toBe("パスは");
   });
 });
@@ -208,7 +208,7 @@ describe("unwrapPaths - 折り返し改行で分断されたパスの接合", ()
 });
 
 /* ------------------------------------------------------------------ */
-/* 回帰: pnpm パス（+ を含む）: 2026-07-03 結城さん報告                  */
+/* 回帰: pnpm パス（+ を含む）: 2026-07-03 ユーザー報告                  */
 /* ------------------------------------------------------------------ */
 
 describe("pnpm パス（+ 入り）の全長リンク化", () => {
@@ -252,7 +252,7 @@ describe("pnpm パス（+ 入り）の全長リンク化", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 回帰: 「。」「、」空白入り日本語ファイル名（2026-07-03 結城さん報告 意地悪ケース） */
+/* 回帰: 「。」「、」空白入り日本語ファイル名（2026-07-03 ユーザー報告 意地悪ケース） */
 /* ------------------------------------------------------------------ */
 
 describe("findDrivePathMatches - 。、空白入りパスの貪欲展開", () => {

@@ -45,7 +45,7 @@ export function FeedbackCard({
     };
     const { mailtoUrl } = recordFeedback(payload);
 
-    // メーラーを開いて結城さん宛に送信。
+    // メーラーを開いてメンテナ宛に送信。
     // window.location.href だと SPA 遷移と誤認される環境があるため open を優先。
     if (typeof window !== "undefined") {
       window.open(mailtoUrl, "_self");

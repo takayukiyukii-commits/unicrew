@@ -10,7 +10,7 @@
 ## 1. 開発起動
 
 ```powershell
-cd C:\Users\takay\repos\unicrew
+cd <リポジトリのパス>
 npm run tauri:dev
 ```
 

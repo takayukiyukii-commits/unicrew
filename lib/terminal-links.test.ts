@@ -81,7 +81,7 @@ describe("readLogicalLine", () => {
   });
 
   it("折り返し行を連結し、途中の行から呼んでも同じ論理行を返す", () => {
-    const text = "D:/company/very/long/path/to/some/deep/file_name_here.md";
+    const text = "D:/work/very/long/path/to/some/deep/file_name_here.md";
     const lines = layout(text, 20); // 3行に折り返し
     expect(lines.length).toBeGreaterThan(1);
     const fromFirst = readLogicalLine(asGetLine(lines), 0)!;
@@ -104,7 +104,7 @@ describe("readLogicalLine", () => {
 
 describe("matchToBufferRange（部分クリックバグの回帰テスト）", () => {
   it("日本語入りパス：クリック範囲がパス全体のセルをカバーする", () => {
-    const line = "保存先: D:/company/作業レポート/20260611_レポート.md です";
+    const line = "保存先: D:/work/reports/20260611_レポート.md です";
     const lines = layout(line, 200);
     const info = readLogicalLine(asGetLine(lines), 0)!;
     const matches = findPathMatches(info.text);
@@ -119,7 +119,7 @@ describe("matchToBufferRange（部分クリックバグの回帰テスト）", (
   });
 
   it("旧実装の再現：文字列インデックスをセル座標に使うと範囲が短くなる（バグの証明）", () => {
-    const line = "保存先: D:/company/作業レポート/20260611_レポート.md です";
+    const line = "保存先: D:/work/reports/20260611_レポート.md です";
     const lines = layout(line, 200);
     const info = readLogicalLine(asGetLine(lines), 0)!;
     const mt = findPathMatches(info.text)[0];
@@ -129,7 +129,7 @@ describe("matchToBufferRange（部分クリックバグの回帰テスト）", (
   });
 
   it("折り返しパス：複数行にまたがるセル範囲を返す", () => {
-    const path = "D:/company/projects/unicrew/components/InteractiveTerminal.tsx";
+    const path = "D:/work/unicrew/components/InteractiveTerminal.tsx";
     const lines = layout(path, 40); // 2行に折り返し
     const info = readLogicalLine(asGetLine(lines), 1)!; // 2行目から呼んでも
     const mt = findPathMatches(info.text)[0];
@@ -193,7 +193,7 @@ function layoutHardWrap(text: string, cols: number): LineLike[] {
 
 describe("readLogicalLine - ConPTY ハードラップ連結（設計書④ B-1）", () => {
   const BS2 = "\\";
-  const longPath = `C:${BS2}Users${BS2}takay${BS2}repos${BS2}unicrew${BS2}components${BS2}InteractiveTerminal.tsx`;
+  const longPath = `C:${BS2}Users${BS2}user${BS2}repos${BS2}unicrew${BS2}components${BS2}InteractiveTerminal.tsx`;
 
   it("isWrapped が立たない幅いっぱいの行も連結して全長1本のパスを検出できる", () => {
     const lines = layoutHardWrap(longPath, 20);

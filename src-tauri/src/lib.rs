@@ -3871,7 +3871,7 @@ async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
-// ---------- UNIHUB リモート受付（UNIPILOT P3-M3・結城さん承認済み 2026-07-16） ----------
+// ---------- UNIHUB リモート受付（UNIPILOT P3-M3・メンテナ承認済み 2026-07-16） ----------
 //
 // UNIHUB の AI 秘書から届いたジョブを `claude -p "<prompt>"` の一発実行で処理する。
 // ジョブは UNIHUB 側で本人が承認カードを承認したものだけが届く（無差別実行ではない）。
@@ -3901,7 +3901,7 @@ struct RemoteExecResult {
 /// リモートジョブの既定タイムアウト（サーバー側 expires=30分より必ず短くする）
 const REMOTE_JOB_TIMEOUT_SECS: u64 = 20 * 60;
 
-/// 開発モード（P3-M6・結城さん承認済み 2026-07-16）:
+/// 開発モード（P3-M6・メンテナ承認済み 2026-07-16）:
 /// cwd がユーザーが明示登録した許可フォルダ配下なら acceptEdits で編集・ビルドを許可する。
 /// 判定は canonicalize 同士の前方一致（`..` やシンボリックリンクでの脱出を防ぐ）。
 fn is_inside_dev_folder(cwd: &std::path::Path, dev_folders: &[String]) -> bool {

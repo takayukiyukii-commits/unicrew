@@ -8,8 +8,8 @@ Repository → Settings → Secrets and variables → Actions → New repository
 
 | シークレット名 | 内容 | 取得方法 |
 |---|---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | minisign 秘密鍵の **本文**（base64含む全文） | `Get-Content -Raw D:\secrets\tauri-signing\unicrew.key` の出力をそのまま貼り付け |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 上記鍵のパスフレーズ | `D:\secrets\tauri-signing\README.md` の「パスワード」行を参照 |
+| `TAURI_SIGNING_PRIVATE_KEY` | minisign 秘密鍵の **本文**（base64含む全文） | `Get-Content -Raw <鍵保管フォルダ>\unicrew.key` の出力をそのまま貼り付け |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 上記鍵のパスフレーズ | 鍵保管フォルダの README にある「パスワード」行を参照 |
 
 > ⚠️ 秘密鍵を紛失すると、配布済ユーザーの自動アップデートが永久に止まります。
 > F: 外付けバックアップ（タスクスケジューラ Backup_Secrets_Daily 03:15）が走っていることを確認。
@@ -56,7 +56,7 @@ Repository → Settings → Secrets and variables → Actions → New repository
 
 Windows ローカルでは:
 ```powershell
-$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content -Raw D:\secrets\tauri-signing\unicrew.key)
+$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content -Raw <鍵保管フォルダ>\unicrew.key)
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<パスワード>"
 npm run build:tauri
 npm run tauri:build

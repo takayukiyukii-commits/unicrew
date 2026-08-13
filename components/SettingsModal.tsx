@@ -247,7 +247,7 @@ export function SettingsModal({
   // 「localStorage 読込前のデフォルト settings」を掴んでいる。ここで beginnerMode /
   // advancedMode / appearance を同期しないと、保存ボタンで古い値（beginnerMode:true 等）を
   // 上書きしてしまい、ターミナル等の上級者UIがサイドバーから消える
-  // （結城さん報告 2026-07-16 の真因）。
+  // （ユーザー報告 2026-07-16 の真因）。
   useEffect(() => {
     if (open) {
       setAuthMode(settings.authMode);
@@ -1986,7 +1986,7 @@ function UserProfileSection({
  *   2) 新版があれば情報＋「ダウンロードして適用」ボタン
  *   3) 押下 → .exe/.msi をダウンロード → 署名検証 → 既存版置換 → 自動再起動
  *
- * 署名鍵：D:\secrets\tauri-signing\unicrew.key（Ed25519 / minisign 互換）。
+ * 署名鍵：リポジトリ外の鍵保管フォルダで管理（Ed25519 / minisign 互換）。
  * 公開鍵は tauri.conf.json の plugins.updater.pubkey に直書きされており、
  * バイナリにビルドインされる。鍵が一致しないアップデートは弾かれる。
  */

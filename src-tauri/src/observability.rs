@@ -1,7 +1,7 @@
 //! OpenTelemetry 観測性 Phase 1 — 足場のみ。
 //!
 //! ## なぜ Phase 1 では no-op か
-//! - エンドポイント（Honeycomb / Grafana Cloud / 自前 OTLP）の決定が結城さん要判断
+//! - エンドポイント（Honeycomb / Grafana Cloud / 自前 OTLP）の決定がメンテナ要判断
 //! - opentelemetry-otlp 系は転送依存（rustls / protobuf）が重く、決定前の取込はバイナリ肥大化要因
 //! - そのため「フックと API 形」を先に固定し、依存追加は決定後に `otel` feature で有効化
 //!

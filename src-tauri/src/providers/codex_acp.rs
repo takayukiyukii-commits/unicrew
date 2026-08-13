@@ -66,7 +66,7 @@ impl CliProvider for CodexAcpProvider {
             cmd.current_dir(ws);
         }
         // 実行時の OpenAI 認証。
-        // AuthMode::ApiKey で結城さんが UI に登録した OpenAI key（Whisper 用と共用）が
+        // AuthMode::ApiKey でユーザーが UI に登録した OpenAI key（Whisper 用と共用）が
         // opts.api_key として流れてくる場合はそれを OPENAI_API_KEY に注入する。
         // AuthMode::Subscription の場合は env を触らず、UNICREW を起動した shell が
         // 既に OPENAI_API_KEY / CODEX_API_KEY / ChatGPT subscription を持っている前提。

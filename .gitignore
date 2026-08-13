@@ -42,3 +42,6 @@ scripts/_handoff_*.md
 # ビルドログ（公開リポジトリに入れない）
 .tsc-out.txt
 *.log
+scripts/_handoff_*.md
+scripts/*.py
+!scripts/build_tauri.js

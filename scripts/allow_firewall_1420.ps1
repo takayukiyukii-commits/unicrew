@@ -41,7 +41,7 @@ Write-Host ""
 Write-Host "✓ ファイアウォールルール 'UNICREW-1420' を追加しました（LAN 内のみ）" -ForegroundColor Green
 Write-Host ""
 Write-Host "次の手順:"
-Write-Host "  1. UNICREW を再起動 (cd C:\Users\takay\repos\unicrew && npm run tauri:dev)"
+Write-Host "  1. UNICREW を再起動 (cd <リポジトリのパス> && npm run tauri:dev)"
 Write-Host "  2. ファイル → 📱 スマホ連携（リモコン） を開いて URL をコピー"
 Write-Host "  3. スマホ（同じ Wi-Fi）でその URL を開く"
 Write-Host ""
