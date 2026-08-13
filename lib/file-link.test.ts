@@ -86,7 +86,7 @@ describe("findPathMatches - ターミナル側も同じ再アンカー", () => {
 });
 
 describe("§ や記号を含むパスも全体がリンクになる（報告された不具合）", () => {
-  const sectionPath = `D:${BS}company${BS}CDO（技術責任者）${BS}作業中${BS}20260627_提案_UNIHUBマネージドAI料金_§12統合最終プラン表.md`;
+  const sectionPath = `D:${BS}work${BS}プロジェクト（開発）${BS}作業中${BS}20260627_提案_サービス料金_§12統合プラン表.md`;
 
   it("segmentText: § で切れず全体が file セグメントになる", () => {
     const segs = segmentText(`保存しました ${sectionPath} を確認`);
@@ -155,29 +155,29 @@ describe("escapeMarkdownInPaths - パス内 markdown 活性文字のエスケー
 describe("unwrapPaths - 折り返し改行で分断されたパスの接合", () => {
   it("改行＋インデントで分断されたパスを1本に戻す", () => {
     const src =
-      `保存先は D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設\n` +
+      `保存先は D:${BS}work${BS}プロジェクト（開発）${BS}成果物${BS}20260702_設\n` +
       `    計書_改善.md です`;
     const out = unwrapPaths(src);
     expect(out).toBe(
-      `保存先は D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設計書_改善.md です`,
+      `保存先は D:${BS}work${BS}プロジェクト（開発）${BS}成果物${BS}20260702_設計書_改善.md です`,
     );
     // 接合後は segmentText が全長を 1 リンク化できる
     const segs = segmentText(out);
     const file = segs.find((s) => s.kind === "file");
     expect(file?.path).toBe(
-      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}20260702_設計書_改善.md`,
+      `D:${BS}work${BS}プロジェクト（開発）${BS}成果物${BS}20260702_設計書_改善.md`,
     );
   });
 
   it("3行にまたがる折り返しも接合できる", () => {
     const src = [
-      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}UNICREW${BS}components`,
+      `D:${BS}work${BS}プロジェクト（開発）${BS}成果物${BS}UNICREW${BS}components`,
       `    ${BS}InteractiveTermi`,
       "    nal.tsx",
     ].join("\n");
     const out = unwrapPaths(src);
     expect(out).toBe(
-      `D:${BS}company${BS}CDO（技術責任者）${BS}成果物${BS}UNICREW${BS}components${BS}InteractiveTerminal.tsx`,
+      `D:${BS}work${BS}プロジェクト（開発）${BS}成果物${BS}UNICREW${BS}components${BS}InteractiveTerminal.tsx`,
     );
   });
 
@@ -213,7 +213,7 @@ describe("unwrapPaths - 折り返し改行で分断されたパスの接合", ()
 
 describe("pnpm パス（+ 入り）の全長リンク化", () => {
   const pnpmPath =
-    `D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm` +
+    `D:${BS}work${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm` +
     `${BS}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0` +
     `${BS}node_modules${BS}@sentry${BS}nextjs${BS}build${BS}types-ts3.8` +
     `${BS}wrapDocumentGetInitialPropsWithSentry.d.ts`;
@@ -232,7 +232,7 @@ describe("pnpm パス（+ 入り）の全長リンク化", () => {
 
   it("unwrapPaths: インデント付き実改行で 3 分割された + 入りパスを接合する", () => {
     const src = [
-      `  1. D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core`,
+      `  1. D:${BS}work${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core`,
       `  @2.7.0_@opentelemetry+api@1.9.1${BS}node_modules${BS}@sentry${BS}nextjs${BS}b`,
       `  uild${BS}types-ts3.8${BS}wrapDocumentGetInitialPropsWithSentry.d.ts（298文字）`,
     ].join("\n");
@@ -241,7 +241,7 @@ describe("pnpm パス（+ 入り）の全長リンク化", () => {
     const hits = findPathMatches(out);
     expect(hits.length).toBe(1);
     expect(hits[0].openPath).toBe(
-      `D:${BS}company${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0_@opentelemetry+api@1.9.1${BS}node_modules${BS}@sentry${BS}nextjs${BS}build${BS}types-ts3.8${BS}wrapDocumentGetInitialPropsWithSentry.d.ts`,
+      `D:${BS}work${BS}成果物${BS}unistep${BS}node_modules${BS}.pnpm${BS}@sentry+nextjs@10.50.0_@opentelemetry+core@2.7.0_@opentelemetry+api@1.9.1${BS}node_modules${BS}@sentry${BS}nextjs${BS}build${BS}types-ts3.8${BS}wrapDocumentGetInitialPropsWithSentry.d.ts`,
     );
   });
 
@@ -257,7 +257,7 @@ describe("pnpm パス（+ 入り）の全長リンク化", () => {
 
 describe("findDrivePathMatches - 。、空白入りパスの貪欲展開", () => {
   const pdfPath =
-    `D:${BS}company${BS}CDO（技術責任者）${BS}参考資料${BS}AI作成ファイル` +
+    `D:${BS}work${BS}プロジェクト（開発）${BS}資料${BS}AI作成ファイル` +
     `${BS}マインドセット、メンタル管理` +
     `${BS}運命は変えられる。性格は作れる。魂の建築学 習慣と思考のコントロール.pdf`;
 

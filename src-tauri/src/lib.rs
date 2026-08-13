@@ -2347,7 +2347,7 @@ mod path_norm_tests {
 
     #[test]
     fn percent_decode_fullwidth_parens() {
-        assert_eq!(percent_decode_utf8("CDO%EF%BC%88x%EF%BC%89"), "CDO（x）");
+        assert_eq!(percent_decode_utf8("AB%EF%BC%88x%EF%BC%89"), "AB（x）");
     }
 
     #[test]
@@ -2363,8 +2363,8 @@ mod path_norm_tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn wsl_mnt_path_to_windows() {
-        let p = expand_user_path("/mnt/d/company/icons/phone.png");
-        assert_eq!(p.to_string_lossy(), "D:\\company\\icons\\phone.png");
+        let p = expand_user_path("/mnt/d/work/icons/phone.png");
+        assert_eq!(p.to_string_lossy(), "D:\\work\\icons\\phone.png");
     }
 
     #[cfg(target_os = "windows")]

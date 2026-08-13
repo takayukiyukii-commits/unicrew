@@ -2,17 +2,17 @@
 import { describe, expect, it } from "vitest";
 import { classifyMarkdownLink } from "./preview";
 
-const WS = "D:\\company\\ナレッジ\\アイコン";
+const WS = "D:\\work\\ナレッジ\\アイコン";
 
 describe("classifyMarkdownLink", () => {
   it("相対パスの画像PNG → 別ウィンドウでプレビュー(file)", () => {
     const a = classifyMarkdownLink("phone-soft.png", WS);
-    expect(a).toEqual({ kind: "preview-file", file: "D:\\company\\ナレッジ\\アイコン\\phone-soft.png" });
+    expect(a).toEqual({ kind: "preview-file", file: "D:\\work\\ナレッジ\\アイコン\\phone-soft.png" });
   });
 
   it("./付き相対の画像 → workspace解決してプレビュー", () => {
     const a = classifyMarkdownLink("./camera-circle.png", WS);
-    expect(a).toEqual({ kind: "preview-file", file: "D:\\company\\ナレッジ\\アイコン\\camera-circle.png" });
+    expect(a).toEqual({ kind: "preview-file", file: "D:\\work\\ナレッジ\\アイコン\\camera-circle.png" });
   });
 
   it("絶対Windowsパスの画像 → そのままプレビュー(file)", () => {
@@ -47,7 +47,7 @@ describe("classifyMarkdownLink", () => {
 
   it("画像でもHTMLでもないローカルファイル(pdf) → external", () => {
     const a = classifyMarkdownLink("report.pdf", WS);
-    expect(a).toEqual({ kind: "external", target: "D:\\company\\ナレッジ\\アイコン\\report.pdf" });
+    expect(a).toEqual({ kind: "external", target: "D:\\work\\ナレッジ\\アイコン\\report.pdf" });
   });
 
   it("URLエンコードされたfile:// の日本語パス → デコードしてプレビュー", () => {
@@ -57,13 +57,13 @@ describe("classifyMarkdownLink", () => {
 
   it("percent-encodedな全角括弧パス → デコードしてプレビュー(file)", () => {
     // react-markdown が （ ） を %EF%BC%88 / %EF%BC%89 にエンコードするケース
-    const enc = "/mnt/d/company/CDO%EF%BC%88%E6%8A%80%E8%A1%93%E8%B2%AC%E4%BB%BB%E8%80%85%EF%BC%89/x.png";
+    const enc = "/mnt/d/work/%E3%83%97%E3%83%AD%E3%82%B8%E3%82%A7%E3%82%AF%E3%83%88%EF%BC%88%E9%96%8B%E7%99%BA%EF%BC%89/x.png";
     const a = classifyMarkdownLink(enc, null);
-    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/company/CDO（技術責任者）/x.png" });
+    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/work/プロジェクト（開発）/x.png" });
   });
 
   it("WSL絶対パスの画像 → preview-file（/mnt のまま返しRust側で変換）", () => {
-    const a = classifyMarkdownLink("/mnt/d/company/icons/phone.png", null);
-    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/company/icons/phone.png" });
+    const a = classifyMarkdownLink("/mnt/d/work/icons/phone.png", null);
+    expect(a).toEqual({ kind: "preview-file", file: "/mnt/d/work/icons/phone.png" });
   });
 });
