@@ -1282,13 +1282,24 @@ export default function Page() {
             : null,
       },
     };
-    // 🚨 中身ゼロ（テキストもブロックも無い）の draft はメッセージ化しない。
+    // 🚨 中身ゼロ（テキストもブロックも無い）の draft の扱い（2026-08-14）:
     // Codex は 1 回の送信に対して turn.completed（= Result イベント）を複数回返すことがあり、
-    // そのたびに finalizeDraft が走って「アイコン＋名前＋…」だけの空ふきだしが積まれ、
-    // 「何をしているのか分からない表示」になっていた（2026-08-14 結城さん報告）。
-    // 空 draft は破棄し、進捗は StreamingStatus（考え中…/経過秒）側に一本化する。
-    if (finalText !== "" || d.blocks.length > 0) {
+    // そのたびに finalizeDraft が走って「アイコン＋名前＋…」だけの空ふきだしが積まれていた。
+    // - 単独チャット: 空 draft は破棄（進捗は StreamingStatus 側に一本化）
+    // - 並列/会議スレッド: 破棄すると①直列送信の「直前の発言」検索が過去ラウンドの
+    //   メッセージを誤って拾う ②会議進行が空応答のまま先へ進む（監査第2回 HIGH）ため、
+    //   破棄せず明示プレースホルダで残してフロー整合を保つ
+    const isEmptyDraft = finalText === "" && d.blocks.length === 0;
+    const parallelCtx = thread ? isThreadParallel(thread) : false;
+    if (!isEmptyDraft) {
       updateThread(d.threadId, (t) => appendMessage(t, assistantMsg));
+    } else if (parallelCtx) {
+      updateThread(d.threadId, (t) =>
+        appendMessage(t, {
+          ...assistantMsg,
+          content: tr("chat.emptyResponsePlaceholder"),
+        }),
+      );
     }
     const next = { ...draftsRef.current };
     delete next[sid];

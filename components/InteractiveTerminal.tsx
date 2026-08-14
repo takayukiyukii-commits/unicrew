@@ -526,8 +526,12 @@ export function InteractiveTerminal({
       // 喪失時は WebGL アドオンを作り直し、復帰後に全面 refresh して描画を復元する。
       try {
         const { WebglAddon } = await import("@xterm/addon-webgl");
+        let webglRetries = 0;
         const loadWebgl = () => {
           if (disposed) return;
+          // GPU が完全に死んでいる環境で 喪失→再生成→即喪失 の高速ループに
+          // ならないよう上限を設ける（上限到達後は DOM レンダラで継続）
+          if (webglRetries++ > 5) return;
           try {
             const webgl = new WebglAddon();
             webgl.onContextLoss(() => {

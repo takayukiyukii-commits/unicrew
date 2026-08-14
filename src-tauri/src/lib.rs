@@ -1700,20 +1700,18 @@ async fn cli_versions() -> Result<CliVersions, String> {
 /// 自分の導入経路を認識して適切に更新するため、これを第1経路にする。
 /// （npm 導入の CLI でも `claude update` は npm 向けの案内/更新を行う）
 /// 進捗は `cli_update:line` イベントで stream する。
-#[tauri::command]
-async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
-    let bin = match provider.as_str() {
-        "claude" => "claude",
-        "codex" => "codex",
-        other => return Err(format!("unknown provider: {}", other)),
-    };
-    let mut cmd = build_silent_command(bin);
-    cmd.arg("update")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+/// program + args を実行し、stdout/stderr を `cli_update:line` に stream して
+/// 終了ステータスを返す（update_cli の 2 経路で共用）。
+async fn run_streamed_update(
+    app: &AppHandle,
+    program: &str,
+    args: &[&str],
+) -> Result<bool, String> {
+    let mut cmd = build_silent_command(program);
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("{} の起動に失敗しました: {}", bin, e))?;
+        .map_err(|e| format!("{} の起動に失敗しました: {}", program, e))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
@@ -1732,14 +1730,37 @@ async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
         }
     });
     let status = child.wait().await.map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err(format!(
-            "{} update が失敗しました（exit={}）",
-            bin,
-            status.code().unwrap_or(-1)
-        ));
+    Ok(status.success())
+}
+
+#[tauri::command]
+async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
+    let (bin, pkg) = match provider.as_str() {
+        "claude" => ("claude", "@anthropic-ai/claude-code"),
+        "codex" => ("codex", "@openai/codex"),
+        other => return Err(format!("unknown provider: {}", other)),
+    };
+    // 第1経路: CLI 自己更新（導入経路を自認して適切に更新する）
+    if run_streamed_update(&app, bin, &["update"]).await? {
+        return Ok(());
     }
-    Ok(())
+    // 第2経路: 旧 CLI（update サブコマンド未実装）や自己更新不可の環境向けに
+    // 旧来の npm グローバル更新へフォールバック
+    let _ = app.emit(
+        "cli_update:line",
+        format!(
+            "{} update が使えないため npm でフォールバック更新します…",
+            bin
+        ),
+    );
+    let target = format!("{}@latest", pkg);
+    if run_streamed_update(&app, "npm", &["install", "-g", &target]).await? {
+        return Ok(());
+    }
+    Err(format!(
+        "{} の更新に失敗しました（self-update / npm の両経路とも失敗）",
+        bin
+    ))
 }
 
 // ---------- Aggregated update checker (Phase 1) ----------
@@ -2272,6 +2293,11 @@ fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
         // PATH には反映されないため、ここを直接探す。
         // ＝「ワンクリックインストール成功直後なのに claude が見つからない」の根治。
         (local_appdata.as_ref(), "Microsoft/WinGet/Links"),
+        // Codex 公式インストーラ（chatgpt.com/codex/install.ps1）の既定 visible bin。
+        // 2026-08-14 実物スクリプトで確認: %LOCALAPPDATA%/Programs/OpenAI/Codex/bin。
+        // これが無いと、公式インストーラ成功直後に resolve_on_path("codex") が失敗して
+        // npm フォールバックへ落ち、同一 CLI が二重インストールされる。
+        (local_appdata.as_ref(), "Programs/OpenAI/Codex/bin"),
         // winget の Ollama.Ollama 既定
         (local_appdata.as_ref(), "Programs/Ollama"),
         // 一般的な ProgramFiles 配置

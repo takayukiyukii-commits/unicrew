@@ -112,8 +112,9 @@ jobs:
         run: |
           $dir = "$env:RUNNER_TEMP\TrustedSigning"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          nuget install Microsoft.Trusted.Signing.Client -OutputDirectory $dir -x
-          nuget install Microsoft.Windows.SDK.BuildTools -OutputDirectory $dir -x
+          # バージョンはローカル実証済みのものに固定（監査指摘・供給網対策。更新は明示的コミットで）
+          nuget install Microsoft.Trusted.Signing.Client -Version 1.0.95 -OutputDirectory $dir -x
+          nuget install Microsoft.Windows.SDK.BuildTools -Version 10.0.26100.4188 -OutputDirectory $dir -x
           echo "TRUSTED_SIGNING_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build & release

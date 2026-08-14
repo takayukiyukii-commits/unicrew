@@ -115,11 +115,24 @@ if (!fs.existsSync(meta)) {
   );
 }
 
-// 冪等: 既に署名済みならスキップ（Tauri は同じバイナリに複数回 signCommand を呼ぶことがある）
+// 冪等: 既に「ZUBOLAND の署名」が付いている場合のみスキップ
+// （Tauri は同じバイナリに複数回 signCommand を呼ぶことがある）。
+// 🚨 監査指摘（2026-08-14 第1回 HIGH）: 旧実装は verify /pa が通るだけでスキップして
+// いたため、他発行者の有効な Authenticode 署名が付いたバイナリが混入した場合に
+// 再署名されないまま配布される恐れがあった。発行先サブジェクトまで確認する。
+const EXPECTED_SUBJECT = "ZUBOLAND";
 try {
-  execFileSync(signtool, ["verify", "/pa", target], { stdio: "pipe" });
-  console.log(`[sign] 署名済みのためスキップ: ${path.basename(target)}`);
-  process.exit(0);
+  const out = execFileSync(signtool, ["verify", "/pa", "/v", target], {
+    stdio: "pipe",
+  }).toString("utf8");
+  if (out.includes("Successfully verified") && out.includes(EXPECTED_SUBJECT)) {
+    console.log(`[sign] ZUBOLAND 署名済みのためスキップ: ${path.basename(target)}`);
+    process.exit(0);
+  }
+  // 有効だが他者の署名 → 我々の署名で置き換える（signtool sign は主署名を置換する）
+  console.warn(
+    `[sign] ⚠ 既存署名は ${EXPECTED_SUBJECT} ではないため再署名します: ${path.basename(target)}`,
+  );
 } catch {
   /* 未署名 → 署名へ */
 }
