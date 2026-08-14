@@ -2867,7 +2867,9 @@ async fn install_codex(app: AppHandle) -> Result<(), String> {
         let mut cmd = build_silent_command("sh");
         cmd.args([
             "-c",
-            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$PATH\"; curl -fsSL https://chatgpt.com/codex/install.sh | sh || npm install -g @openai/codex",
+            // 導入後の実在確認まで shell 内で行う（resolve_on_path は Windows 専用 cfg。
+            // 2026-08-14: 非 Windows から呼んで CI の mac/Linux ビルドが E0425 で落ちた）。
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$PATH\"; { curl -fsSL https://chatgpt.com/codex/install.sh | sh || npm install -g @openai/codex; } && command -v codex >/dev/null 2>&1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2887,8 +2889,8 @@ async fn install_codex(app: AppHandle) -> Result<(), String> {
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
             let exit = child.wait().await;
-            let success = matches!(&exit, Ok(s) if s.success())
-                && resolve_on_path("codex").is_some();
+            // 実在確認は上の sh スクリプト末尾の `command -v codex` が担う
+            let success = matches!(&exit, Ok(s) if s.success());
             let _ = app_done.emit("codex_install:done", success);
         });
         Ok(())
