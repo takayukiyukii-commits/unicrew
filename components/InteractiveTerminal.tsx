@@ -519,17 +519,44 @@ export function InteractiveTerminal({
       // WebGL レンダラ（VSCode 統合ターミナルと同じ方式）。各グリフをセル枠にクリップして
       // GPU 描画するため、DOM レンダラで起きていた「全角(日本語)入力時に差分描画がズレて
       // 入力中の文字が別の行に描かれる」問題に強い。生成失敗/コンテキスト喪失時は DOM へ戻す。
+      // 【2026-08-14 修正】旧実装はコンテキスト喪失時に dispose() だけして
+      // DOM レンダラへ落としていた。DOM レンダラには上記の「全角の差分描画ズレ」が
+      // あるため、長時間使用（GPU リセット・スリープ復帰・メモリ逼迫で喪失が起きる）
+      // の後に「文章が崩れて表示される」状態へ移行していた。VS Code と同じく
+      // 喪失時は WebGL アドオンを作り直し、復帰後に全面 refresh して描画を復元する。
       try {
         const { WebglAddon } = await import("@xterm/addon-webgl");
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => {
+        const loadWebgl = () => {
+          if (disposed) return;
           try {
-            webgl.dispose();
+            const webgl = new WebglAddon();
+            webgl.onContextLoss(() => {
+              try {
+                webgl.dispose();
+              } catch {
+                /* noop */
+              }
+              // 直後の再生成は同じ喪失中コンテキストを掴みがちなので 1 ティック譲る
+              setTimeout(loadWebgl, 50);
+            });
+            term.loadAddon(webgl);
+            // 再生成後はアトラスが空なので全面再描画で現画面を復元する
+            try {
+              term.refresh(0, Math.max(0, term.rows - 1));
+            } catch {
+              /* noop */
+            }
           } catch {
-            /* noop */
+            // WebGL 再生成不可（GPU 無効化等）→ DOM レンダラで継続。
+            // せめて全面 refresh して喪失時点の描き掛けを消す。
+            try {
+              term.refresh(0, Math.max(0, term.rows - 1));
+            } catch {
+              /* noop */
+            }
           }
-        });
-        term.loadAddon(webgl);
+        };
+        loadWebgl();
       } catch {
         /* WebGL 不可環境では DOM レンダラのまま（機能は維持） */
       }
@@ -654,7 +681,31 @@ export function InteractiveTerminal({
           void (async () => {
             try {
               const text = await readClipboardText();
-              if (text) term.paste(text);
+              if (!text) return;
+              // 【2026-08-14 修正】複数行ペーストの崩れ対策。
+              // claude(Ink) は起動時に ?2004h（ブラケットペースト）を有効化するが、
+              // Windows の ConPTY はこのモード変更を端末側へ通さないことがあり、
+              // その場合 xterm はブラケットモードに入らず term.paste() が素の \r を送る。
+              // claude は \r を Enter として処理するため、複数行テキストが行ごとに
+              // 送信されて Ink の再描画で改行・空白が混入して崩れる。
+              // → モードが立っていない claude ターミナルでは、マーカー
+              //   （ESC[200~ … ESC[201~）を自前で付けて PTY へ直接書く。
+              //   claude CLI 自身はマーカーを解釈して「1 個の貼り付けブロック」として
+              //   受け取るため、どちらの環境でも同じ挙動になる。
+              //   （shell ターミナルは cmd がマーカー未対応のため従来どおり term.paste()）
+              const normalized = text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+              const bracketed = (() => {
+                try {
+                  return term.modes?.bracketedPasteMode === true;
+                } catch {
+                  return false;
+                }
+              })();
+              if (!bracketed && kind === "claude" && normalized.includes("\r")) {
+                void ptyWriteText(id, "\x1b[200~" + normalized + "\x1b[201~");
+              } else {
+                term.paste(text);
+              }
             } catch {
               /* クリップボード取得不可時は何もしない */
             }

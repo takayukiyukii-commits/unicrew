@@ -38,11 +38,8 @@ import { getCharacter } from "@/lib/characters";
 import { getPersonality } from "@/lib/personalities";
 import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
-import { VoiceInputButton } from "./VoiceInputButton";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
-import { SlashCommandPicker } from "./SlashCommandPicker";
-import type { SlashCommandDef } from "@/lib/slash-commands";
 import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
@@ -323,30 +320,6 @@ export function ChatPane({
     ]);
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
-
-  // スラッシュコマンドピッカーから選ばれたら、textarea にコマンド文字列を反映する。
-  // 末尾スペース付き（引数を要するもの）はそのまま挿入し、ユーザーが続きを書ける状態にする。
-  // 既に入力中ならスペース区切りで追記、空ならそのまま設定。
-  const handlePickCommand = (cmd: SlashCommandDef) => {
-    setInput((prev) => {
-      const trimmed = prev.trimEnd();
-      if (trimmed.length === 0) return cmd.command;
-      return `${trimmed} ${cmd.command}`;
-    });
-    setTimeout(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-      }
-    }, 0);
-  };
-
-  // 並列モード時は両プロバイダのコマンドを表示する
-  const activeProviders: Provider[] = thread?.splitMode
-    ? ["claude", "codex"]
-    : ["claude"];
 
   const isSplitPane = paneRole === "split";
   const paneBorderClass = isSplitPane
@@ -647,18 +620,6 @@ export function ChatPane({
           >
             <Paperclip size={16} />
           </button>
-          <VoiceInputButton
-            disabled={isStreaming}
-            onTranscribed={(text) => {
-              setInput((prev) => (prev ? `${prev} ${text}` : text));
-              setTimeout(() => textareaRef.current?.focus(), 0);
-            }}
-          />
-          <SlashCommandPicker
-            activeProviders={activeProviders}
-            onPick={handlePickCommand}
-            disabled={isStreaming}
-          />
           {isStreaming ? (
             <>
               {input.trim() && (

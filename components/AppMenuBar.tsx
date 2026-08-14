@@ -39,9 +39,11 @@ interface Props {
    * 真値（更新あり）/ 偽値（最新）を Promise で返すと、UI バッジが切り替わる。
    */
   onCheckUpdates?: () => Promise<{ hasUpdate: boolean; message?: string }>;
+  /** 更新ありの状態でボタンを押したとき、適用 UI（設定モーダル）を開く。 */
+  onOpenSettings?: () => void;
 }
 
-export function AppMenuBar({ menus, onCheckUpdates }: Props) {
+export function AppMenuBar({ menus, onCheckUpdates, onOpenSettings }: Props) {
   const { t } = useTranslation();
   const appVersion = useAppVersion();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -75,7 +77,36 @@ export function AppMenuBar({ menus, onCheckUpdates }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [openMenu]);
 
+  // 【2026-08-14】起動時に 1 回だけサイレント自動チェック。
+  // 手動で押さない限り更新に気づけなかったため（設定モーダル内の手動確認のみ）、
+  // 起動直後に裏でチェックして、更新があればボタンを緑バッジ化する。
+  // silent=true では「最新版です」等のメッセージは出さない（起動時のノイズ防止）。
+  const autoCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!onCheckUpdates || autoCheckedRef.current) return;
+    autoCheckedRef.current = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const result = await onCheckUpdates();
+          if (result.hasUpdate) {
+            setUpdateInfo({ ...result, checkedAt: Date.now() });
+          }
+        } catch {
+          /* 起動時の失敗は黙って無視（手動チェックで表面化する） */
+        }
+      })();
+    }, 3000); // 起動直後の初期化ラッシュを避けて 3 秒後
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleCheck = async () => {
+    // 更新ありバッジの状態でクリックされたら、再チェックではなく適用 UI を開く
+    if (updateInfo?.hasUpdate && onOpenSettings) {
+      onOpenSettings();
+      return;
+    }
     setChecking(true);
     try {
       if (onCheckUpdates) {

@@ -355,7 +355,7 @@ const ja: Dict = {
   "rightPane.splitEditingClose": "」",
   "rightPane.splitEditingUntitled": "（無題）",
   "rightPane.splitEditingHint": "以下の変更はクリック中のペインだけに反映されます。別のペインを編集したい時はそのペインをクリック。",
-  "rightPane.characterLabel": "キャラクター",
+  "rightPane.characterLabel": "モデル",
   "rightPane.providerHintCharacter": "このキャラを動かす AI を切替（テンプレはクローンして保存）",
   "rightPane.providerHintSlot": "このスロットを動かす AI を切替",
   "rightPane.participantsLabel": "参加者（{count}人）",
@@ -526,6 +526,8 @@ const ja: Dict = {
 
   // ----- App menu bar (top right) -----
   "appmenu.checkUpdates": "アップデートを確認",
+  "appmenu.checkFailed": "更新の確認に失敗しました（ネットワークをご確認ください）",
+  "appmenu.newVersion": "新しいバージョン v{version} があります",
   "appmenu.checking": "確認中…",
   "appmenu.updateAvailable": "アップデートあり",
   "appmenu.upToDate": "現時点で最新版です（v{version}）",
@@ -1467,7 +1469,7 @@ const en: Dict = {
   "rightPane.splitEditingClose": "\"",
   "rightPane.splitEditingUntitled": "(untitled)",
   "rightPane.splitEditingHint": "Changes below only apply to the focused pane. Click another pane to edit it.",
-  "rightPane.characterLabel": "Character",
+  "rightPane.characterLabel": "Model",
   "rightPane.providerHintCharacter": "Switch the AI behind this character (templates are cloned and saved)",
   "rightPane.providerHintSlot": "Switch the AI for this slot",
   "rightPane.participantsLabel": "Participants ({count})",
@@ -1638,6 +1640,8 @@ const en: Dict = {
 
   // ----- App menu bar (top right) -----
   "appmenu.checkUpdates": "Check for updates",
+  "appmenu.checkFailed": "Failed to check for updates (please check your network)",
+  "appmenu.newVersion": "New version v{version} is available",
   "appmenu.checking": "Checking…",
   "appmenu.updateAvailable": "Update available",
   "appmenu.upToDate": "You are on the latest version (v{version})",

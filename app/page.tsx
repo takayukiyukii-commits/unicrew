@@ -97,6 +97,7 @@ import {
   agentSend,
   agentStart,
   agentStop,
+  checkUnicrewUpdate,
   claudeStatus,
   codexStatus,
   defaultWorkspacePath,
@@ -1281,7 +1282,14 @@ export default function Page() {
             : null,
       },
     };
-    updateThread(d.threadId, (t) => appendMessage(t, assistantMsg));
+    // 🚨 中身ゼロ（テキストもブロックも無い）の draft はメッセージ化しない。
+    // Codex は 1 回の送信に対して turn.completed（= Result イベント）を複数回返すことがあり、
+    // そのたびに finalizeDraft が走って「アイコン＋名前＋…」だけの空ふきだしが積まれ、
+    // 「何をしているのか分からない表示」になっていた（2026-08-14 結城さん報告）。
+    // 空 draft は破棄し、進捗は StreamingStatus（考え中…/経過秒）側に一本化する。
+    if (finalText !== "" || d.blocks.length > 0) {
+      updateThread(d.threadId, (t) => appendMessage(t, assistantMsg));
+    }
     const next = { ...draftsRef.current };
     delete next[sid];
     draftsRef.current = next;
@@ -2224,44 +2232,6 @@ export default function Page() {
     const target = focusedThread;
     if (!target) return;
     updateThread(target.id, (t) => ({ ...t, model, updatedAt: Date.now() }));
-  };
-
-  /**
-   * 単独モード：現在のキャラの起動 AI（provider）を切替える。
-   * - テンプレ（isTemplate=true）の場合：provider 上書きでクローン → 保存 →
-   *   thread.characterId を新クローンに差替（テンプレ自体は編集不可のため）。
-   * - ユーザーキャラの場合：provider を直接書き換え（同じキャラ id のまま）。
-   * セッションは AI が変わるので止めて再 spawn を促す。
-   */
-  const handleChangeCharacterProvider = async (provider: Provider) => {
-    const target = focusedThread;
-    if (!target) return;
-    const char = getCharacter(target.characterId);
-    if (!char || char.provider === provider) return;
-
-    // セッション再 spawn のため停止
-    await agentStop(target.id).catch(() => {});
-    sessionsStartedRef.current.delete(target.id);
-
-    if (char.isTemplate) {
-      const clone = cloneFromTemplate(char, { provider });
-      saveUserCharacters([clone, ...loadUserCharacters()]);
-      setCharacterRevision((r) => r + 1);
-      updateThread(target.id, (t) => ({
-        ...t,
-        characterId: clone.id,
-        updatedAt: Date.now(),
-      }));
-    } else {
-      const userChars = loadUserCharacters();
-      const updated = userChars.map((c) =>
-        c.id === char.id ? { ...c, provider } : c,
-      );
-      saveUserCharacters(updated);
-      setCharacterRevision((r) => r + 1);
-      // characterId は同じ。再描画と次の send 時に新 systemPrompt を反映させる。
-      updateThread(target.id, (t) => ({ ...t, updatedAt: Date.now() }));
-    }
   };
 
   /**
@@ -3503,7 +3473,26 @@ ${command}
   return (
     <ActivityVisibilityContext.Provider value={settings.showActivity}>
       <div className="h-screen w-screen flex flex-col bg-white overflow-hidden">
-        <AppMenuBar menus={menuDefs} />
+        <AppMenuBar
+          menus={menuDefs}
+          onCheckUpdates={async () => {
+            // plugin-updater で GitHub Releases の latest.json を実チェックする。
+            // （旧実装は未配線で、メニューバーのボタンは常に「最新版です」を
+            //   返すだけのダミーだった。2026-08-14 修正）
+            const r = await checkUnicrewUpdate();
+            if (!r) {
+              return { hasUpdate: false, message: tr("appmenu.checkFailed") };
+            }
+            if (r.available) {
+              return {
+                hasUpdate: true,
+                message: tr("appmenu.newVersion", { version: r.version }),
+              };
+            }
+            return { hasUpdate: false };
+          }}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
         <div className="flex-1 min-h-0 flex">
         <Sidebar
           threads={threads}
@@ -3888,7 +3877,6 @@ ${command}
               splitIds.includes(focusedThread.id)
             }
             onChangeCharacter={handleChangeCharacter}
-            onChangeCharacterProvider={handleChangeCharacterProvider}
             onChangeSplitCharacter={handleChangeSplitCharacter}
             onChangeSlotProvider={handleChangeSlotProvider}
             onAddParticipant={handleAddParticipant}

@@ -1607,14 +1607,33 @@ async fn npm_view_latest(pkg: &str) -> Option<String> {
     }
 }
 
+/// "x.y.z" を数値タプルに。パースできない部分は 0 扱い。
+fn parse_semver(v: &str) -> (u64, u64, u64) {
+    let mut it = v.split('.').map(|s| {
+        s.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<u64>()
+            .unwrap_or(0)
+    });
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
 fn build_version_info(
     name: &str,
     package: &str,
     current: Option<String>,
     latest: Option<String>,
 ) -> CliVersionInfo {
+    // 🚨 2026-08 修正: 旧実装の `c != l` は、stable チャネルや winget 版
+    // （npm latest より数版古いのが常態）の利用者に**永久に「更新あり」**を
+    // 出し続けた。current < latest のときだけ更新ありにする。
     let update_available = match (&current, &latest) {
-        (Some(c), Some(l)) => c != l,
+        (Some(c), Some(l)) => parse_semver(c) < parse_semver(l),
         _ => false,
     };
     CliVersionInfo {
@@ -1673,23 +1692,28 @@ async fn cli_versions() -> Result<CliVersions, String> {
     })
 }
 
-/// 指定 provider の CLI を `npm install -g <pkg>@latest` で更新する。
+/// 指定 provider の CLI を更新する。
+/// 🚨 2026-08 改修: 旧実装は常に `npm install -g <pkg>@latest` だったが、
+/// 現行の導入経路（ネイティブインストーラ/winget/brew）と食い違うと **同じ CLI が
+/// 2 系統インストールされ、どちらが起動するか PATH 順次第になる事故**を起こす。
+/// 現行 CLI はどちらも自己更新サブコマンド（`claude update` / `codex update`）を持ち、
+/// 自分の導入経路を認識して適切に更新するため、これを第1経路にする。
+/// （npm 導入の CLI でも `claude update` は npm 向けの案内/更新を行う）
 /// 進捗は `cli_update:line` イベントで stream する。
 #[tauri::command]
 async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
-    let pkg = match provider.as_str() {
-        "claude" => "@anthropic-ai/claude-code",
-        "codex" => "@openai/codex",
+    let bin = match provider.as_str() {
+        "claude" => "claude",
+        "codex" => "codex",
         other => return Err(format!("unknown provider: {}", other)),
     };
-    let target = format!("{}@latest", pkg);
-    let mut cmd = build_silent_command("npm");
-    cmd.args(["install", "-g", &target])
+    let mut cmd = build_silent_command(bin);
+    cmd.arg("update")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("npm の起動に失敗しました: {}", e))?;
+        .map_err(|e| format!("{} の起動に失敗しました: {}", bin, e))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
@@ -1710,7 +1734,8 @@ async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
     let status = child.wait().await.map_err(|e| e.to_string())?;
     if !status.success() {
         return Err(format!(
-            "npm install が失敗しました（exit={}）",
+            "{} update が失敗しました（exit={}）",
+            bin,
             status.code().unwrap_or(-1)
         ));
     }
@@ -2532,19 +2557,22 @@ async fn start_claude_login(app: AppHandle) -> Result<(), String> {
 }
 
 /// インストールコマンドを隠しウィンドウで実行し、stdout / stderr の両方を
-/// `claude_install:line` としてフロントに流す。終了コード成功なら true。
+/// 指定イベント（`claude_install:line` / `codex_install:line` 等）としてフロントに流す。
+/// 終了コード成功なら true。
 /// （旧実装は stderr を読み捨てており、失敗理由がユーザーに見えなかった）
 #[cfg(target_os = "windows")]
-async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> bool {
+async fn run_streamed_install_to(
+    app: &AppHandle,
+    event: &'static str,
+    program: &str,
+    args: &[&str],
+) -> bool {
     let mut cmd = build_silent_command(program);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let _ = app.emit(
-                "claude_install:line",
-                format!("{program} の起動に失敗しました: {e}"),
-            );
+            let _ = app.emit(event, format!("{program} の起動に失敗しました: {e}"));
             return false;
         }
     };
@@ -2553,7 +2581,7 @@ async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> 
         tauri::async_runtime::spawn(async move {
             let mut r = BufReader::new(out).lines();
             while let Ok(Some(l)) = r.next_line().await {
-                let _ = a.emit("claude_install:line", l);
+                let _ = a.emit(event, l);
             }
         });
     }
@@ -2562,58 +2590,66 @@ async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> 
         tauri::async_runtime::spawn(async move {
             let mut r = BufReader::new(err).lines();
             while let Ok(Some(l)) = r.next_line().await {
-                let _ = a.emit("claude_install:line", l);
+                let _ = a.emit(event, l);
             }
         });
     }
     matches!(child.wait().await, Ok(s) if s.success())
 }
 
+/// 後方互換ラッパ: Claude 用の既存呼び出し（claude_install:line 固定）。
+#[cfg(target_os = "windows")]
+async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> bool {
+    run_streamed_install_to(app, "claude_install:line", program, args).await
+}
+
 #[tauri::command]
 async fn install_claude_code(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // ワンクリックインストール（Windows）:
-        //   第1経路: winget (Anthropic.ClaudeCode / portable)
-        //   第2経路: 公式ネイティブインストーラ irm https://claude.ai/install.ps1 | iex
-        //            （winget が無い/古い/失敗した PC の救済。%USERPROFILE%\.local\bin に入る）
+        // ワンクリックインストール（Windows）— 2026-08 の公式仕様に追従:
+        //   第1経路: 公式ネイティブインストーラ irm https://claude.ai/install.ps1 | iex
+        //            （公式の「推奨」。管理者不要・Node 不要・**バックグラウンド自動更新あり**。
+        //              %USERPROFILE%\.local\bin に入る）
+        //   第2経路: winget (Anthropic.ClaudeCode)
+        //            （PowerShell が制限された PC の救済。winget 版は自動更新されない）
         // どちらも完了後に resolve_on_path("claude") で「本当に検出できるか」を検証して
         // から done を通知する（インストーラの成功コードだけを信用しない）。
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
-            let winget_ok = run_streamed_install(
+            let ps_ok = run_streamed_install(
                 &app_done,
-                "winget",
+                "powershell",
                 &[
-                    "install",
-                    "--silent",
-                    "--id",
-                    "Anthropic.ClaudeCode",
-                    "--accept-source-agreements",
-                    "--accept-package-agreements",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "irm https://claude.ai/install.ps1 | iex",
                 ],
             )
             .await;
-            let mut success = winget_ok && resolve_on_path("claude").is_some();
+            let mut success = ps_ok && resolve_on_path("claude").is_some();
             if !success {
                 let _ = app_done.emit(
                     "claude_install:line",
-                    "winget での導入に失敗または検出できませんでした。公式インストーラで再試行します…"
+                    "公式インストーラでの導入に失敗または検出できませんでした。winget で再試行します…"
                         .to_string(),
                 );
-                let ps_ok = run_streamed_install(
+                let winget_ok = run_streamed_install(
                     &app_done,
-                    "powershell",
+                    "winget",
                     &[
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-Command",
-                        "irm https://claude.ai/install.ps1 | iex",
+                        "install",
+                        "--silent",
+                        "--id",
+                        "Anthropic.ClaudeCode",
+                        "--accept-source-agreements",
+                        "--accept-package-agreements",
                     ],
                 )
                 .await;
-                success = ps_ok && resolve_on_path("claude").is_some();
+                success = winget_ok && resolve_on_path("claude").is_some();
             }
             let _ = app_done.emit("claude_install:done", success);
         });
@@ -2631,7 +2667,11 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
         let mut cmd = build_silent_command("sh");
         cmd.args([
             "-c",
-            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; command -v brew >/dev/null 2>&1 && brew install anthropic-ai/claude-code/claude-code || npm install -g @anthropic-ai/claude-code",
+            // 🚨 旧 tap `anthropic-ai/claude-code` は 2026-08 時点で GitHub 404＝消滅済み。
+            // 現行公式: ①ネイティブインストーラ（推奨・自動更新あり・~/.local/bin）
+            //           ②brew install --cask claude-code ③npm（最後の砦）。
+            // curl は最小 PATH でも /usr/bin にあるため、GUI 起動（Finder/Dock）でも確実に動く。
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; curl -fsSL https://claude.ai/install.sh | bash || { command -v brew >/dev/null 2>&1 && brew install --cask claude-code; } || npm install -g @anthropic-ai/claude-code",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2661,11 +2701,12 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
         let mut cmd = build_silent_command("sh");
         cmd.args([
             "-c",
-            // 1. ~/.npm-global を作る
-            // 2. NPM_CONFIG_PREFIX を一時的に上書きして user-global に install
-            "mkdir -p \"$HOME/.npm-global\" && \
-             NPM_CONFIG_PREFIX=\"$HOME/.npm-global\" \
-             npm install -g @anthropic-ai/claude-code",
+            // 第1経路: 公式ネイティブインストーラ（推奨・Node 不要・自動更新あり）。
+            // 第2経路: npm。sudo を避けるため NPM_CONFIG_PREFIX=$HOME/.npm-global に入れる。
+            "curl -fsSL https://claude.ai/install.sh | bash || { \
+               mkdir -p \"$HOME/.npm-global\" && \
+               NPM_CONFIG_PREFIX=\"$HOME/.npm-global\" \
+               npm install -g @anthropic-ai/claude-code; }",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2750,31 +2791,82 @@ async fn codex_status() -> Result<CodexStatus, String> {
 
 #[tauri::command]
 async fn install_codex(app: AppHandle) -> Result<(), String> {
-    // Codex は npm 配布が公式。Node.js が前提（UNICREW も Node 必須なので問題なし）。
-    let mut cmd = build_silent_command("npm");
-    cmd.args(["install", "-g", "@openai/codex"])
+    // Codex 導入 — 2026-08 の公式仕様に追従。
+    // 公式が推奨するのはスタンドアロンインストーラ（Node 不要）:
+    //   Win: irm https://chatgpt.com/codex/install.ps1 | iex
+    //   mac/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+    // フォールバックに npm（旧来経路・Node が要る）。
+    // 完了判定は Claude と同じく resolve_on_path("codex") の実検出で行う。
+    #[cfg(target_os = "windows")]
+    {
+        let app_done = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let ps_ok = run_streamed_install_to(
+                &app_done,
+                "codex_install:line",
+                "powershell",
+                &[
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "irm https://chatgpt.com/codex/install.ps1 | iex",
+                ],
+            )
+            .await;
+            let mut success = ps_ok && resolve_on_path("codex").is_some();
+            if !success {
+                let _ = app_done.emit(
+                    "codex_install:line",
+                    "公式インストーラでの導入に失敗または検出できませんでした。npm で再試行します…"
+                        .to_string(),
+                );
+                let npm_ok = run_streamed_install_to(
+                    &app_done,
+                    "codex_install:line",
+                    "npm",
+                    &["install", "-g", "@openai/codex"],
+                )
+                .await;
+                success = npm_ok && resolve_on_path("codex").is_some();
+            }
+            let _ = app_done.emit("codex_install:done", success);
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // mac/Linux: 公式インストーラ → npm フォールバック。
+        // macOS の GUI 起動は最小 PATH のため、Claude と同じ PATH 前置を行う。
+        let mut cmd = build_silent_command("sh");
+        cmd.args([
+            "-c",
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$PATH\"; curl -fsSL https://chatgpt.com/codex/install.sh | sh || npm install -g @openai/codex",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("npm の起動に失敗しました: {}", e))?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("インストーラの起動に失敗しました: {}", e))?;
+        let stdout = child.stdout.take().ok_or("no stdout")?;
 
-    let app_clone = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = app_clone.emit("codex_install:line", line);
-        }
-    });
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut reader = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                let _ = app_clone.emit("codex_install:line", line);
+            }
+        });
 
-    let app_done = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let exit = child.wait().await;
-        let success = matches!(&exit, Ok(s) if s.success());
-        let _ = app_done.emit("codex_install:done", success);
-    });
-    Ok(())
+        let app_done = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let exit = child.wait().await;
+            let success = matches!(&exit, Ok(s) if s.success())
+                && resolve_on_path("codex").is_some();
+            let _ = app_done.emit("codex_install:done", success);
+        });
+        Ok(())
+    }
 }
 
 #[tauri::command]

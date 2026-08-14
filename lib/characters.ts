@@ -32,7 +32,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
   {
     id: "tmpl-codex-normal",
     name: "Codex（normal）",
-    roleTag: "Codex CLI（OpenAI公式・第二意見）",
+    roleTag: "Codex CLI（OpenAI公式）",
     emoji: "🟢",
     iconName: undefined,
     avatarPath: null,

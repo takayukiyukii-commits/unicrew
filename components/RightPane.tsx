@@ -42,7 +42,6 @@ interface Props {
    * 単独モード：現キャラを動かす AI（provider）を切替える。テンプレならクローン+保存、
    * ユーザーキャラなら直接書換（実装側で対応）。
    */
-  onChangeCharacterProvider?: (provider: Provider) => void;
   /**
    * 並列モード時に slot 別にキャラを切替する。
    * 旧2way時は slotId が "claude"/"codex" になる（Provider と一致）。
@@ -70,7 +69,6 @@ export function RightPane({
   thread,
   isFocusedFromSplit = false,
   onChangeCharacter,
-  onChangeCharacterProvider,
   onChangeSplitCharacter,
   onChangeSlotProvider,
   onAddParticipant,
@@ -155,13 +153,6 @@ export function RightPane({
                 onChange={onChangeCharacter}
                 userChars={userChars}
               />
-              {character && onChangeCharacterProvider && (
-                <ProviderToggle
-                  current={character.provider}
-                  onChange={onChangeCharacterProvider}
-                  hint={t("rightPane.providerHintCharacter")}
-                />
-              )}
             </div>
           )}
 

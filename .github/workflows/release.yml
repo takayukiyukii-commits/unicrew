@@ -102,6 +102,20 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Windows コード署名（Azure Trusted Signing）の道具立て。
+      # scripts/sign-windows.mjs が signtool(x64) + Azure.CodeSigning.Dlib を
+      # %TRUSTED_SIGNING_DIR% から解決する。metadata.json はスクリプトが自動生成。
+      # Secrets（AZURE_*）が無い fork 等ではスクリプト側が警告して未署名で続行する。
+      - name: Setup Trusted Signing tools (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\TrustedSigning"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          nuget install Microsoft.Trusted.Signing.Client -OutputDirectory $dir -x
+          nuget install Microsoft.Windows.SDK.BuildTools -OutputDirectory $dir -x
+          echo "TRUSTED_SIGNING_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build & release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -109,6 +123,13 @@ jobs:
           # Tauri Updater 用 minisign 署名（Ed25519）。両 OS 共通。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Windows Authenticode（Azure Trusted Signing / zuboland-prod 共用プロファイル）。
+          # bundle.windows.signCommand → scripts/sign-windows.mjs がこの 3 変数で認証する。
+          # updater の minisign 署名は「Authenticode 済み exe」に対して行われるため、
+          # 署名をローカル差し替えにすると sig 不一致で自動更新が壊れる＝必ず CI 内で署名する。
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           # スマホ連携クラウドリレー（Supabase Realtime broadcast）用。
           # build_tauri.js → next build がこの env を static export に焼き込み、
           # 配布バイナリで isCloudConfigured()=true（「QRですぐ使う」が実働）になる。
@@ -132,7 +153,7 @@ jobs:
             **Windows (x64)**
             - `UNICREW_x.y.z_x64-setup.exe`（NSIS インストーラ、推奨）
             - `UNICREW_x.y.z_x64_ja-JP.msi`（MSI インストーラ）
-            - SmartScreen の警告が出たら「詳細情報 → 実行」で進めてください。
+            - v0.2.47 から ZUBOLAND株式会社 のコード署名付きです（SmartScreen の「不明な発行元」警告は解消されます。反映には数時間〜数日かかる場合があります）。
 
             **macOS 11+（Apple Silicon / Intel 両対応 universal）**
             - `UNICREW_x.y.z_universal.dmg`
