@@ -1,0 +1,26 @@
+# 検査CI（2026-08-23 設計品質調査で新設）
+#   目的: Windowsローカルでは通るが Linux(Vercel) でだけ落ちる事故（import の大文字小文字など）を
+#         人力監査の前に機械で拾う。型チェックは必須。lint は既存負債がある間は「見えるが止めない」。
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci --ignore-scripts
+      - name: typecheck (必須)
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: lint (必須)
+        run: npm run lint --silent
+      - name: test (必須)
+        run: npm test --silent
+
