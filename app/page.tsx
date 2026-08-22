@@ -57,6 +57,7 @@ import {
   type MobileStateSnapshot,
 } from "@/lib/mobile-bridge";
 import { remoteNodeManager } from "@/lib/remote-node";
+import { sendLaunchPing } from "@/lib/telemetry";
 import {
   isCloudConfigured,
   joinPairChannel,
@@ -570,6 +571,12 @@ export default function Page() {
   // ポーリング/Realtime購読/実行は lib/remote-node.ts のシングルトンが常駐管理する。
   useEffect(() => {
     remoteNodeManager.init();
+  }, []);
+
+  // 匿名の起動記録（インストール数を数えるためだけ・設定でオフにできる）。
+  // 🚨 送るのは乱数ID・バージョン・OSの3つだけ。PRIVACY.md と必ず一致させること。
+  useEffect(() => {
+    void sendLaunchPing();
   }, []);
 
   // /mcp 等の REPL コマンド横取り（ChatPane が dispatch）→ 対応画面へ
