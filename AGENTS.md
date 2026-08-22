@@ -48,7 +48,7 @@ UNICREW は候補ごとに以下の層を使い分ける。**業界標準 ACP（
 
 ## やっていいこと
 
-- `winget install --id Anthropic.ClaudeCode` を spawn してインストール手助け
+- 公式インストーラ（`irm https://claude.ai/install.ps1 | iex` / `curl -fsSL https://claude.ai/install.sh | bash`）を spawn してインストール手助け。Windows で失敗したときのみ `winget install --id Anthropic.ClaudeCode` にフォールバック
 - `claude` / `codex` / `agy` CLI を subprocess として動かす（L1）
 - 初回起動時に裏で `winget install OpenCode.OpenCode` 等を実行（L2）
 - `agent-client-protocol` crate を Cargo.toml に追加し、ACP 対応エージェントと型付き通信（L3）

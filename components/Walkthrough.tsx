@@ -18,9 +18,12 @@ import {
   installClaudeCode,
   installCodex,
   isTauri,
+  listenCodexInstallProgress,
+  listenInstallProgress,
   startClaudeLogin,
   startCodexLogin,
 } from "@/lib/tauri";
+import { InstallFailedFallback } from "@/components/InstallFailedFallback";
 import { markWalkthroughDone } from "@/lib/walkthrough";
 import { useTranslation } from "@/lib/i18n";
 
@@ -41,6 +44,9 @@ interface StatusSnapshot {
 
 const FRESH: StatusSnapshot = { installed: false, logged_in: false, loading: true };
 
+/** インストール完了イベントが来なかった場合にボタンを解放するまでの上限。 */
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
+
 /**
  * Welcome 後の 3 ステップ初期セットアップ。
  *
@@ -58,6 +64,14 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
   const [claudeBusy, setClaudeBusy] = useState<"none" | "installing" | "loggingIn">("none");
   const [codexBusy, setCodexBusy] = useState<"none" | "installing" | "loggingIn">("none");
   const [skippedCodex, setSkippedCodex] = useState(false);
+  // インストーラの出力（最終行）と失敗フラグ。
+  // 🚨 2026-08-22 追加。従来この画面は claude_install:* / codex_install:* を購読して
+  // おらず（購読していたのは SettingsModal だけ）、押しても進捗も失敗理由も出ないため
+  // 「何も起きない」に見えていた。
+  const [claudeLine, setClaudeLine] = useState("");
+  const [codexLine, setCodexLine] = useState("");
+  const [claudeFailed, setClaudeFailed] = useState(false);
+  const [codexFailed, setCodexFailed] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ステータスポーリング（open 中、かつ Step 3 到達前のみ）。
@@ -92,6 +106,75 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
       pollRef.current = null;
     };
   }, [open, step]);
+
+  // インストール進捗の購読。
+  // ここで done を受けて初めて busy を解除する（＝完了まで押せない）。
+  // busy を先に解除していたのが、連打 → winget/install.ps1 の同時実行 →
+  // 「The process cannot access the file because it is being used by another process」
+  // の入口だった。
+  //
+  // 🚨 購読は open ではなくマウント全体に張る（この画面は open を出し入れするだけで
+  // 常時マウントされている）。open で外すと「インストール中に画面を閉じた」ときに
+  // done を取りこぼし、busy が installing のまま居座る。
+  useEffect(() => {
+    let disposed = false;
+    const unlistens: Array<() => void> = [];
+    const keep = (u: () => void) => {
+      if (disposed) u();
+      else unlistens.push(u);
+    };
+    void listenInstallProgress({
+      onLine: (line) => setClaudeLine(line),
+      onDone: (success) => {
+        setClaudeBusy((b) => (b === "installing" ? "none" : b));
+        setClaudeFailed(!success);
+      },
+    }).then(keep);
+    void listenCodexInstallProgress({
+      onLine: (line) => setCodexLine(line),
+      onDone: (success) => {
+        setCodexBusy((b) => (b === "installing" ? "none" : b));
+        setCodexFailed(!success);
+      },
+    }).then(keep);
+    return () => {
+      disposed = true;
+      unlistens.forEach((u) => u());
+    };
+  }, []);
+
+  // 保険1: done を取りこぼしても、ポーリングが installed を見つけたら解除する。
+  useEffect(() => {
+    if (claudeBusy === "installing" && claude.installed) {
+      setClaudeBusy("none");
+      setClaudeFailed(false);
+    }
+  }, [claudeBusy, claude.installed]);
+  useEffect(() => {
+    if (codexBusy === "installing" && codex.installed) {
+      setCodexBusy("none");
+      setCodexFailed(false);
+    }
+  }, [codexBusy, codex.installed]);
+
+  // 保険2: それでも何も返ってこない場合の最終解除（15分）。
+  // ボタンが永久に押せないまま詰むのを防ぐ。
+  useEffect(() => {
+    if (claudeBusy !== "installing") return;
+    const id = setTimeout(() => {
+      setClaudeBusy("none");
+      setClaudeFailed(true);
+    }, INSTALL_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [claudeBusy]);
+  useEffect(() => {
+    if (codexBusy !== "installing") return;
+    const id = setTimeout(() => {
+      setCodexBusy("none");
+      setCodexFailed(true);
+    }, INSTALL_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [codexBusy]);
 
   // 自動進行: Claude OK で Step2 へ
   useEffect(() => {
@@ -171,12 +254,22 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
               description={t("walkthrough.step1Body")}
               status={claude}
               busy={claudeBusy}
+              installLine={claudeLine}
+              installFailed={claudeFailed}
+              product="claude"
+              productLabel="Claude Code"
+              helpUrl="https://github.com/takayukiyukii-commits/unicrew#claude-code-が入らない時"
               onInstall={async () => {
+                // 完了は claude_install:done で受ける。ここで解除しない。
+                setClaudeFailed(false);
+                setClaudeLine("");
                 setClaudeBusy("installing");
                 try {
                   await installClaudeCode();
-                } finally {
+                } catch (e) {
                   setClaudeBusy("none");
+                  setClaudeFailed(true);
+                  setClaudeLine(e instanceof Error ? e.message : String(e));
                 }
               }}
               onLogin={async () => {
@@ -196,12 +289,21 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
               description={t("walkthrough.step2Body")}
               status={codex}
               busy={codexBusy}
+              installLine={codexLine}
+              installFailed={codexFailed}
+              product="codex"
+              productLabel="Codex CLI"
+              helpUrl="https://github.com/takayukiyukii-commits/unicrew#codex-cli-が入らない時"
               onInstall={async () => {
+                setCodexFailed(false);
+                setCodexLine("");
                 setCodexBusy("installing");
                 try {
                   await installCodex();
-                } finally {
+                } catch (e) {
                   setCodexBusy("none");
+                  setCodexFailed(true);
+                  setCodexLine(e instanceof Error ? e.message : String(e));
                 }
               }}
               onLogin={async () => {
@@ -312,6 +414,11 @@ function ProviderStep({
   description,
   status,
   busy,
+  installLine,
+  installFailed,
+  product,
+  productLabel,
+  helpUrl,
   onInstall,
   onLogin,
   skipLabel,
@@ -322,6 +429,11 @@ function ProviderStep({
   description: string;
   status: StatusSnapshot;
   busy: "none" | "installing" | "loggingIn";
+  installLine: string;
+  installFailed: boolean;
+  product: "claude" | "codex";
+  productLabel: string;
+  helpUrl: string;
   onInstall: () => void;
   onLogin: () => void;
   skipLabel?: string;
@@ -373,6 +485,29 @@ function ProviderStep({
           icon={!loggedIn && installed ? <ExternalLink size={11} /> : undefined}
         />
       </div>
+
+      {/* インストール進捗（押しっぱなしに見えないよう、必ず何か出す） */}
+      {busy === "installing" && (
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 space-y-1">
+          <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-text)]">
+            <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+            {t("walkthrough.installRunning")}
+          </div>
+          <div className="font-mono text-[10.5px] text-[var(--color-muted)] break-all line-clamp-2 leading-relaxed">
+            {installLine || "…"}
+          </div>
+        </div>
+      )}
+
+      {/* 失敗時の救済（手動コマンド・コピー・サポート連絡） */}
+      {installFailed && busy === "none" && !installed && (
+        <InstallFailedFallback
+          product={product}
+          productLabel={productLabel}
+          lastLine={installLine}
+          helpUrl={helpUrl}
+        />
+      )}
 
       {onSkip && skipLabel && (
         <button

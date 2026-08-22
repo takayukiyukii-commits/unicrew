@@ -199,9 +199,40 @@ unicrew/
 
 - **Rust ビルド時の link.exe エラー** → Visual Studio Build Tools (C++ workload) が必要
 - **「next dev server is already running」** → `Get-NetTCPConnection -LocalPort 1420` で確認、`Stop-Process -Id <PID> -Force`
-- **Claude CLI が見つからない** → `winget install --id Anthropic.ClaudeCode --accept-source-agreements --accept-package-agreements` または UNICREW 内のインストールボタン
+- **Claude CLI が見つからない** → 下の「Claude Code が入らない時」を参照
 - **認証エラー** → 設定 → 接続状態 → ログイン
 - **SmartScreen 警告**（インストール時）→ 詳細情報 → 実行
+
+### Claude Code が入らない時
+
+UNICREW の「インストール」ボタンは、内部で公式のネイティブインストーラを実行しています。うまくいかない場合は同じことを手で実行してください。
+
+1. UNICREW を閉じる（インストーラを二重に走らせないため）
+2. PowerShell を開いて `irm https://claude.ai/install.ps1 | iex`
+3. PowerShell を開き直して `claude --version` → バージョンが出れば成功
+4. UNICREW を起動すると「インストール済」になります
+
+`winget install --id Anthropic.ClaudeCode` で入れようとして
+
+```
+remove: The process cannot access the file because it is being used by another process
+```
+
+が出た場合は、winget が二重に走って一時ファイルを取り合っています。**その表示が出ても実際にはインストールが完了していることがあるので、まず `claude --version` を確認してください。** 入っていなければ、
+
+```powershell
+Remove-Item "$env:TEMP\WinGet" -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+で一時ファイルを消してから 2. をやり直してください。
+
+### Codex CLI が入らない時
+
+1. UNICREW を閉じる
+2. PowerShell で `irm https://chatgpt.com/codex/install.ps1 | iex`（mac/Linux は `curl -fsSL https://chatgpt.com/codex/install.sh | sh`）
+3. `codex --version` で確認
+
+Codex は任意です。使わない場合は初期セットアップでスキップして構いません。
 
 ## ライセンス・法的事項
 

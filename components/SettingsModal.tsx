@@ -13,10 +13,6 @@ import {
   Key,
   Download,
   LogIn,
-  Copy,
-  Check,
-  Mail,
-  HelpCircle,
 } from "lucide-react";
 import type { AppSettings, AuthMode } from "@/lib/types";
 import {
@@ -57,6 +53,7 @@ import {
   type CodexStatus,
   type GeminiStatus,
 } from "@/lib/tauri";
+import { InstallFailedFallback } from "@/components/InstallFailedFallback";
 import clsx from "clsx";
 import { CharactersSection } from "./CharactersSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
@@ -76,7 +73,6 @@ import {
   type ProviderCategory,
 } from "@/lib/providerCategories";
 import { useTranslation, type Locale } from "@/lib/i18n";
-import { useAppVersion } from "@/lib/app-version";
 
 interface Props {
   open: boolean;
@@ -1554,143 +1550,6 @@ function CategoryAccordion({
         {children}
       </div>
     </details>
-  );
-}
-
-function detectOs(): "windows" | "mac" | "linux" | "unknown" {
-  if (typeof navigator === "undefined") return "unknown";
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("windows")) return "windows";
-  if (ua.includes("mac")) return "mac";
-  if (ua.includes("linux") || ua.includes("x11")) return "linux";
-  return "unknown";
-}
-
-function manualInstallCommand(
-  product: "claude" | "codex",
-  os: ReturnType<typeof detectOs>,
-): string {
-  if (product === "claude") {
-    if (os === "windows")
-      return "winget install --id Anthropic.ClaudeCode --accept-source-agreements --accept-package-agreements";
-    if (os === "mac")
-      return "brew install anthropic-ai/claude-code/claude-code || npm install -g @anthropic-ai/claude-code";
-    return "npm install -g @anthropic-ai/claude-code";
-  }
-  return "npm install -g @openai/codex";
-}
-
-function InstallFailedFallback({
-  product,
-  productLabel,
-  lastLine,
-  helpUrl,
-}: {
-  product: "claude" | "codex";
-  productLabel: string;
-  lastLine: string;
-  helpUrl: string;
-}) {
-  const { t: tr } = useTranslation();
-  const appVersion = useAppVersion();
-  const [copied, setCopied] = useState(false);
-  const os = detectOs();
-  const command = manualInstallCommand(product, os);
-  const osLabel =
-    os === "windows" ? "Windows" : os === "mac" ? "macOS" : os === "linux" ? "Linux" : tr("settings.installFail.osUnknown");
-  const shellLabel =
-    os === "mac"
-      ? tr("settings.installFail.shellTerminal")
-      : os === "windows"
-        ? tr("settings.installFail.shellPowershell")
-        : tr("settings.installFail.shellGeneric");
-
-  const copyCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard 拒否時は select-all 領域から手動コピー
-    }
-  };
-
-  const sendSupport = () => {
-    const subject = tr("settings.installFail.mailSubject", { productLabel });
-    const body =
-      `${tr("settings.installFail.mailIntro", { productLabel })}\n\n` +
-      `${tr("settings.installFail.mailTriedHeader")}\n${tr("settings.installFail.mailTriedBody")}\n\n` +
-      `${tr("settings.installFail.mailCmdHeader", { os: osLabel })}\n${command}\n\n` +
-      `${tr("settings.installFail.mailLogHeader")}\n${lastLine || tr("settings.installFail.mailLogEmpty")}\n\n` +
-      `${tr("settings.installFail.mailEnvHeader")}\nOS: ${osLabel}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : ""}\nUNICREW: ${appVersion || "?"}\n\n` +
-      `――――――――――――――――――――\n` +
-      `${tr("settings.installFail.mailScreenshotNote")}\n`;
-    const url = `mailto:support@uni-core.jp?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = url;
-  };
-
-  return (
-    <div className="pt-2 border-t border-[var(--color-border)] space-y-2.5">
-      <div className="flex items-start gap-2 text-[12px] text-red-600">
-        <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-        <span className="leading-relaxed">
-          {tr("settings.installFail.banner")}
-        </span>
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="text-[11px] text-[var(--color-muted)] font-medium">
-          {tr("settings.installFail.manualHeader", { os: osLabel })}
-        </div>
-        <div className="bg-white border border-[var(--color-border)] rounded p-2 flex items-start gap-2">
-          <span className="flex-1 font-mono text-[11px] text-[var(--color-text)] break-all select-all leading-relaxed">
-            {command}
-          </span>
-          <button
-            type="button"
-            onClick={copyCommand}
-            className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] rounded border border-[var(--color-border)] hover:bg-[var(--color-surface)] text-[var(--color-text)]"
-            title={tr("settings.installFail.copyTitle")}
-          >
-            {copied ? (
-              <>
-                <Check size={11} className="text-emerald-500" />
-                {tr("settings.installFail.copied")}
-              </>
-            ) : (
-              <>
-                <Copy size={11} />
-                {tr("settings.installFail.copy")}
-              </>
-            )}
-          </button>
-        </div>
-        <div className="text-[10.5px] text-[var(--color-muted)] leading-relaxed">
-          {tr("settings.installFail.manualHint", { shell: shellLabel })}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={sendSupport}
-          className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11.5px] bg-white border border-[var(--color-border)] rounded-md hover:bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
-        >
-          <Mail size={12} />
-          {tr("settings.installFail.sendSupport")}
-        </button>
-        <a
-          href={helpUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11.5px] bg-white border border-[var(--color-border)] rounded-md hover:bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
-        >
-          <HelpCircle size={12} />
-          {tr("settings.installFail.openHelp")}
-          <ExternalLink size={10} className="text-[var(--color-muted)]" />
-        </a>
-      </div>
-    </div>
   );
 }
 

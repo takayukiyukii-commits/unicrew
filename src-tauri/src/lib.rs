@@ -3,6 +3,7 @@ use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -19,6 +20,34 @@ use providers::{build_provider, SessionHandle};
 const KEYRING_SERVICE: &str = "unicrew";
 const KEYRING_USER: &str = "anthropic-api-key";
 const KEYRING_USER_OPENAI: &str = "openai-api-key";
+
+// ---------- CLI インストールの多重起動ガード ----------
+//
+// 🚨 2026-08-22 追加。install_claude_code / install_codex は「裏で spawn して即 Ok を
+// 返す」非同期コマンドなので、フロントが待たずにボタンを押せる状態へ戻ると連打できて
+// しまう。連打すると `irm install.ps1 | iex` と `winget install` が同時に走り、winget の
+// 一時フォルダが固定パス（%TEMP%\WinGet\<PackageId>.<ver>\）で並行実行に耐えないため
+//   remove: The process cannot access the file because it is being used by another process
+// で落ちる（実ユーザー環境で発生）。走行中の再入はここで弾く。
+// フロント側のガード（ボタン disabled）と二重で持つ＝どちらかが壊れても事故らない。
+static CLAUDE_INSTALL_RUNNING: AtomicBool = AtomicBool::new(false);
+static CODEX_INSTALL_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// 取得できた場合のみ生成され、drop 時に必ずフラグを戻す RAII ロック。
+/// （途中の `?` で早期 return しても解放漏れが起きない）
+struct InstallLock(&'static AtomicBool);
+
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+fn try_acquire_install_lock(flag: &'static AtomicBool) -> Option<InstallLock> {
+    flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .ok()
+        .map(|_| InstallLock(flag))
+}
 
 // ---------- Keychain ----------
 
@@ -2393,6 +2422,36 @@ fn strip_ansi_simple(input: &str) -> String {
 
 
 #[cfg(test)]
+mod install_lock_tests {
+    use super::{try_acquire_install_lock, InstallLock};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static TEST_FLAG: AtomicBool = AtomicBool::new(false);
+
+    #[test]
+    fn second_acquire_is_refused_and_released_on_drop() {
+        // 1本目は取れる
+        let first: Option<InstallLock> = try_acquire_install_lock(&TEST_FLAG);
+        assert!(first.is_some(), "1本目のロックが取れない");
+        assert!(TEST_FLAG.load(Ordering::SeqCst));
+
+        // 走行中の2本目は弾く（＝winget/install.ps1 の同時実行を防ぐ）
+        assert!(
+            try_acquire_install_lock(&TEST_FLAG).is_none(),
+            "走行中なのに2本目のインストーラが起動できてしまう"
+        );
+
+        // drop で必ず解放（失敗・パニック経路でも詰まらない）
+        drop(first);
+        assert!(!TEST_FLAG.load(Ordering::SeqCst));
+
+        // 解放後は再度取れる（リトライ可能）
+        let again = try_acquire_install_lock(&TEST_FLAG);
+        assert!(again.is_some(), "解放後に再取得できない");
+    }
+}
+
+#[cfg(test)]
 mod path_norm_tests {
     use super::{expand_user_path, percent_decode_utf8};
 
@@ -2631,6 +2690,18 @@ async fn run_streamed_install(app: &AppHandle, program: &str, args: &[&str]) -> 
 
 #[tauri::command]
 async fn install_claude_code(app: AppHandle) -> Result<(), String> {
+    // 多重起動ガード（詳細は InstallLock のコメント）。実行中の再呼び出しは
+    // 新しいインストーラを起こさず、進捗行だけ返して黙って握りつぶす。
+    // ここで done を emit してはいけない（走行中の本物のインストールの UI が
+    // 失敗表示に化ける）。
+    let Some(lock) = try_acquire_install_lock(&CLAUDE_INSTALL_RUNNING) else {
+        let _ = app.emit(
+            "claude_install:line",
+            "インストールは既に実行中です。完了までお待ちください…".to_string(),
+        );
+        return Ok(());
+    };
+
     #[cfg(target_os = "windows")]
     {
         // ワンクリックインストール（Windows）— 2026-08 の公式仕様に追従:
@@ -2643,6 +2714,8 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
         // から done を通知する（インストーラの成功コードだけを信用しない）。
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
+            // 完了（成功/失敗どちらでも）でロック解放。
+            let _lock = lock;
             let ps_ok = run_streamed_install(
                 &app_done,
                 "powershell",
@@ -2697,12 +2770,26 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
             // 現行公式: ①ネイティブインストーラ（推奨・自動更新あり・~/.local/bin）
             //           ②brew install --cask claude-code ③npm（最後の砦）。
             // curl は最小 PATH でも /usr/bin にあるため、GUI 起動（Finder/Dock）でも確実に動く。
-            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; curl -fsSL https://claude.ai/install.sh | bash || { command -v brew >/dev/null 2>&1 && brew install --cask claude-code; } || npm install -g @anthropic-ai/claude-code",
+            // 🚨 末尾の `command -v claude` が成功判定（実在確認）。Windows 側の
+            // resolve_on_path("claude") と同じ基準にそろえてある。
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; curl -fsSL https://claude.ai/install.sh | bash || { command -v brew >/dev/null 2>&1 && brew install --cask claude-code; } || npm install -g @anthropic-ai/claude-code; command -v claude >/dev/null 2>&1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| e.to_string())?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
+        // 🚨 stderr も必ず読み切る。piped にしたまま放置すると OS の pipe バッファが
+        // 埋まった時点でインストーラが書き込みでブロックし、child.wait() が返らず
+        // done も出ず InstallLock も解放されない（＝アプリ再起動まで再試行不能）。
+        if let Some(stderr) = child.stderr.take() {
+            let app_err = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = app_err.emit("claude_install:line", line);
+                }
+            });
+        }
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -2712,6 +2799,7 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
         });
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
+            let _lock = lock;
             let exit = child.wait().await;
             let success = matches!(&exit, Ok(s) if s.success());
             let _ = app_done.emit("claude_install:done", success);
@@ -2729,15 +2817,32 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
             "-c",
             // 第1経路: 公式ネイティブインストーラ（推奨・Node 不要・自動更新あり）。
             // 第2経路: npm。sudo を避けるため NPM_CONFIG_PREFIX=$HOME/.npm-global に入れる。
-            "curl -fsSL https://claude.ai/install.sh | bash || { \
+            // 🚨 成功判定は終了コードではなく最後の `command -v claude`（＝実在確認）。
+            // インストーラが 0 で終わっても claude が見つからない場所に入ると、
+            // done(true) なのにステータスは「未インストール」のままでユーザーが詰む。
+            "export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:$PATH\"; \
+             curl -fsSL https://claude.ai/install.sh | bash || { \
                mkdir -p \"$HOME/.npm-global\" && \
                NPM_CONFIG_PREFIX=\"$HOME/.npm-global\" \
-               npm install -g @anthropic-ai/claude-code; }",
+               npm install -g @anthropic-ai/claude-code; }; \
+             command -v claude >/dev/null 2>&1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| e.to_string())?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
+        // 🚨 stderr も必ず読み切る。piped にしたまま放置すると OS の pipe バッファが
+        // 埋まった時点でインストーラが書き込みでブロックし、child.wait() が返らず
+        // done も出ず InstallLock も解放されない（＝アプリ再起動まで再試行不能）。
+        if let Some(stderr) = child.stderr.take() {
+            let app_err = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = app_err.emit("claude_install:line", line);
+                }
+            });
+        }
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -2747,6 +2852,7 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
         });
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
+            let _lock = lock;
             let exit = child.wait().await;
             let success = matches!(&exit, Ok(s) if s.success());
             let _ = app_done.emit("claude_install:done", success);
@@ -2817,6 +2923,15 @@ async fn codex_status() -> Result<CodexStatus, String> {
 
 #[tauri::command]
 async fn install_codex(app: AppHandle) -> Result<(), String> {
+    // 多重起動ガード（Claude と同じ理由。install.ps1 と npm が重なる事故を防ぐ）
+    let Some(lock) = try_acquire_install_lock(&CODEX_INSTALL_RUNNING) else {
+        let _ = app.emit(
+            "codex_install:line",
+            "インストールは既に実行中です。完了までお待ちください…".to_string(),
+        );
+        return Ok(());
+    };
+
     // Codex 導入 — 2026-08 の公式仕様に追従。
     // 公式が推奨するのはスタンドアロンインストーラ（Node 不要）:
     //   Win: irm https://chatgpt.com/codex/install.ps1 | iex
@@ -2827,6 +2942,7 @@ async fn install_codex(app: AppHandle) -> Result<(), String> {
     {
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
+            let _lock = lock;
             let ps_ok = run_streamed_install_to(
                 &app_done,
                 "codex_install:line",
@@ -2877,6 +2993,16 @@ async fn install_codex(app: AppHandle) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("インストーラの起動に失敗しました: {}", e))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
+        // stderr も読み切る（理由は install_claude_code 側の同じコメントを参照）
+        if let Some(stderr) = child.stderr.take() {
+            let app_err = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = app_err.emit("codex_install:line", line);
+                }
+            });
+        }
 
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -2888,6 +3014,7 @@ async fn install_codex(app: AppHandle) -> Result<(), String> {
 
         let app_done = app.clone();
         tauri::async_runtime::spawn(async move {
+            let _lock = lock;
             let exit = child.wait().await;
             // 実在確認は上の sh スクリプト末尾の `command -v codex` が担う
             let success = matches!(&exit, Ok(s) if s.success());
