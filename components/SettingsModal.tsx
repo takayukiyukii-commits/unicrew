@@ -15,6 +15,7 @@ import {
   LogIn,
 } from "lucide-react";
 import type { AppSettings, AuthMode } from "@/lib/types";
+import { isUsagePingEnabled, setUsagePingEnabled } from "@/lib/telemetry";
 import {
   applyAppearance,
   APPEARANCE_PRESETS,
@@ -91,6 +92,9 @@ interface Props {
 }
 
 type InstallStage = "idle" | "running" | "done" | "failed";
+
+/** 完了イベントが来ないままボタンが押せなくなるのを防ぐ上限（Walkthrough と同じ値） */
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 type LoginStage =
   | "idle"
   | "starting"
@@ -122,6 +126,12 @@ export function SettingsModal({
   const [appearance, setAppearance] = useState<AppearanceSettings>(
     settings.appearance ?? DEFAULT_APPEARANCE,
   );
+  // 匿名の起動情報を送るか。localStorage はSSR時に読めないので、
+  // 既定（オン）で描いてからマウント後に実際の値へ合わせる
+  const [usagePing, setUsagePing] = useState<boolean>(true);
+  useEffect(() => {
+    setUsagePing(isUsagePingEnabled());
+  }, []);
   const [apiKey, setApiKeyLocal] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [openaiKey, setOpenaiKeyLocal] = useState("");
@@ -178,37 +188,89 @@ export function SettingsModal({
     setRefreshing(true);
     try {
       // status / version を全部並列取得。version は npm view を叩くので少し遅いが、待ってから表示。
-      const [c, x, g, v, goose, opencode, ollama, codexAcp, kiro, qwen, kimi] =
-        await Promise.all([
-          claudeStatus(),
-          codexStatus(),
-          geminiStatus(),
-          cliVersions(),
-          acpCliStatus("goose"),
-          acpCliStatus("opencode"),
-          acpCliStatus("ollama"),
-          acpCliStatus("codex-acp"),
-          acpCliStatus("kiro"),
-          acpCliStatus("qwen"),
-          acpCliStatus("kimi"),
-        ]);
-      setStatus(c);
-      setCxStatus(x);
-      setGmStatus(g);
-      setVersions(v);
+      //
+      // 🚨 allSettled で取る。Promise.all だと 1 つでも reject した時点で
+      // どの set*Status にも到達せず、**インストールは成功したのに画面は
+      // 「未インストール」のまま**という食い違いが起きる（npm view は
+      // オフラインで普通に失敗する）。取れたものだけ反映する。
+      const results = await Promise.allSettled([
+        claudeStatus(),
+        codexStatus(),
+        geminiStatus(),
+        cliVersions(),
+        acpCliStatus("goose"),
+        acpCliStatus("opencode"),
+        acpCliStatus("ollama"),
+        acpCliStatus("codex-acp"),
+        acpCliStatus("kiro"),
+        acpCliStatus("qwen"),
+        acpCliStatus("kimi"),
+      ]);
+      const val = <T,>(i: number): T | null =>
+        results[i].status === "fulfilled"
+          ? ((results[i] as PromiseFulfilledResult<T>).value as T)
+          : null;
+      const c = val<Awaited<ReturnType<typeof claudeStatus>>>(0);
+      const x = val<Awaited<ReturnType<typeof codexStatus>>>(1);
+      const g = val<Awaited<ReturnType<typeof geminiStatus>>>(2);
+      const v = val<Awaited<ReturnType<typeof cliVersions>>>(3);
+      if (c) setStatus(c);
+      if (x) setCxStatus(x);
+      if (g) setGmStatus(g);
+      if (v) setVersions(v);
+      const acpAt = (i: number) =>
+        val<Awaited<ReturnType<typeof acpCliStatus>>>(i);
       setAcpStates((prev) => ({
-        goose: { ...prev.goose, status: goose },
-        opencode: { ...prev.opencode, status: opencode },
-        ollama: { ...prev.ollama, status: ollama },
-        "codex-acp": { ...prev["codex-acp"], status: codexAcp },
-        kiro: { ...prev.kiro, status: kiro },
-        qwen: { ...prev.qwen, status: qwen },
-        kimi: { ...prev.kimi, status: kimi },
+        goose: { ...prev.goose, status: acpAt(4) ?? prev.goose.status },
+        opencode: { ...prev.opencode, status: acpAt(5) ?? prev.opencode.status },
+        ollama: { ...prev.ollama, status: acpAt(6) ?? prev.ollama.status },
+        "codex-acp": {
+          ...prev["codex-acp"],
+          status: acpAt(7) ?? prev["codex-acp"].status,
+        },
+        kiro: { ...prev.kiro, status: acpAt(8) ?? prev.kiro.status },
+        qwen: { ...prev.qwen, status: acpAt(9) ?? prev.qwen.status },
+        kimi: { ...prev.kimi, status: acpAt(10) ?? prev.kimi.status },
       }));
     } finally {
       setRefreshing(false);
     }
   }, []);
+
+  // 🚨 「インストール中…」で永久に固まらないための保険。
+  // done イベントを取りこぼすと、このモーダルは常駐マウントなので閉じて開き直しても
+  // running のまま残り、再試行ボタンも手動コマンドも出ない（＝ユーザーが詰む）。
+  // ① 実際に入っていたら done 扱い ② 15分でタイムアウトして failed（再試行できる状態）
+  useEffect(() => {
+    if (installStage === "running" && status?.installed) setInstallStage("done");
+  }, [installStage, status?.installed]);
+  useEffect(() => {
+    if (cxInstallStage === "running" && cxStatus?.installed) setCxInstallStage("done");
+  }, [cxInstallStage, cxStatus?.installed]);
+  useEffect(() => {
+    if (gmInstallStage === "running" && gmStatus?.installed) setGmInstallStage("done");
+  }, [gmInstallStage, gmStatus?.installed]);
+
+  useEffect(() => {
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const arm = (
+      stage: InstallStage,
+      setStage: (s: InstallStage) => void,
+      setLine: (l: string) => void,
+    ) => {
+      if (stage !== "running") return;
+      timers.push(
+        setTimeout(() => {
+          setLine(tr("settings.installTimeout"));
+          setStage("failed");
+        }, INSTALL_TIMEOUT_MS),
+      );
+    };
+    arm(installStage, setInstallStage, setInstallLine);
+    arm(cxInstallStage, setCxInstallStage, setCxInstallLine);
+    arm(gmInstallStage, setGmInstallStage, setGmInstallLine);
+    return () => timers.forEach(clearTimeout);
+  }, [installStage, cxInstallStage, gmInstallStage, tr]);
 
   // CLI 更新進捗 listen
   useEffect(() => {
@@ -421,10 +483,17 @@ export function SettingsModal({
     onClose();
   };
 
+  // 🚨 invoke が reject したときに stage を戻す。捕まえないと「インストール中…」の
+  // まま永久に固まり、ボタンも出ない（Rust 側が Err を返す経路が実在する）。
   const startInstall = async () => {
     setInstallStage("running");
     setInstallLine("");
-    await installClaudeCode();
+    try {
+      await installClaudeCode();
+    } catch (e) {
+      setInstallLine(e instanceof Error ? e.message : String(e));
+      setInstallStage("failed");
+    }
   };
 
   const startLogin = async () => {
@@ -436,7 +505,12 @@ export function SettingsModal({
   const startCxInstall = async () => {
     setCxInstallStage("running");
     setCxInstallLine("");
-    await installCodex();
+    try {
+      await installCodex();
+    } catch (e) {
+      setCxInstallLine(e instanceof Error ? e.message : String(e));
+      setCxInstallStage("failed");
+    }
   };
 
   const startCxLogin = async () => {
@@ -448,7 +522,13 @@ export function SettingsModal({
   const startGmInstall = async () => {
     setGmInstallStage("running");
     setGmInstallLine("");
-    await installGemini();
+    try {
+      await installGemini();
+    } catch (e) {
+      // 例: Node/npm が入っていない PC では npm の spawn 自体が失敗して Err が返る
+      setGmInstallLine(e instanceof Error ? e.message : String(e));
+      setGmInstallStage("failed");
+    }
   };
 
   const startAcpInstall = async (provider: AcpCliAutoInstallProvider) => {
@@ -686,7 +766,7 @@ export function SettingsModal({
                   )}
 
                   {/* インストール進捗 */}
-                  {!status.installed && installStage === "idle" && (
+                  {!status.installed && (installStage === "idle" || installStage === "failed") && (
                     <div className="pt-2 border-t border-[var(--color-border)]">
                       <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
                         {tr("settings.claude.installIntro")}
@@ -855,7 +935,7 @@ export function SettingsModal({
                 )}
 
                 {/* Install */}
-                {!cxStatus.installed && cxInstallStage === "idle" && (
+                {!cxStatus.installed && (cxInstallStage === "idle" || cxInstallStage === "failed") && (
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
                       {tr("settings.codex.installIntro")}
@@ -1006,7 +1086,7 @@ export function SettingsModal({
                 />
 
                 {/* Install */}
-                {!gmStatus.installed && gmInstallStage === "idle" && (
+                {!gmStatus.installed && (gmInstallStage === "idle" || gmInstallStage === "failed") && (
                   <div className="pt-2 border-t border-[var(--color-border)]">
                     <p className="text-[11.5px] text-[var(--color-muted)] mb-2 leading-relaxed">
                       {tr("settings.gemini.installIntro")}
@@ -1038,10 +1118,12 @@ export function SettingsModal({
                   </div>
                 )}
                 {gmInstallStage === "failed" && (
-                  <div className="pt-2 border-t border-[var(--color-border)] text-[12px] text-red-600 flex items-center gap-1.5">
-                    <AlertCircle size={13} />
-                    {tr("settings.gemini.installFailed")}
-                  </div>
+                  <InstallFailedFallback
+                    product="gemini"
+                    productLabel="Gemini CLI"
+                    lastLine={gmInstallLine}
+                    helpUrl="https://github.com/takayukiyukii-commits/unicrew#gemini-cli-が入らない時"
+                  />
                 )}
                 {gmStatus.installed && !gmStatus.logged_in && !gmStatus.has_api_key_env && (
                   <div className="pt-2 border-t border-[var(--color-border)] text-[11.5px] text-[var(--color-muted)] leading-relaxed">
@@ -1394,6 +1476,29 @@ export function SettingsModal({
               </span>
             </label>
 
+          </section>
+
+          <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+            <h4 className="font-semibold text-[13px]">プライバシー</h4>
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={usagePing}
+                onChange={(e) => {
+                  setUsagePingEnabled(e.target.checked);
+                  setUsagePing(e.target.checked);
+                }}
+                className="w-4 h-4 mt-0.5"
+              />
+              <span className="flex-1">
+                <span className="font-medium">匿名の起動情報を送る</span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  起動したときに<strong>ランダムなID・アプリのバージョン・OSの種類</strong>の3つだけを送ります。
+                  何台に使われているかを知るためだけのもので、会話の内容・キャラクター設定・APIキー・
+                  ファイルの場所は<strong>一切送りません</strong>。オフにすると本当に送信しません。
+                </span>
+              </span>
+            </label>
           </section>
 
           <UnicrewSelfUpdateSection currentVersion="0.2.1" />

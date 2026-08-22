@@ -34,14 +34,20 @@ export function detectOs(): "windows" | "mac" | "linux" | "unknown" {
  *    公式推奨のネイティブインストーラ（管理者不要・Node 不要・自動更新あり）に変更。
  *  - 旧 mac 案内の brew tap `anthropic-ai/claude-code` は 2026-08 時点で 404＝消滅済み。
  */
+export type InstallProduct = "claude" | "codex" | "gemini";
+
 export function manualInstallCommand(
-  product: "claude" | "codex",
+  product: InstallProduct,
   os: ReturnType<typeof detectOs>,
 ): string {
   if (product === "claude") {
     if (os === "windows") return "irm https://claude.ai/install.ps1 | iex";
     // mac/Linux はアプリと同じく npm フォールバックまで含める
     return "curl -fsSL https://claude.ai/install.sh | bash || npm install -g @anthropic-ai/claude-code";
+  }
+  if (product === "gemini") {
+    // Gemini CLI は npm 配布のみ（アプリも npm install -g を実行している）
+    return "npm install -g @google/gemini-cli";
   }
   if (os === "windows") return "irm https://chatgpt.com/codex/install.ps1 | iex";
   return "curl -fsSL https://chatgpt.com/codex/install.sh | sh || npm install -g @openai/codex";
@@ -53,7 +59,7 @@ export function InstallFailedFallback({
   lastLine,
   helpUrl,
 }: {
-  product: "claude" | "codex";
+  product: InstallProduct;
   productLabel: string;
   lastLine: string;
   helpUrl: string;

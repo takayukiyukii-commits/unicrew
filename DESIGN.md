@@ -308,6 +308,8 @@ codex exec \
 |---|---|---|
 | Claude CLIインストール | 公式ネイティブインストーラ（Win: `irm https://claude.ai/install.ps1 \| iex` / mac・Linux: `curl -fsSL https://claude.ai/install.sh \| bash`）を spawn。失敗時のみ winget / brew / npm にフォールバック | ✓ Anthropic 公式の配布物をそのまま取得・実行 |
 | Codex CLIインストール | 公式インストーラ（Win: `irm https://chatgpt.com/codex/install.ps1 \| iex` / 他: `install.sh`）を spawn。失敗時のみ `npm install -g @openai/codex` | ✓ 同上 |
+| CLI の検出 | 起動時に `augment_cli_path()` で「CLI がよく入る場所」を PATH 末尾へ追記。Windows は PATHEXT を展開して `.cmd` シムも解決し、見つからなければ既知インストール先を直接探索 | — macOS の GUI 起動は PATH が最小値になるため、これが無いと入れても検出できない |
+| 更新 | `<cli> update`（自己更新）→ 失敗時は **npm 管理の CLI に限り** `npm install -g <pkg>@latest` | — 公式インストーラ版に npm を重ねると同じ CLI が2箇所に並ぶため |
 | 多重起動の防止 | `InstallLock`（AtomicBool）で走行中の再入を拒否。UI 側も done イベントまでボタンを無効化 | — インストーラ同士が一時ファイルを取り合う事故（winget の `%TEMP%\WinGet` 競合）を防ぐ |
 | Claude ログイン | `claude login` を spawn、stdout から URL 抽出して Tauri shell.open(url) | ✓ CLI 自身が OAuth を処理、UNICREW は token に触れない |
 | Codex ログイン | `codex login` を spawn、同様 | ✓ 同上 |

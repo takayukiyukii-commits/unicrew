@@ -43,6 +43,54 @@ impl Drop for InstallLock {
     }
 }
 
+static GEMINI_INSTALL_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// ACP / OSS CLI は provider 単位でロックする（別 provider の同時インストールは許す）。
+static ACP_INSTALL_RUNNING: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<String>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+struct AcpInstallLock(String);
+
+impl Drop for AcpInstallLock {
+    fn drop(&mut self) {
+        if let Ok(mut set) = ACP_INSTALL_RUNNING.lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+fn try_acquire_acp_install_lock(provider: &str) -> Option<AcpInstallLock> {
+    let mut set = ACP_INSTALL_RUNNING.lock().ok()?;
+    if set.contains(provider) {
+        return None;
+    }
+    set.insert(provider.to_string());
+    Some(AcpInstallLock(provider.to_string()))
+}
+
+/// バイナリが「今この瞬間」起動できるかを確認する。**インストール完了の判定はこれで行う**。
+///
+/// 🚨 インストーラの終了コードだけを信じてはいけない。npm / winget が 0 で終わっても、
+/// PATH に出ない場所へ入る・prefix が違う等で UNICREW からは見えないことがある。
+/// その場合「成功しました」と出たのにステータスは「未インストール」のままになり、
+/// ユーザーは何をすればいいか分からなくなる（実際に起きた詰みの型）。
+async fn cli_is_available(bin: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = bin;
+        resolve_on_path(bin).is_some()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        match build_silent_command(bin).arg("--version").output().await {
+            Ok(_) => true,
+            // NotFound 以外（--version 非対応で異常終了 等）は「在る」と扱う
+            Err(e) => !matches!(e.kind(), std::io::ErrorKind::NotFound),
+        }
+    }
+}
+
 fn try_acquire_install_lock(flag: &'static AtomicBool) -> Option<InstallLock> {
     flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .ok()
@@ -1773,8 +1821,25 @@ async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
     if run_streamed_update(&app, bin, &["update"]).await? {
         return Ok(());
     }
-    // 第2経路: 旧 CLI（update サブコマンド未実装）や自己更新不可の環境向けに
-    // 旧来の npm グローバル更新へフォールバック
+    // 第2経路: npm グローバル更新。
+    //
+    // 🚨 ただし「その CLI が npm で入っている場合」に限る。
+    // 公式インストーラ（~/.local/bin）で入れた CLI に対して npm install -g を走らせると、
+    // **同じ CLI が2箇所に並ぶ**（実測: %APPDATA%\npm\claude.cmd = 2.1.154 と
+    // ~/.local/bin\claude.exe = 2.1.240 が同居していた）。
+    // どちらが動くかは PATH の順番次第なので、更新したつもりで古い方が起動し続ける。
+    if !cli_is_npm_managed(bin).await {
+        let _ = app.emit(
+            "cli_update:line",
+            format!(
+                "{} は公式インストーラ経由で入っています（npm 管理ではありません）。npm での更新は二重インストールになるため行いません。",
+                bin
+            ),
+        );
+        return Err(format!(
+            "{bin} の自己更新に失敗しました。この CLI は公式インストーラで入っているため、npm では更新しません（二重インストールを避けるため）。ターミナルで `{bin} update` を実行するか、公式インストーラを再実行してください。"
+        ));
+    }
     let _ = app.emit(
         "cli_update:line",
         format!(
@@ -1790,6 +1855,67 @@ async fn update_cli(app: AppHandle, provider: String) -> Result<(), String> {
         "{} の更新に失敗しました（self-update / npm の両経路とも失敗）",
         bin
     ))
+}
+
+/// その CLI が npm グローバルで入っているか（＝npm で更新してよいか）。
+///
+/// 実体のパスに `npm` / `node_modules` が含まれるかで判定する。
+/// 判定できないときは **false（npm で触らない）** に倒す。二重インストールを作るより、
+/// 「更新できませんでした」と正直に出して手順を案内する方が事故が小さい。
+async fn cli_is_npm_managed(bin: &str) -> bool {
+    let path = {
+        #[cfg(target_os = "windows")]
+        {
+            resolve_on_path(bin).map(|p| p.to_string_lossy().to_lowercase())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let out = build_silent_command("sh")
+                .args(["-c", &format!("command -v {}", bin)])
+                .output()
+                .await
+                .ok();
+            out.and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+                } else {
+                    None
+                }
+            })
+        }
+    };
+    let Some(path) = path else {
+        return false;
+    };
+    let path = path.replace('\\', "/");
+    // よくある npm / パッケージマネージャ配下の置き場
+    const NPM_ISH: [&str; 7] = [
+        "/npm/",
+        "/node_modules/",
+        "/.npm-global/",
+        "/.nvm/versions/node/",
+        "/.volta/",
+        "/pnpm/",
+        "/.fnm/",
+    ];
+    if NPM_ISH.iter().any(|frag| path.contains(frag)) {
+        return true;
+    }
+    // 決め打ちで拾えない構成（asdf / mise / nodenv 等）は npm 自身に聞く。
+    // `npm prefix -g` の下にあるなら npm で更新してよい。
+    let prefix = build_silent_command("npm")
+        .args(["prefix", "-g"])
+        .output()
+        .await
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase());
+    match prefix {
+        Some(prefix) if !prefix.is_empty() => {
+            path.starts_with(&prefix.replace('\\', "/"))
+        }
+        _ => false,
+    }
 }
 
 // ---------- Aggregated update checker (Phase 1) ----------
@@ -2269,32 +2395,54 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// 利用する LOCALAPPDATA / ProgramFiles 配下の標準パス）をフォールバック探索する。
 /// これにより winget install 直後で UNICREW プロセスの PATH に新パスがまだ
 /// 伝播してない状況でも binary を発見できる。
+/// Windows の実行可能拡張子リスト（PATHEXT）。未設定時は既定値。
+#[cfg(target_os = "windows")]
+fn windows_path_exts() -> Vec<String> {
+    let raw = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".into());
+    raw.split(';')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect()
+}
+
+/// 1つのディレクトリの中から `name` の実体を探す（PATHEXT を展開する）。
+///
+/// 🚨 npm -g のシムは `<name>.cmd`、公式インストーラは `<name>.exe` と実体が違う。
+/// 拡張子を決め打ちすると **npm 経由で入れた gemini / opencode / qwen / codex-acp を
+/// 取りこぼす**（＝入れたのに「未インストール」）。PATH 探索と既知パス探索で
+/// 同じロジックを使うため、ここに集約する。
+#[cfg(target_os = "windows")]
+pub(crate) fn find_executable_in_dir(
+    dir: &std::path::Path,
+    name: &str,
+) -> Option<std::path::PathBuf> {
+    if std::path::Path::new(name).extension().is_some() {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    for ext in windows_path_exts() {
+        let candidate = dir.join(format!("{}{}", name, ext));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    // 拡張子なしの実体（WSL 由来のスクリプト等）も一応見る
+    let bare = dir.join(name);
+    if bare.is_file() {
+        return Some(bare);
+    }
+    None
+}
+
 #[cfg(target_os = "windows")]
 pub(crate) fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
-    use std::path::PathBuf;
     if let Some(p) = std::env::var_os("PATH") {
-        let pathext_raw = std::env::var("PATHEXT").unwrap_or_else(|_| {
-            ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC".into()
-        });
-        let exts: Vec<String> = pathext_raw
-            .split(';')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_lowercase())
-            .collect();
-        let already_has_ext = std::path::Path::new(name).extension().is_some();
         for dir in std::env::split_paths(&p) {
-            if already_has_ext {
-                let candidate = dir.join(name);
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-            for ext in &exts {
-                let mut candidate: PathBuf = dir.clone();
-                candidate.push(format!("{}{}", name, ext));
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
+            if let Some(found) = find_executable_in_dir(&dir, name) {
+                return Some(found);
             }
         }
     }
@@ -2310,13 +2458,18 @@ pub(crate) fn resolve_on_path(name: &str) -> Option<std::path::PathBuf> {
 #[cfg(target_os = "windows")]
 fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
     let local_appdata = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let roaming_appdata = std::env::var_os("APPDATA").map(std::path::PathBuf::from);
     let program_files = std::env::var_os("ProgramFiles").map(std::path::PathBuf::from);
     let program_files_x86 = std::env::var_os("ProgramFiles(x86)").map(std::path::PathBuf::from);
     let user_profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let system_root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from);
 
     // (root_prefix, relative_path_template, exe_name) のテーブル。
     // `{name}` プレースホルダを引数で置換。プロバイダ追加時はここに 1 行足す。
     let recipes: Vec<(Option<&std::path::PathBuf>, &str)> = vec![
+        // 🚨 並び順に意味がある。公式インストーラ（~/.local/bin）を先頭に置く。
+        // npm シムを先に見ると、同居している古い npm 版を掴む（自動更新されない）。
+        (user_profile.as_ref(), ".local/bin"),
         // winget portable パッケージ共通のシム置き場（Anthropic.ClaudeCode 等）。
         // winget はユーザー PATH（レジストリ）に Links を足すが、起動中プロセスの
         // PATH には反映されないため、ここを直接探す。
@@ -2329,15 +2482,27 @@ fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
         (local_appdata.as_ref(), "Programs/OpenAI/Codex/bin"),
         // winget の Ollama.Ollama 既定
         (local_appdata.as_ref(), "Programs/Ollama"),
+        // kiro-cli の既定配置（実測）
+        (local_appdata.as_ref(), "Kiro-Cli"),
         // 一般的な ProgramFiles 配置
         (program_files.as_ref(), "Ollama"),
         (program_files_x86.as_ref(), "Ollama"),
         // Goose の Block 公式 zip 展開先候補
         (local_appdata.as_ref(), "Programs/Goose"),
         (local_appdata.as_ref(), "Programs/Block.Goose"),
-        (user_profile.as_ref(), ".local/bin"),
-        // npm global の Squirrel スコープ（参考）。npm 自体は PATH 経路を使う想定
         (local_appdata.as_ref(), "Programs/OpenCode"),
+        // npm / node 本体（npm.cmd を spawn できないと install 自体が始まらない）
+        (program_files.as_ref(), "nodejs"),
+        // winget 本体（App Execution Alias）と PowerShell。PATH から漏れている PC で
+        // 「インストーラを起動すらできない」を防ぐ。
+        (local_appdata.as_ref(), "Microsoft/WindowsApps"),
+        (program_files.as_ref(), "PowerShell/7"),
+        (system_root.as_ref(), "System32/WindowsPowerShell/v1.0"),
+        // npm -g のシム置き場。gemini / opencode / qwen / codex-acp はここに
+        // `<name>.cmd` として入る（実測: %APPDATA%\npm\gemini.cmd）。
+        // 通常は Node 導入時に PATH へ入るが、UNICREW 起動後に Node を入れた場合や
+        // prefix を変えている場合は PATH に無いのでここで拾う。**最後に見る**。
+        (roaming_appdata.as_ref(), "npm"),
     ];
 
     for (root, subdir) in recipes {
@@ -2346,15 +2511,148 @@ fn resolve_known_install_location(name: &str) -> Option<std::path::PathBuf> {
         if !dir.is_dir() {
             continue;
         }
-        // .exe / 拡張子なし両方を試す
-        for candidate_name in [format!("{}.exe", name), name.to_string()] {
-            let candidate = dir.join(&candidate_name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+        // PATHEXT を展開して探す（.exe だけでなく npm シムの .cmd も拾う）
+        if let Some(found) = find_executable_in_dir(&dir, name) {
+            return Some(found);
         }
     }
     None
+}
+
+/// CLI が入る「よくある場所」を PATH に追記する（起動時に1回だけ呼ぶ）。
+///
+/// 🚨 これが無いと macOS の .app を Finder / Dock から起動したとき、PATH が
+/// launchd の最小値（/usr/bin:/bin:/usr/sbin:/sbin）のままになり、
+/// - `claude`（公式インストーラは ~/.local/bin）
+/// - `gemini` / `opencode` / `qwen`（npm -g）
+/// - Homebrew 配下の全部
+/// が **インストール済みでも「未インストール」と判定される**。
+/// インストール処理側だけは sh -c で PATH を前置していたが、検出（*_status）と
+/// 実行（providers/*）は素の PATH を使っていたため、
+/// 「インストールは成功と出るのに、ずっと未インストール表示」という詰みが起きる。
+///
+/// 方針:
+/// - **既存 PATH の後ろに足すだけ**（前に入れるとユーザーの解決順を壊す）
+/// - 実在するディレクトリだけ、重複なしで足す
+/// - 外部シェルは起動しない（`$SHELL -ilc` 方式は遅く、環境によって固まるため）
+fn augment_cli_path() {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&current).collect();
+    let mut known: Vec<std::path::PathBuf> = Vec::new();
+
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from);
+
+    #[cfg(target_os = "windows")]
+    {
+        // 🚨 並び順に意味がある。**公式インストーラの置き場を npm シムより先に**置く。
+        // 同じ CLI が両方に居ることがあり（例: 古い npm 版 claude と、公式
+        // インストーラ版 ~/.local/bin\claude.exe）、npm を先に見ると
+        // 自動更新されない古い方を掴む（実測: 2.1.154 と 2.1.240 が同居していた）。
+        if let Some(h) = home.as_ref() {
+            known.push(h.join(".local").join("bin"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from) {
+            known.push(local.join("Microsoft").join("WinGet").join("Links"));
+            known.push(local.join("Programs").join("OpenAI").join("Codex").join("bin"));
+            known.push(local.join("Programs").join("Ollama"));
+            known.push(local.join("Kiro-Cli"));
+            // winget 本体（App Execution Alias）。PATH から漏れている PC では
+            // フォールバック側の winget install が「起動すらできない」になる。
+            known.push(local.join("Microsoft").join("WindowsApps"));
+        }
+        if let Some(pf) = std::env::var_os("ProgramFiles").map(std::path::PathBuf::from) {
+            known.push(pf.join("nodejs"));
+            known.push(pf.join("PowerShell").join("7"));
+        }
+        if let Some(sysroot) = std::env::var_os("SystemRoot").map(std::path::PathBuf::from) {
+            // Windows PowerShell 5.1 本体。System32 が PATH にあっても、この
+            // サブディレクトリが無いと powershell.exe は解決できない（実測）。
+            known.push(
+                sysroot
+                    .join("System32")
+                    .join("WindowsPowerShell")
+                    .join("v1.0"),
+            );
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA").map(std::path::PathBuf::from) {
+            // npm -g のシム置き場（gemini / opencode / qwen / codex-acp 等）。最後に置く。
+            known.push(appdata.join("npm"));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 公式インストーラ（claude.ai/install.sh）の置き場を最優先で見る
+        if let Some(h) = home.as_ref() {
+            known.push(h.join(".local/bin"));
+        }
+        known.push(std::path::PathBuf::from("/opt/homebrew/bin"));
+        known.push(std::path::PathBuf::from("/opt/homebrew/sbin"));
+        known.push(std::path::PathBuf::from("/usr/local/bin"));
+        known.push(std::path::PathBuf::from("/usr/local/sbin"));
+        known.push(std::path::PathBuf::from("/snap/bin"));
+        // Linuxbrew（Linux 版 Homebrew）
+        known.push(std::path::PathBuf::from("/home/linuxbrew/.linuxbrew/bin"));
+        known.push(std::path::PathBuf::from("/home/linuxbrew/.linuxbrew/sbin"));
+        if let Some(h) = home.as_ref() {
+            known.push(h.join(".npm-global/bin"));
+            known.push(h.join(".volta/bin"));
+            known.push(h.join(".bun/bin"));
+            known.push(h.join(".deno/bin"));
+            known.push(h.join(".cargo/bin"));
+            // Node / ツールのバージョンマネージャ各種。
+            // どれか1つでも使っていると、GUI 起動時の最小 PATH からは全部見えない。
+            known.push(h.join(".local/share/pnpm"));
+            known.push(h.join(".asdf/shims"));
+            known.push(h.join(".local/share/mise/shims"));
+            known.push(h.join(".nodenv/shims"));
+            known.push(h.join(".local/share/fnm/aliases/default/bin"));
+            known.push(h.join("Library/Application Support/fnm/aliases/default/bin"));
+            known.push(h.join(".linuxbrew/bin"));
+            // nvm は複数バージョンが並ぶ。名前順で最後（＝概ね最新）を1つだけ足す。
+            let nvm = h.join(".nvm/versions/node");
+            if let Ok(entries) = std::fs::read_dir(&nvm) {
+                let mut versions: Vec<std::path::PathBuf> =
+                    entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+                versions.sort();
+                if let Some(latest) = versions.last() {
+                    known.push(latest.join("bin"));
+                }
+            }
+        }
+    }
+
+    if let Some(joined) = merge_path_dirs(&mut dirs, known) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
+/// `dirs`（現在の PATH）に `known` の中で「実在し、まだ入っていない」ものだけを
+/// **末尾へ**足して、新しい PATH 文字列を返す。足すものが無ければ None。
+///
+/// 末尾に足すのは、ユーザーが自分で通した PATH の解決順を壊さないため
+/// （先頭に入れると、意図的に別バージョンを前に置いている環境を壊す）。
+fn merge_path_dirs(
+    dirs: &mut Vec<std::path::PathBuf>,
+    known: Vec<std::path::PathBuf>,
+) -> Option<std::ffi::OsString> {
+    let mut added = false;
+    for dir in known {
+        if !dir.is_dir() {
+            continue;
+        }
+        if dirs.iter().any(|d| d == &dir) {
+            continue;
+        }
+        dirs.push(dir);
+        added = true;
+    }
+    if !added {
+        return None;
+    }
+    std::env::join_paths(dirs.iter()).ok()
 }
 
 pub fn build_silent_command(program: &str) -> Command {
@@ -2420,6 +2718,138 @@ fn strip_ansi_simple(input: &str) -> String {
     out
 }
 
+
+// ===== CLI 検出の実機プローブ（監査用・普段は走らせない） =====
+//
+// 実行: cargo test --lib probe_all_clis -- --ignored --nocapture
+// PATH を最小（macOS の Finder 起動を模した状態）にしてから augment_cli_path() を呼び、
+// 各 CLI が「解決できるか」「実際に起動できるか」を実測する。
+// CI では環境に CLI が無いため #[ignore]。手元で導入経路を変えたとき等に使う。
+#[cfg(test)]
+mod cli_detection_probe {
+    use super::{build_silent_command, resolve_on_path};
+
+    #[test]
+    #[ignore = "実機の CLI 導入状況に依存する診断用"]
+    fn probe_all_clis() {
+        let names = [
+            "claude", "codex", "gemini", "npm", "node", "ollama", "opencode",
+            "qwen", "goose", "kiro-cli", "kimi", "codex-acp", "winget", "powershell",
+        ];
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // 最小 PATH（macOS の Finder 起動を模す）にしてから augment_cli_path を呼び、
+        // それでも全部見つかるかを確かめる。
+        let original = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var("PATH", r"C:\Windows\System32;C:\Windows");
+        println!("
+=== フェーズA: 最小PATH・augment なし（既知パス探索だけで解決できるか）===");
+        for n in names {
+            let r = resolve_on_path(n)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "<NOT RESOLVED>".into());
+            println!("{:<12} {}", n, r);
+        }
+
+        super::augment_cli_path();
+        println!("
+=== PATH after augment ===
+{}", std::env::var("PATH").unwrap_or_default());
+        println!("
+=== resolve_on_path + spawn probe (最小PATH + augment) ===");
+        // 最後に元の PATH へ戻す（他テストへ影響させない）
+        struct Restore(std::ffi::OsString);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                std::env::set_var("PATH", &self.0);
+            }
+        }
+        let _restore = Restore(original);
+        for n in names {
+            let resolved = resolve_on_path(n)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "<NOT RESOLVED>".into());
+            let spawn = rt.block_on(async {
+                let out = build_silent_command(n).arg("--version").output().await;
+                match out {
+                    Ok(o) => format!(
+                        "exit={} stdout={:?}",
+                        o.status.code().map(|c| c.to_string()).unwrap_or("?".into()),
+                        String::from_utf8_lossy(&o.stdout).trim().chars().take(40).collect::<String>()
+                    ),
+                    Err(e) => format!("SPAWN ERROR: {:?} ({})", e.kind(), e),
+                }
+            });
+            println!("{:<12} resolve={:<70} {}", n, resolved, spawn);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_os = "windows")]
+mod find_executable_tests {
+    use super::find_executable_in_dir;
+
+    /// 🚨 回帰テスト: npm -g のシムは `<name>.cmd`。ここが .exe 決め打ちだと
+    /// PATH に npm の置き場が無い環境で gemini / opencode / qwen を取りこぼし、
+    /// 「インストールしたのに未インストール」になる（Codex 監査の指摘）。
+    #[test]
+    fn finds_cmd_shim_not_only_exe() {
+        let dir = std::env::temp_dir().join("unicrew-find-exe-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("probe_tool.cmd"), b"@echo off\r\n").unwrap();
+
+        let found = find_executable_in_dir(&dir, "probe_tool");
+        assert!(
+            found.is_some(),
+            ".cmd シムを見つけられない（npm -g で入れた CLI を取りこぼす）"
+        );
+        assert!(found.unwrap().to_string_lossy().to_lowercase().ends_with(".cmd"));
+
+        assert!(
+            find_executable_in_dir(&dir, "no_such_tool").is_none(),
+            "存在しないものを見つけたことにしている"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod path_merge_tests {
+    use super::merge_path_dirs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn adds_existing_dir_once_and_skips_missing_and_duplicates() {
+        let tmp = std::env::temp_dir();
+        let missing = tmp.join("unicrew-does-not-exist-9f3a");
+        let mut dirs: Vec<PathBuf> = vec![PathBuf::from("/already/in/path")];
+
+        // 実在するもの1つ + 実在しないもの + 同じものの重複
+        let merged = merge_path_dirs(
+            &mut dirs,
+            vec![tmp.clone(), missing.clone(), tmp.clone()],
+        );
+        assert!(merged.is_some(), "実在ディレクトリが1つあるのに追記されない");
+        assert_eq!(
+            dirs.iter().filter(|d| **d == tmp).count(),
+            1,
+            "同じディレクトリが2回入っている"
+        );
+        assert!(!dirs.iter().any(|d| *d == missing), "実在しないディレクトリを足している");
+        // 既存の解決順を壊さない（末尾に足す）
+        assert_eq!(dirs[0], PathBuf::from("/already/in/path"));
+
+        // 2回目は足すものが無いので None
+        assert!(
+            merge_path_dirs(&mut dirs, vec![tmp.clone()]).is_none(),
+            "既に入っているのに再追記しようとしている"
+        );
+    }
+}
 
 #[cfg(test)]
 mod install_lock_tests {
@@ -2770,9 +3200,12 @@ async fn install_claude_code(app: AppHandle) -> Result<(), String> {
             // 現行公式: ①ネイティブインストーラ（推奨・自動更新あり・~/.local/bin）
             //           ②brew install --cask claude-code ③npm（最後の砦）。
             // curl は最小 PATH でも /usr/bin にあるため、GUI 起動（Finder/Dock）でも確実に動く。
+            // 🚨 `sort -V` は使わない。macOS の BSD sort には無い環境があり、その場合
+            // nvm の bin が PATH に入らず npm フォールバックが動かない（監査指摘）。
+            // どのバージョンでも npm さえ動けばよいので単純な `sort | tail -1` で足りる。
             // 🚨 末尾の `command -v claude` が成功判定（実在確認）。Windows 側の
             // resolve_on_path("claude") と同じ基準にそろえてある。
-            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1):$PATH\"; curl -fsSL https://claude.ai/install.sh | bash || { command -v brew >/dev/null 2>&1 && brew install --cask claude-code; } || npm install -g @anthropic-ai/claude-code; command -v claude >/dev/null 2>&1",
+            "export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/.volta/bin:$HOME/.npm-global/bin:$([ -d \"$HOME/.nvm/versions/node\" ] && ls -d \"$HOME\"/.nvm/versions/node/*/bin 2>/dev/null | sort | tail -1):$PATH\"; curl -fsSL https://claude.ai/install.sh | bash || { command -v brew >/dev/null 2>&1 && brew install --cask claude-code; } || npm install -g @anthropic-ai/claude-code; command -v claude >/dev/null 2>&1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -3159,6 +3592,16 @@ async fn gemini_status() -> Result<GeminiStatus, String> {
 
 #[tauri::command]
 async fn install_gemini(app: AppHandle) -> Result<(), String> {
+    // 多重起動ガード（詳細は InstallLock のコメント）。npm の global install を
+    // 並行させるとキャッシュとリンク先を取り合う。
+    let Some(lock) = try_acquire_install_lock(&GEMINI_INSTALL_RUNNING) else {
+        let _ = app.emit(
+            "gemini_install:line",
+            "インストールは既に実行中です。完了までお待ちください…".to_string(),
+        );
+        return Ok(());
+    };
+
     // gemini-cli は npm 配布。`@google/gemini-cli`。
     let mut cmd = build_silent_command("npm");
     cmd.args(["install", "-g", "@google/gemini-cli"])
@@ -3186,8 +3629,10 @@ async fn install_gemini(app: AppHandle) -> Result<(), String> {
     });
     let app_done = app.clone();
     tauri::async_runtime::spawn(async move {
+        let _lock = lock;
         let exit = child.wait().await;
-        let success = matches!(&exit, Ok(s) if s.success());
+        // 終了コード + 実在確認の両方で成功判定する
+        let success = matches!(&exit, Ok(s) if s.success()) && cli_is_available("gemini").await;
         let _ = app_done.emit("gemini_install:done", success);
     });
     Ok(())
@@ -3482,6 +3927,19 @@ async fn ollama_pull(app: AppHandle, model: String) -> Result<(), String> {
 #[tauri::command]
 async fn install_acp_cli(app: AppHandle, provider: String) -> Result<(), String> {
     let (program, args) = resolve_acp_install_command(&provider)?;
+
+    // provider 単位の多重起動ガード（npm / winget の並行実行を防ぐ）
+    let Some(lock) = try_acquire_acp_install_lock(&provider) else {
+        let _ = app.emit(
+            "acp_install:line",
+            AcpInstallLine {
+                provider: provider.clone(),
+                line: "インストールは既に実行中です。完了までお待ちください…".to_string(),
+            },
+        );
+        return Ok(());
+    };
+
     let mut cmd = build_silent_command(&program);
     cmd.args(args.iter().map(|s| s.as_str()))
         .stdout(Stdio::piped())
@@ -3524,11 +3982,15 @@ async fn install_acp_cli(app: AppHandle, provider: String) -> Result<(), String>
     let provider_for_done = provider.clone();
     // child.wait() より先に stdout/stderr リーダーを drain させてから done を emit する。
     // 順番を逆にすると npm/winget の末尾行（"added N packages" 等）が done の後に届く。
+    let bin_for_check = acp_cli_command_name(&provider_for_done).unwrap_or("");
     tauri::async_runtime::spawn(async move {
+        let _lock = lock;
         let exit = child.wait().await;
         let _ = h_out.await;
         let _ = h_err.await;
-        let success = matches!(&exit, Ok(s) if s.success());
+        // 終了コード + 実在確認の両方で成功判定する（理由は cli_is_available 参照）
+        let success = matches!(&exit, Ok(s) if s.success())
+            && (bin_for_check.is_empty() || cli_is_available(bin_for_check).await);
         let _ = app_done.emit(
             "acp_install:done",
             AcpInstallDone {
@@ -4354,6 +4816,10 @@ async fn remote_exec_kill_all(state: State<'_, RemoteJobState>) -> Result<(), St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 🚨 何よりも先に PATH を補強する。これ以降に spawn される子プロセス
+    //（CLI の検出・インストール・エージェント実行のすべて）がこの PATH を継承する。
+    augment_cli_path();
+
     observability::init(None);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

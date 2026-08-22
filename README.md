@@ -226,6 +226,15 @@ Remove-Item "$env:TEMP\WinGet" -Recurse -Force -ErrorAction SilentlyContinue
 
 で一時ファイルを消してから 2. をやり直してください。
 
+### Gemini CLI が入らない時
+
+Gemini CLI は npm 配布です。**Node.js（npm）が先に必要**です。
+
+1. `node -v` で確認（出なければ https://nodejs.org からインストール）
+2. **Node.js を入れた直後は UNICREW を一度終了して起動し直す**（起動中のアプリは新しい PATH を知らないため）
+3. `npm install -g @google/gemini-cli`
+4. `gemini --version` で確認
+
 ### Codex CLI が入らない時
 
 1. UNICREW を閉じる
@@ -239,7 +248,7 @@ Codex は任意です。使わない場合は初期セットアップでスキ�
 - 本アプリは **Apache License 2.0** に基づき提供されます（[LICENSE](./LICENSE)、[NOTICE](./NOTICE)）。
 - 個人利用・商用利用ともに無料。改変・再配布も Apache-2.0 の範囲で自由です。
 - 利用規約: [TERMS.md](./TERMS.md)
-- プライバシーポリシー: [PRIVACY.md](./PRIVACY.md)（本アプリはユーザー情報を一切収集しません）
+- プライバシーポリシー: [PRIVACY.md](./PRIVACY.md)（会話内容・APIキー・個人情報は一切収集しません。何台で使われているかを知るための匿名の起動情報のみ送信し、設定でオフにできます）
 
 ### 商標について
 
