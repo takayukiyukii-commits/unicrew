@@ -17,6 +17,10 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci --ignore-scripts
+      # Next 16 は RouteContext/PageProps 等の型を .next/types に生成する。ローカルは .next があるので通るが
+      # CI には無い → 先に生成しないと「ローカルだけ通る」型エラーになる（2026-08-23 uniLinks で実測）
+      - name: next typegen
+        run: npx next typegen
       - name: typecheck (必須)
         run: npx tsc --noEmit -p tsconfig.json
       - name: lint (必須)
