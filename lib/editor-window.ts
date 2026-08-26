@@ -72,7 +72,6 @@ export async function openFileInEditorWindow(path: string): Promise<void> {
   });
   // エラー検知のみ（成功イベントはここでは待たない；エディタ側 mount 時に URL から拾う）
   win.once("tauri://error", (e) => {
-    // eslint-disable-next-line no-console
     console.error("[editor window] failed to create", e);
   });
 }

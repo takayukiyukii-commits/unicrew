@@ -745,7 +745,6 @@ export async function checkUnicrewUpdate(): Promise<UnicrewUpdateInfo | null> {
       __token: token,
     };
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("[updater] check failed", e);
     return null;
   }
@@ -771,7 +770,6 @@ export async function downloadAndInstallUnicrewUpdate(
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("[updater] relaunch failed", e);
   }
 }

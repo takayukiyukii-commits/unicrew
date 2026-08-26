@@ -22,7 +22,6 @@ interface BridgeStore {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __unicrew_mobile_store__: BridgeStore | undefined;
 }
 
