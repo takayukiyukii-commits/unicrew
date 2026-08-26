@@ -93,7 +93,6 @@ export function CommandPalette({ open, onClose, commands }: Props) {
     onClose();
     // Promise を捨てる（エラーは各 run 側で処理する想定）
     Promise.resolve(target.item.run()).catch((e) => {
-      // eslint-disable-next-line no-console
       console.error("[command]", target.item.id, e);
     });
   };

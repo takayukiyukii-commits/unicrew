@@ -504,7 +504,6 @@ function FilePathLink({
     // 設計書③: workspace 直下に無ければ Rust 側で配下を探索して開く。
     // 見つからない/開けない場合は openFileSmart がトーストで可視化する。
     void openFileSmart(path, workspace).catch((err) => {
-      // eslint-disable-next-line no-console
       console.error("[file-link] failed to open", path, err);
     });
   };
