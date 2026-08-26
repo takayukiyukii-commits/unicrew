@@ -45,6 +45,7 @@ import { TaskQueuePanel } from "@/components/TaskQueuePanel";
 import { UniMcpModal } from "@/components/UniMcpModal";
 import { RoutinesModal } from "@/components/RoutinesModal";
 import { MobileBridgeModal } from "@/components/MobileBridgeModal";
+import { RemoteControlModal } from "@/components/RemoteControlModal";
 import {
   loadRoutines,
   markFired,
@@ -462,6 +463,8 @@ export default function Page() {
   const [routinesOpen, setRoutinesOpen] = useState(false);
   /** スマホ連携モーダル（モバイルA案） */
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** 公式 Remote Control ランチャー */
+  const [rcOpen, setRcOpen] = useState(false);
   /** Mobile bridge: auth POST 完了後に true。snapshot push を 401 させないため。 */
   const [mobileBridgeReady, setMobileBridgeReady] = useState(false);
   /** クラウドリレー（Phase 2）の現在のペアリングコード。null なら未起動。 */
@@ -3103,6 +3106,14 @@ ${command}
         run: () => setRoutinesOpen(true),
       },
       {
+        id: "rc.open",
+        label: tr("palette.rc.open"),
+        category: tr("palette.category.action"),
+        icon: Smartphone,
+        keywords: ["remote", "control", "phone", "official"],
+        run: () => setRcOpen(true),
+      },
+      {
         id: "mobile.open",
         label: tr("palette.mobile.open"),
         category: tr("palette.category.action"),
@@ -3338,6 +3349,10 @@ ${command}
         {
           label: tr("menu.file.routines"),
           onSelect: () => setRoutinesOpen(true),
+        },
+        {
+          label: tr("menu.file.remoteControl"),
+          onSelect: () => setRcOpen(true),
         },
         {
           label: tr("menu.file.mobile"),
@@ -3932,6 +3947,11 @@ ${command}
           if (t) void handleSendForThread(prompt, t);
         }}
         onClose={() => setRoutinesOpen(false)}
+      />
+      <RemoteControlModal
+        open={rcOpen}
+        onClose={() => setRcOpen(false)}
+        workspace={activeThread?.workspace ?? null}
       />
       <MobileBridgeModal
         open={mobileOpen}

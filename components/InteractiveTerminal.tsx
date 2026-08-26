@@ -49,6 +49,8 @@ export function InteractiveTerminal({
   workspace,
   paneKey,
   kind = "claude",
+  onOutput,
+  onExited,
 }: {
   workspace?: string | null;
   /**
@@ -61,9 +63,23 @@ export function InteractiveTerminal({
    * シェル（Git Bash / PowerShell / cmd / $SHELL）を Rust 側 default_shell で
    * 解決して起動する。PTY 基盤・IME・コピー・リンク等の既存処理は共通。
    */
-  kind?: "claude" | "shell";
+  kind?: "claude" | "shell" | "remote-control";
+  /**
+   * PTY 出力（デコード済みテキスト）を親でも観測するフック（remote-control の
+   * URL 抽出用）。ref 経由で保持するため、コールバックの参照が変わっても
+   * PTY は再起動しない。未指定なら従来と完全に同じ動作。
+   */
+  onOutput?: (text: string) => void;
+  /** PTY プロセス終了時に親へ通知（remote-control の状態表示用）。 */
+  onExited?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // onOutput/onExited は毎レンダーで参照が変わりうるので ref で持つ
+  // （effect の依存に入れると PTY が再起動してしまう）。
+  const onOutputRef = useRef<typeof onOutput>(onOutput);
+  onOutputRef.current = onOutput;
+  const onExitedRef = useRef<typeof onExited>(onExited);
+  onExitedRef.current = onExited;
   // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
   // term インスタンスは effect 内ローカルだったが、ドラッグ操作（React イベント）
   // から scrollToLine を呼ぶために ref 化する。
@@ -719,8 +735,19 @@ export function InteractiveTerminal({
         return true;
       });
 
-      unData = await onPtyData(id, (bytes) => term?.write(bytes));
+      const outputDecoder = new TextDecoder();
+      unData = await onPtyData(id, (bytes) => {
+        term?.write(bytes);
+        if (onOutputRef.current) {
+          try {
+            onOutputRef.current(outputDecoder.decode(bytes, { stream: true }));
+          } catch {
+            /* observer hook must never break the terminal */
+          }
+        }
+      });
       unExit = await onPtyExit(id, () => {
+        onExitedRef.current?.();
         term?.write(
           "\r\n\x1b[33m[プロセスが終了しました。再度開くと新しいセッションが始まります]\x1b[0m\r\n",
         );
@@ -747,6 +774,11 @@ export function InteractiveTerminal({
       // 設計書⑤: 起動プログラムの決定。shell は Rust 側でOS別に解決する。
       let program = "claude";
       let args: string[] = [];
+      if (kind === "remote-control") {
+        // 公式 Remote Control（サーバーモード）。claude.ai / Claude アプリから
+        // このPCのセッションに接続できる。会話はスマホ/ブラウザ側で行う。
+        args = ["remote-control"];
+      }
       if (kind === "shell") {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
