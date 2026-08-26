@@ -45,3 +45,6 @@ scripts/_handoff_*.md
 scripts/_handoff_*.md
 scripts/*.py
 !scripts/build_tauri.js
+
+# Claude Code のローカル設定（個人環境・共有しない）
+.claude/settings.local.json

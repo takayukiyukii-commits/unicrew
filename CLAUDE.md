@@ -17,3 +17,9 @@
 - デプロイとコミットはワンセット（未コミット残し禁止）。git add は個別ファイル指定
 - APIキー・秘密は直書き禁止（環境変数参照）。.env* はコミットしない
 - 出力は日本語
+
+## クラウドエージェント（Claude Code on the web）
+- 環境準備は `.claude/settings.json` の SessionStart フック → `scripts/session-setup.sh`（fresh clone でだけフルインストール。node_modules があるときは触らない＝起動中プロセス保護）
+- 合格基準は check.yml と同一の3本：`npx tsc --noEmit -p tsconfig.json` / `npm run lint` / `npm test`
+- 🚨 クラウドに出すのは **Next 側のロジックとテストまで**。Tauri の Rust ビルド・署名・公証・実機確認はクラウド不可（CI とローカル）
+- 運用ルール: `docs/cloud-agent.md`
