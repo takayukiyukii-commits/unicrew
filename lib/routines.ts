@@ -108,6 +108,22 @@ export function shouldFire(routine: Routine, now: Date = new Date()): boolean {
   return nowMinutes >= targetMinutes;
 }
 
+/**
+ * 監査（ファイルタブR3）: 新規作成時、当日の指定時刻を既に過ぎている場合に
+ * セットする lastFiredDay を返す。shouldFire は「同日で未発火なら過去時刻を回収」
+ * する仕様のため、これが無いと 18:00 に 09:00 のルーティーンを作った瞬間に発火する。
+ * 未来時刻なら undefined（当日中に正常に発火させる）。
+ */
+export function initialLastFiredDay(
+  hour: number,
+  minute: number,
+  now: Date = new Date(),
+): string | undefined {
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const targetMinutes = hour * 60 + minute;
+  return nowMinutes >= targetMinutes ? todayStamp(now) : undefined;
+}
+
 export function markFired(
   routines: Routine[],
   id: string,
