@@ -59,7 +59,8 @@ impl CliProvider for GeminiProvider {
             system_prompt: opts.system_prompt,
             history: Arc::new(Mutex::new(Vec::new())),
             event_sender,
-            stopped: Arc::new(Mutex::new(false)),
+            stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            child: Arc::new(Mutex::new(None)),
         }))
     }
 }
@@ -74,7 +75,10 @@ pub struct GeminiSessionHandle {
     /// (user, assistant) ペアの履歴。毎ターン丸ごと再送する。
     history: Arc<Mutex<Vec<(String, String)>>>,
     event_sender: UnboundedSender<NormalizedEvent>,
-    stopped: Arc<Mutex<bool>>,
+    /// 停止フラグ（監査R1: 停止後のイベント流出を止める）
+    stopped: Arc<std::sync::atomic::AtomicBool>,
+    /// 実行中の gemini（監査R1: stop() で実プロセスを kill するために保持）
+    child: Arc<Mutex<Option<tokio::process::Child>>>,
 }
 
 impl GeminiSessionHandle {
@@ -101,7 +105,7 @@ impl GeminiSessionHandle {
 #[async_trait::async_trait]
 impl SessionHandle for GeminiSessionHandle {
     async fn send_user_message(&mut self, text: &str) -> Result<(), ProviderError> {
-        if *self.stopped.lock().await {
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
 
@@ -162,16 +166,34 @@ impl SessionHandle for GeminiSessionHandle {
             ProviderError::Session("gemini subprocess の stderr が取得できません".into())
         })?;
 
+        // 監査R1: stop() で実プロセスを kill できるよう handle に保持
+        {
+            let mut guard = self.child.lock().await;
+            if let Some(mut old) = guard.take() {
+                let _ = old.start_kill();
+            }
+            *guard = Some(child);
+        }
+
         let session_id = self.session_id.clone();
         let event_sender = self.event_sender.clone();
         let history = Arc::clone(&self.history);
         let user_text_owned = text.to_string();
+        let stopped_flag = Arc::clone(&self.stopped);
+        let child_for_reap = Arc::clone(&self.child);
 
         // stdout 読み取り：行ごとに AssistantText として流し、累積も記録
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             let mut accumulated = String::new();
             while let Ok(Some(line)) = reader.next_line().await {
+                if stopped_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    // 停止後は履歴にも UI にも流さない
+                    if let Some(mut ch) = child_for_reap.lock().await.take() {
+                        let _ = ch.wait().await;
+                    }
+                    return;
+                }
                 if !line.is_empty() {
                     accumulated.push_str(&line);
                     accumulated.push('\n');
@@ -203,14 +225,22 @@ impl SessionHandle for GeminiSessionHandle {
                 cost_usd: None,
                 usage: None,
             });
+            // ゾンビ防止: stop() が先に take していれば no-op
+            if let Some(mut ch) = child_for_reap.lock().await.take() {
+                let _ = ch.wait().await;
+            }
         });
 
         // stderr：エラーらしき行だけ Error イベントへ
         let session_id_for_stderr = self.session_id.clone();
         let event_sender_stderr = self.event_sender.clone();
+        let stopped_flag_err = Arc::clone(&self.stopped);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
+                if stopped_flag_err.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -227,11 +257,6 @@ impl SessionHandle for GeminiSessionHandle {
             }
         });
 
-        // ゾンビ防止のためバックグラウンドで wait
-        tokio::spawn(async move {
-            let _ = child.wait().await;
-        });
-
         Ok(())
     }
 
@@ -245,7 +270,14 @@ impl SessionHandle for GeminiSessionHandle {
     }
 
     async fn stop(&mut self) -> Result<(), ProviderError> {
-        *self.stopped.lock().await = true;
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // 監査R1: 実行中の gemini を実際に止める
+        let mut guard = self.child.lock().await;
+        if let Some(mut ch) = guard.take() {
+            let _ = ch.start_kill();
+            let _ = ch.wait().await;
+        }
         Ok(())
     }
 }
