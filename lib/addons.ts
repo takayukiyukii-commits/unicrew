@@ -127,14 +127,18 @@ export const CURATED_ADDONS: CuratedAddon[] = [
     verified: true,
   },
   {
-    id: "security-review@claude-code-plugins",
+    // 🚨 2026-08-28: 旧 id は "security-review" だったが、上流のマーケットプレイスで
+    //    "security-guidance" に置き換わっていた（一覧13件を実測して確認）。
+    //    説明も実物の description に合わせて書き直している（脆弱性スキャンではなく
+    //    編集時に警告を出すフック）。ここは推測で書かない。
+    id: "security-guidance@claude-code-plugins",
     source: "claude",
     kind: "plugin",
-    name: "security-review",
+    name: "security-guidance",
     marketplaceId: "claude-code-plugins",
-    label: "セキュリティ監査",
-    description: "OWASP Top 10 などの観点で脆弱性をスキャン",
-    benefit: "「セキュリティチェックして」で危険な箇所を一覧化",
+    label: "セキュリティ注意",
+    description: "ファイル編集時に、コマンド注入・XSS・危険なコードを警告する",
+    benefit: "編集のたびに、危ないコードをその場で指摘してくれる",
     riskLevel: "low",
     verified: true,
   },
@@ -153,10 +157,12 @@ export const CURATED_ADDONS: CuratedAddon[] = [
 
   // Codex 公式バンドル
   {
-    id: "browser-use@openai-bundled",
+    // 🚨 2026-08-28: 旧 id は "browser-use" だったが、openai-bundled の実際の
+    //    プラグイン名は "chrome"（codex config の実測値）。
+    id: "chrome@openai-bundled",
     source: "codex",
     kind: "plugin",
-    name: "browser-use",
+    name: "chrome",
     marketplaceId: "openai-bundled",
     label: "ブラウザ操作",
     description: "Codex がブラウザを開いて Web 操作を実行",

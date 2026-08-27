@@ -271,10 +271,24 @@ export function AddonsSection({
 
   const recommendations = useMemo<CuratedAddon[]>(() => {
     if (isUniSeries) return [];
+    // 🚨【2026-08-28】推奨は手書きの一覧なので、上流で改名・削除されると
+    //    「押せるのに必ず失敗するボタン」になる（実測: security-review は
+    //    security-guidance に、browser-use は chrome に変わっていた）。
+    //    プラグインは、実際のマーケットプレイス一覧に在るものだけを出す。
+    //    カタログが空のとき（取得失敗・未取得）は従来どおり全部出す
+    //    ——取得できないことを「全部提供終了」と誤表示しないため。
+    const catalog =
+      activeTab.source === "codex" ? codexCatalog : marketplaceCatalog;
+    const catalogIds = new Set(catalog.map((c) => c.id));
     return CURATED_ADDONS.filter(
       (c) => c.source === activeTab.source && c.kind === activeTab.kind,
-    ).filter((c) => !activeItems.some((it) => it.id === c.id));
-  }, [activeTab, activeItems, isUniSeries]);
+    )
+      .filter((c) => !activeItems.some((it) => it.id === c.id))
+      .filter(
+        (c) =>
+          c.kind !== "plugin" || catalogIds.size === 0 || catalogIds.has(c.id),
+      );
+  }, [activeTab, activeItems, isUniSeries, marketplaceCatalog, codexCatalog]);
 
   const onToggleMcp = useCallback(
     async (item: AddonItem, nextEnabled: boolean) => {
@@ -304,10 +318,13 @@ export function AddonsSection({
       try {
         const result = await installClaudePlugin(id);
         setInfo(tr("addons.installedToast", { id, detail: result ? `: ${result.slice(0, 200)}` : "" }));
-        await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
+        // 🚨 成功時だけでなく失敗時も読み直す。失敗の多くは「一覧が古い」ことが
+        //    原因で、Rust 側が marketplace を更新した直後なので、ここで読み直すと
+        //    消えたプラグインが一覧から消える（押し続けられる状態を残さない）。
+        await reload();
         setPendingInstall(null);
       }
     },
@@ -323,10 +340,13 @@ export function AddonsSection({
       try {
         const result = await installCodexPlugin(id);
         setInfo(tr("addons.installedToast", { id, detail: result ? `: ${result.slice(0, 200)}` : "" }));
-        await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
+        // 🚨 成功時だけでなく失敗時も読み直す。失敗の多くは「一覧が古い」ことが
+        //    原因で、Rust 側が marketplace を更新した直後なので、ここで読み直すと
+        //    消えたプラグインが一覧から消える（押し続けられる状態を残さない）。
+        await reload();
         setPendingInstall(null);
       }
     },
