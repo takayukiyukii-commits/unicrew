@@ -110,6 +110,22 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     isTemplate: true,
   },
   {
+    id: "tmpl-cursor-normal",
+    name: "Cursor（normal）",
+    roleTag: "Cursor Agent（マルチモデル）",
+    emoji: "◼️",
+    iconName: undefined,
+    avatarPath: null,
+    accentColor: "#374151",
+    description:
+      "Cursor 公式 Agent CLI（cursor-agent）を stream-json 経由で動かす。認証は `cursor-agent login` か CURSOR_API_KEY（CLI 側で完結）。GPT / Claude / Gemini 等をモデル指定で切替可能。🚨 Windows はネイティブ非対応のため WSL + cursor-agent 導入が必要（macOS / Linux はネイティブ）。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "cursor",
+    isTemplate: true,
+  },
+  {
     id: "tmpl-auto",
     name: "おまかせ",
     roleTag: "自動アサイン",

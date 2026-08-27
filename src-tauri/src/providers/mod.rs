@@ -23,6 +23,7 @@ pub mod acp_transport;
 pub mod claude;
 pub mod codex;
 pub mod codex_acp;
+pub mod cursor;
 pub mod gemini;
 pub mod goose;
 pub mod grok;
@@ -81,6 +82,7 @@ pub fn build_provider(id: &str) -> Option<Arc<dyn CliProvider>> {
         "grok" => Some(Arc::new(grok::GrokProvider::new())),
         "opencode" => Some(Arc::new(opencode::OpenCodeProvider::new())),
         "codex-acp" => Some(Arc::new(codex_acp::CodexAcpProvider::new())),
+        "cursor" => Some(Arc::new(cursor::CursorProvider::new())),
         "kiro" => Some(Arc::new(kiro::KiroProvider::new())),
         "qwen" => Some(Arc::new(qwen::QwenProvider::new())),
         "kimi" => Some(Arc::new(kimi::KimiProvider::new())),

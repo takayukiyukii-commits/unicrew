@@ -1851,7 +1851,8 @@ export default function Page() {
         p.provider === "kiro" ||
         p.provider === "qwen" ||
         p.provider === "kimi" ||
-        p.provider === "grok"
+        p.provider === "grok" ||
+        p.provider === "cursor"
       ) {
         acpProvidersInPreset.push(p.provider);
       }

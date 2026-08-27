@@ -3685,6 +3685,9 @@ fn acp_cli_command_name(provider: &str) -> Option<&'static str> {
         "kimi" => Some("kimi"),
         // Grok CLI（xAI 公式・2026-08-27）。ACP 対応（grok agent stdio）。npm 配布で auto install 可。
         "grok" => Some("grok"),
+        // Cursor Agent（2026-08-27）。stream-json 経路。Windows ネイティブ版が無いため
+        // ここでの検出は mac/Linux 用（Windows は WSL 内にあれば実行はできるが検出は未対応）。
+        "cursor" => Some("cursor-agent"),
         _ => None,
     }
 }
@@ -3831,6 +3834,10 @@ fn resolve_acp_install_command(provider: &str) -> Result<(String, Vec<String>), 
                 ],
             ))
         }
+        "cursor" => Err(
+            "Cursor Agent の自動インストールは未対応です。macOS/Linux/WSL で `curl https://cursor.com/install -fsS | bash` を実行してください（Windows ネイティブ版はありません。WSL 内に導入すれば UNICREW が WSL 経由で起動します）。"
+                .to_string(),
+        ),
         other => Err(format!("unknown acp cli: {}", other)),
     }
 }
