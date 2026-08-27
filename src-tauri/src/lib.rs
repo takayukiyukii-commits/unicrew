@@ -768,7 +768,7 @@ fn add_claude_mcp(req: McpAddRequest) -> Result<(), String> {
     }
     servers.insert(req.name, serde_json::Value::Object(entry));
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json 書き込み失敗: {}", e))?;
+    write_json_atomic(&path, &pretty)?;
     Ok(())
 }
 
@@ -792,7 +792,7 @@ fn remove_claude_mcp(name: String) -> Result<(), String> {
         }
     }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json 書き込み失敗: {}", e))?;
+    write_json_atomic(&path, &pretty)?;
     Ok(())
 }
 
@@ -1360,7 +1360,7 @@ fn toggle_claude_mcp(name: String, enabled: bool) -> Result<(), String> {
     }
 
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, pretty).map_err(|e| format!("~/.claude.json の書き込み失敗: {}", e))?;
+    write_json_atomic(&path, &pretty)?;
     Ok(())
 }
 
