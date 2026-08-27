@@ -977,6 +977,34 @@ fn toggle_codex_mcp(name: String, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// JSON を atomic に書き込む（監査R2）。同一ディレクトリの一時ファイルへ全量書き→
+/// flush→rename で置換する。書き込み途中失敗で既存ファイルが空/半端になるのを防ぐ。
+fn write_json_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "書き込み先の親ディレクトリが不明です".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.flush().map_err(|e| e.to_string())?;
+        let _ = f.sync_all();
+    }
+    // Windows は既存ファイルがあると rename が失敗するため、成功優先で置換する
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            std::fs::rename(&tmp, path).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                e.to_string()
+            })
+        }
+    }
+}
+
 // ---------- プラグイン/マーケットプレイス入力の検証（2026-08-27 監査） ----------
 //
 // build_silent_command は Command::new+.arg なので OS シェル注入は起きないが、
@@ -1139,7 +1167,7 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
         ));
     }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, pretty).map_err(|e| e.to_string())?;
+    write_json_atomic(&path, &pretty)?;
     Ok(format!(
         "プラグイン '{}' を installed_plugins.json から削除しました（CLI 経由は不可だったためファイル直編集）",
         id_trim
@@ -1167,11 +1195,21 @@ async fn add_claude_marketplace(id: String, repo: String) -> Result<String, Stri
         .join("plugins")
         .join("known_marketplaces.json");
 
-    if !mp_dir.exists() {
+    // 既存ディレクトリが「壊れたclone残骸」（.git が無い）なら掃除して clone し直す（監査R2）。
+    let looks_valid = mp_dir.exists() && mp_dir.join(".git").exists();
+    if mp_dir.exists() && !looks_valid {
+        std::fs::remove_dir_all(&mp_dir)
+            .map_err(|e| format!("壊れた marketplace ディレクトリの削除に失敗: {}", e))?;
+    }
+    if !mp_dir.join(".git").exists() {
+        // 一時ディレクトリへ clone → 成功したら rename（監査R2: 途中失敗の残骸を残さない）。
+        let tmp_dir = marketplaces_root.join(format!(".{}.cloning", id_t));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
         let mut cmd = build_silent_command("git");
         cmd.arg("clone")
+            .arg("--")
             .arg(format!("https://github.com/{}.git", repo_t))
-            .arg(&mp_dir)
+            .arg(&tmp_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1180,24 +1218,38 @@ async fn add_claude_marketplace(id: String, repo: String) -> Result<String, Stri
             .await
             .map_err(|e| format!("git CLI を起動できませんでした: {}", e))?;
         if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err(format!(
                 "git clone に失敗（exit={}）\n{}",
                 output.status.code().unwrap_or(-1),
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
+        std::fs::rename(&tmp_dir, &mp_dir).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            format!("clone 済みディレクトリの配置に失敗: {}", e)
+        })?;
     }
 
-    // known_marketplaces.json を更新
+    // known_marketplaces.json を更新（監査R2: 破損を握りつぶして既存登録を消さない）
     let mut v: serde_json::Value = if known_path.exists() {
         let text = std::fs::read_to_string(&known_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(val) if val.is_object() => val,
+            _ => {
+                // 壊れている/オブジェクトでない → 上書きせず .bak に退避してからエラー。
+                // （既存登録を黙って消さない。ユーザーが確認して直せるようにする）
+                let bak = known_path.with_extension("json.bak");
+                let _ = std::fs::copy(&known_path, &bak);
+                return Err(format!(
+                    "known_marketplaces.json が壊れています。{} に退避しました。中身を確認して修復するか削除してから再実行してください。",
+                    bak.display()
+                ));
+            }
+        }
     } else {
         serde_json::json!({})
     };
-    if !v.is_object() {
-        v = serde_json::json!({});
-    }
     let obj = v.as_object_mut().unwrap();
     obj.insert(
         id_t.clone(),
@@ -1210,11 +1262,8 @@ async fn add_claude_marketplace(id: String, repo: String) -> Result<String, Stri
             "lastUpdated": chrono_now_iso(),
         }),
     );
-    if let Some(parent) = known_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&known_path, pretty).map_err(|e| e.to_string())?;
+    write_json_atomic(&known_path, &pretty)?;
     Ok(format!("marketplace '{}' を追加しました", id_t))
 }
 
@@ -5060,5 +5109,21 @@ mod plugin_input_validation_tests {
         assert!(validate_github_repo("-oProxyCommand/name").is_err());
         assert!(validate_github_repo("owner/na me").is_err());
         assert!(validate_github_repo("../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_and_survives_overwrite() {
+        use super::write_json_atomic;
+        let dir = std::env::temp_dir().join(format!("unicrew_atomic_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("known.json");
+        write_json_atomic(&path, "{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+        // 既存があっても上書きできる（Windows の rename 失敗フォールバック確認）
+        write_json_atomic(&path, "{\"b\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"b\":2}");
+        // .tmp が残っていない
+        assert!(!path.with_extension("tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
