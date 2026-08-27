@@ -170,6 +170,7 @@ export function SettingsModal({
     qwen: { status: null, stage: "idle", line: "" },
     kimi: { status: null, stage: "idle", line: "" },
     grok: { status: null, stage: "idle", line: "" },
+    cursor: { status: null, stage: "idle", line: "" },
   };
   const [acpStates, setAcpStates] =
     useState<Record<AcpCliProvider, AcpCliState>>(initialAcpState);
@@ -207,6 +208,7 @@ export function SettingsModal({
         acpCliStatus("qwen"),
         acpCliStatus("kimi"),
         acpCliStatus("grok"),
+        acpCliStatus("cursor"),
       ]);
       const val = <T,>(i: number): T | null =>
         results[i].status === "fulfilled"
@@ -234,6 +236,7 @@ export function SettingsModal({
         qwen: { ...prev.qwen, status: acpAt(9) ?? prev.qwen.status },
         kimi: { ...prev.kimi, status: acpAt(10) ?? prev.kimi.status },
         grok: { ...prev.grok, status: acpAt(11) ?? prev.grok.status },
+        cursor: { ...prev.cursor, status: acpAt(12) ?? prev.cursor.status },
       }));
     } finally {
       setRefreshing(false);
@@ -1220,6 +1223,13 @@ export function SettingsModal({
                 description: tr("settings.acp.grok.desc"),
                 installHelpUrl: "https://docs.x.ai/build/cli/reference",
                 kind: "auto",
+              },
+              {
+                provider: "cursor",
+                label: "Cursor Agent",
+                description: tr("settings.acp.cursor.desc"),
+                installHelpUrl: "https://cursor.com/docs/cli/overview",
+                kind: "manual",
               },
             ];
             const connected = acpRows.filter(

@@ -45,6 +45,9 @@ export const PROVIDER_CATEGORY: Record<Provider, ProviderCategory> = {
   // grok は xAI 公式 CLI（@xai-official/grok）、ACP ネイティブ（grok agent stdio）。
   // 3大ファミリーに属さないので open_local 扱い（将来 xai_family を増やす可能性あり）。
   grok: "open_local",
+  // cursor は Cursor 公式 Agent CLI（stream-json）。マルチモデルの商用サービスで
+  // 3大ファミリーに属さないので open_local 扱い。
+  cursor: "open_local",
 };
 
 export const CATEGORY_ORDER: ProviderCategory[] = [

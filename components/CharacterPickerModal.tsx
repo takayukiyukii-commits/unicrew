@@ -36,6 +36,7 @@ const NORMAL_TEMPLATE_IDS = new Set([
   "tmpl-qwen-normal",
   "tmpl-kimi-normal",
   "tmpl-grok-normal",
+  "tmpl-cursor-normal",
 ]);
 const isNormalTemplate = (t: Character) => NORMAL_TEMPLATE_IDS.has(t.id);
 

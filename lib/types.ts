@@ -257,7 +257,8 @@ export type Provider =
   | "kiro"
   | "qwen"
   | "kimi"
-  | "grok";
+  | "grok"
+  | "cursor";
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
@@ -270,6 +271,7 @@ export const PROVIDER_LABELS: Record<Provider, string> = {
   qwen: "Qwen",
   kimi: "Kimi",
   grok: "Grok",
+  cursor: "Cursor",
 };
 
 export const PROVIDER_COLORS: Record<Provider, string> = {
@@ -283,6 +285,7 @@ export const PROVIDER_COLORS: Record<Provider, string> = {
   qwen: "#a855f7",
   kimi: "#06b6d4",
   grok: "#0f1419",
+  cursor: "#374151",
 };
 
 /**

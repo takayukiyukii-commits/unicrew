@@ -532,7 +532,8 @@ export type AcpCliProvider =
   | "kiro"
   | "qwen"
   | "kimi"
-  | "grok";
+  | "grok"
+  | "cursor";
 
 /**
  * installAcpCli が動く provider だけの subset。
