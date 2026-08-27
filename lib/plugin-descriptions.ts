@@ -169,6 +169,47 @@ export const PLUGIN_DESCRIPTIONS: Record<string, BilingualDescription> = {
     en: "Google Gemini image generation (photos, illustrations, icons, banners)",
     benefitJa: "「○○の画像作って」で Gemini 経由のフリー画像生成が動く",
   },
+  // === awesome-claude-plugins / ibrahim-plugins（コミュニティ・2026-08-27 追加）===
+  "senior-frontend@awesome-claude-plugins": {
+    ja: "React / Next.js / TypeScript の実践パターンでフロントを実装し、バンドル分析と最適化まで行う",
+    en: "React/Next.js/TypeScript patterns with bundle analysis and optimization",
+    benefitJa: "「この画面を実装して」で、無駄なバンドルまで削った実務水準のReact/Nextコードが出る",
+  },
+  "test-writer-fixer@awesome-claude-plugins": {
+    ja: "ユニットテストの作成と、落ちているテストの修正を自動で行う",
+    en: "Automatically write and fix unit tests",
+    benefitJa: "「テスト書いて」「テスト直して」で、抜けているテストの追加と赤いテストの修復が進む",
+  },
+  "ship@awesome-claude-plugins": {
+    ja: "コミットから本番反映まで、PR の一連の流れをまとめて進める",
+    en: "Complete PR workflow from commit to production",
+    benefitJa: "「これリリースまで持っていって」でコミット→PR→マージの導線が一気に流れる",
+  },
+  "pr-review@awesome-claude-plugins": {
+    ja: "プルリクを詳細なフィードバック付きで多角的にレビューする",
+    en: "Comprehensive PR reviews with detailed feedback",
+    benefitJa: "「このPR見て」で観点別の指摘とコメント案がまとまって返る",
+  },
+  "theme-factory@awesome-claude-plugins": {
+    ja: "スライド・ドキュメント・レポート・LP 向けのプロ品質テーマを10種そろえる",
+    en: "10 professional themes for slides, docs, reports, and landing pages",
+    benefitJa: "「資料の見た目を整えて」で、量産感のない配色・タイポのテーマが選べる",
+  },
+  "agent-sdk-dev@awesome-claude-plugins": {
+    ja: "Claude Agent SDK を使った開発を支援するキット（公式版の別マーケットプレイス配布）",
+    en: "Claude Agent SDK development helper",
+    benefitJa: "「Agent SDK で○○を作って」で、SDK前提のコードと設定がそろう",
+  },
+  "security-guidance@awesome-claude-plugins": {
+    ja: "セキュリティのベストプラクティスと脆弱性検出（公式版の別マーケットプレイス配布）",
+    en: "Security best practices and vulnerability detection",
+    benefitJa: "「セキュリティチェックして」で危険な箇所を一覧化",
+  },
+  "conductor-orchestrator-supaconductor@ibrahim-plugins": {
+    ja: "複数エージェントの並列実行と評価ループで、大きめのタスクを分割・統括する司令塔",
+    en: "Conductor v3 — multi-agent orchestration with evaluate-loop, parallel execution, and a board of reviewers",
+    benefitJa: "「この案件を分担して進めて」で、複数AIが並列で動き結果を突き合わせてくれる",
+  },
 };
 
 /**
