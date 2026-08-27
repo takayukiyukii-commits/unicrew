@@ -14,7 +14,7 @@ import { compare as compareVersions } from "./semver-mini";
  * 表示中バージョン。リリース時に更新する単一ソース。
  * `public/whatsnew/{version}.md` と一致させる。
  */
-export const UNICREW_VERSION = "0.2.50";
+export const UNICREW_VERSION = "0.3.0";
 
 const STORAGE_KEY = "unicrew.lastSeenVersion";
 
