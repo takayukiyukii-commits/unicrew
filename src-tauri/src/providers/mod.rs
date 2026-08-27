@@ -25,6 +25,7 @@ pub mod codex;
 pub mod codex_acp;
 pub mod gemini;
 pub mod goose;
+pub mod grok;
 pub mod kimi;
 pub mod kiro;
 pub mod opencode;
@@ -77,6 +78,7 @@ pub fn build_provider(id: &str) -> Option<Arc<dyn CliProvider>> {
         "codex" => Some(Arc::new(codex::CodexProvider::new())),
         "gemini" => Some(Arc::new(gemini::GeminiProvider::new())),
         "goose" => Some(Arc::new(goose::GooseProvider::new())),
+        "grok" => Some(Arc::new(grok::GrokProvider::new())),
         "opencode" => Some(Arc::new(opencode::OpenCodeProvider::new())),
         "codex-acp" => Some(Arc::new(codex_acp::CodexAcpProvider::new())),
         "kiro" => Some(Arc::new(kiro::KiroProvider::new())),

@@ -42,6 +42,9 @@ export const PROVIDER_CATEGORY: Record<Provider, ProviderCategory> = {
   qwen: "open_local",
   // kimi は Moonshot AI、ACP ネイティブサポート（kimi acp）。OAuth login で認証完結。
   kimi: "open_local",
+  // grok は xAI 公式 CLI（@xai-official/grok）、ACP ネイティブ（grok agent stdio）。
+  // 3大ファミリーに属さないので open_local 扱い（将来 xai_family を増やす可能性あり）。
+  grok: "open_local",
 };
 
 export const CATEGORY_ORDER: ProviderCategory[] = [
