@@ -47,7 +47,26 @@ export function loadRoutines(): Routine[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Routine[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    // 監査（ファイルタブR1）: 非配列や schedule 欠落の要素で管理画面・発火判定が
+    // TypeError で落ちるのを防ぐ。要素スキーマ（id/threadId/prompt/enabled/schedule）を検証。
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r): r is Routine => {
+      if (!r || typeof r !== "object") return false;
+      const o = r as Record<string, unknown>;
+      const sc = o.schedule as Record<string, unknown> | undefined;
+      return (
+        typeof o.id === "string" &&
+        typeof o.threadId === "string" &&
+        typeof o.prompt === "string" &&
+        typeof o.enabled === "boolean" &&
+        !!sc &&
+        typeof sc === "object" &&
+        typeof sc.hour === "number" &&
+        typeof sc.minute === "number"
+      );
+    });
   } catch {
     return [];
   }
