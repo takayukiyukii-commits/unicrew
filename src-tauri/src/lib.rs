@@ -977,15 +977,128 @@ fn toggle_codex_mcp(name: String, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// JSON を atomic に書き込む（監査R2）。同一ディレクトリの一時ファイルへ全量書き→
+/// flush→rename で置換する。書き込み途中失敗で既存ファイルが空/半端になるのを防ぐ。
+fn write_json_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "書き込み先の親ディレクトリが不明です".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+        f.flush().map_err(|e| e.to_string())?;
+        let _ = f.sync_all();
+    }
+    // Windows は既存ファイルがあると rename が失敗するため、成功優先で置換する
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            std::fs::rename(&tmp, path).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                e.to_string()
+            })
+        }
+    }
+}
+
+// ---------- プラグイン/マーケットプレイス入力の検証（2026-08-27 監査） ----------
+//
+// build_silent_command は Command::new+.arg なので OS シェル注入は起きないが、
+// (a) id を claude CLI の `--print "/plugin install <id>"` 文字列に埋めるため、
+//     改行・スラッシュコマンド・制御文字が混じると CLI 内部パーサが別コマンドとして
+//     解釈しうる（Codex 監査 HIGH）。
+// (b) marketplace の id を `marketplaces/<id>` に join するため、`..` やパス区切り・
+//     絶対パスで clone 先が想定外の場所に化ける（Path::join は `..` を正規化せず、
+//     絶対パスは base を丸ごと置換することを実測。両系統一致 HIGH）。
+// いずれも入力を厳格に検証して弾く。
+
+/// Claude プラグイン ID の形式検証。
+/// 実形式 `plugin@marketplace` を想定し、英数と `. _ - @ /` のみ許可。
+/// 空白・改行・制御文字・クォート・その他記号を拒否する。
+fn validate_plugin_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("プラグイン ID が空です".into());
+    }
+    if id.len() > 200 {
+        return Err("プラグイン ID が長すぎます".into());
+    }
+    let ok = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '/'));
+    if !ok {
+        return Err(format!(
+            "プラグイン ID に使えない文字が含まれています（許可: 英数字 . _ - @ /）: {:?}",
+            id
+        ));
+    }
+    Ok(())
+}
+
+/// マーケットプレイス ID（= ディレクトリ名）の検証。単一パスセグメントに限定する。
+/// `.` / `..` / パス区切り / ドライブレター / 制御文字を拒否する。
+fn validate_marketplace_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("marketplace ID が空です".into());
+    }
+    if id.len() > 100 {
+        return Err("marketplace ID が長すぎます".into());
+    }
+    if id == "." || id == ".." {
+        return Err("marketplace ID にその値は使えません".into());
+    }
+    let ok = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !ok {
+        return Err(format!(
+            "marketplace ID に使えない文字が含まれています（許可: 英数字 . _ -。パス区切り不可）: {:?}",
+            id
+        ));
+    }
+    Ok(())
+}
+
+/// GitHub repo の `owner/name` 形式の検証。
+/// 先頭 `-`（git オプション誤認）・空白・別 URL・`@` 等を弾く。
+fn validate_github_repo(repo: &str) -> Result<(), String> {
+    if repo.is_empty() {
+        return Err("GitHub repo が空です".into());
+    }
+    if repo.len() > 200 {
+        return Err("GitHub repo が長すぎます".into());
+    }
+    let parts: Vec<&str> = repo.split('/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return Err("GitHub repo は owner/name の形式で指定してください".into());
+    }
+    for seg in parts {
+        if seg == "." || seg == ".." || seg.starts_with('-') {
+            return Err("GitHub repo の各要素が不正です".into());
+        }
+        let ok = seg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if !ok {
+            return Err(format!(
+                "GitHub repo に使えない文字が含まれています（許可: 英数字 . _ -）: {:?}",
+                repo
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// claude CLI 経由でプラグインをインストール。
 /// 内部で `claude --print "/plugin install <id>"` を CREATE_NO_WINDOW で spawn。
 /// 成功時は stdout テキストを返す（呼び出し側でログ表示用）。
 #[tauri::command]
 async fn install_claude_plugin(id: String) -> Result<String, String> {
     let id_trim = id.trim();
-    if id_trim.is_empty() {
-        return Err("プラグイン ID が空です".into());
-    }
+    validate_plugin_id(id_trim)?;
     let mut cmd = build_silent_command("claude");
     cmd.arg("--print")
         .arg(format!("/plugin install {}", id_trim))
@@ -1014,19 +1127,29 @@ async fn install_claude_plugin(id: String) -> Result<String, String> {
 #[tauri::command]
 async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
     let id_trim = id.trim().to_string();
-    if id_trim.is_empty() {
-        return Err("プラグイン ID が空です".into());
-    }
+    validate_plugin_id(&id_trim)?;
     let mut cmd = build_silent_command("claude");
     cmd.arg("--print")
         .arg(format!("/plugin uninstall {}", id_trim))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let cli_attempt = cmd.output().await;
-    if let Ok(output) = cli_attempt {
-        if output.status.success() {
-            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    // 監査R3: CLI 失敗の原因（起動失敗/exit/stderr）を保持し、フォールバックも
+    // 失敗したときのエラーに併記する（"claude 不在" 等の本当の原因を失わない）。
+    let mut cli_reason = String::new();
+    match cmd.output().await {
+        Ok(output) => {
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+            cli_reason = format!(
+                "claude CLI（exit={}）: {}",
+                output.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(e) => {
+            cli_reason = format!("claude CLI を起動できませんでした: {}", e);
         }
     }
     // フォールバック: installed_plugins.json から直接除去
@@ -1037,7 +1160,8 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
         .join("installed_plugins.json");
     if !path.exists() {
         return Err(format!(
-            "claude CLI 経由のアンインストールに失敗し、{} も存在しません",
+            "アンインストールに失敗しました。{}／さらに {} も存在しません",
+            cli_reason,
             path.display()
         ));
     }
@@ -1051,12 +1175,12 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
     }
     if !removed {
         return Err(format!(
-            "プラグイン '{}' が installed_plugins.json に見つかりませんでした",
-            id_trim
+            "アンインストールに失敗しました。{}／プラグイン '{}' は installed_plugins.json にも見つかりませんでした",
+            cli_reason, id_trim
         ));
     }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, pretty).map_err(|e| e.to_string())?;
+    write_json_atomic(&path, &pretty)?;
     Ok(format!(
         "プラグイン '{}' を installed_plugins.json から削除しました（CLI 経由は不可だったためファイル直編集）",
         id_trim
@@ -1069,21 +1193,36 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
 async fn add_claude_marketplace(id: String, repo: String) -> Result<String, String> {
     let id_t = id.trim().to_string();
     let repo_t = repo.trim().to_string();
-    if id_t.is_empty() || repo_t.is_empty() {
-        return Err("marketplace ID と GitHub repo の両方が必要です".into());
-    }
+    validate_marketplace_id(&id_t)?;
+    validate_github_repo(&repo_t)?;
     let home = home_dir()?;
-    let mp_dir = home.join(".claude").join("plugins").join("marketplaces").join(&id_t);
+    let marketplaces_root = home.join(".claude").join("plugins").join("marketplaces");
+    let mp_dir = marketplaces_root.join(&id_t);
+    // 二重の防御（監査）: 検証を通っても、join 結果が marketplaces 直下の
+    // 単一セグメントであることを最終確認する（正規化してルート配下を保証）。
+    if mp_dir.parent() != Some(marketplaces_root.as_path()) {
+        return Err("marketplace ID が不正です（marketplaces 直下以外は不可）".into());
+    }
     let known_path = home
         .join(".claude")
         .join("plugins")
         .join("known_marketplaces.json");
 
-    if !mp_dir.exists() {
+    // 既存ディレクトリが「壊れたclone残骸」（.git が無い）なら掃除して clone し直す（監査R2）。
+    let looks_valid = mp_dir.exists() && mp_dir.join(".git").exists();
+    if mp_dir.exists() && !looks_valid {
+        std::fs::remove_dir_all(&mp_dir)
+            .map_err(|e| format!("壊れた marketplace ディレクトリの削除に失敗: {}", e))?;
+    }
+    if !mp_dir.join(".git").exists() {
+        // 一時ディレクトリへ clone → 成功したら rename（監査R2: 途中失敗の残骸を残さない）。
+        let tmp_dir = marketplaces_root.join(format!(".{}.cloning", id_t));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
         let mut cmd = build_silent_command("git");
         cmd.arg("clone")
+            .arg("--")
             .arg(format!("https://github.com/{}.git", repo_t))
-            .arg(&mp_dir)
+            .arg(&tmp_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1092,24 +1231,38 @@ async fn add_claude_marketplace(id: String, repo: String) -> Result<String, Stri
             .await
             .map_err(|e| format!("git CLI を起動できませんでした: {}", e))?;
         if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err(format!(
                 "git clone に失敗（exit={}）\n{}",
                 output.status.code().unwrap_or(-1),
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
+        std::fs::rename(&tmp_dir, &mp_dir).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            format!("clone 済みディレクトリの配置に失敗: {}", e)
+        })?;
     }
 
-    // known_marketplaces.json を更新
+    // known_marketplaces.json を更新（監査R2: 破損を握りつぶして既存登録を消さない）
     let mut v: serde_json::Value = if known_path.exists() {
         let text = std::fs::read_to_string(&known_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(val) if val.is_object() => val,
+            _ => {
+                // 壊れている/オブジェクトでない → 上書きせず .bak に退避してからエラー。
+                // （既存登録を黙って消さない。ユーザーが確認して直せるようにする）
+                let bak = known_path.with_extension("json.bak");
+                let _ = std::fs::copy(&known_path, &bak);
+                return Err(format!(
+                    "known_marketplaces.json が壊れています。{} に退避しました。中身を確認して修復するか削除してから再実行してください。",
+                    bak.display()
+                ));
+            }
+        }
     } else {
         serde_json::json!({})
     };
-    if !v.is_object() {
-        v = serde_json::json!({});
-    }
     let obj = v.as_object_mut().unwrap();
     obj.insert(
         id_t.clone(),
@@ -1122,11 +1275,8 @@ async fn add_claude_marketplace(id: String, repo: String) -> Result<String, Stri
             "lastUpdated": chrono_now_iso(),
         }),
     );
-    if let Some(parent) = known_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&known_path, pretty).map_err(|e| e.to_string())?;
+    write_json_atomic(&known_path, &pretty)?;
     Ok(format!("marketplace '{}' を追加しました", id_t))
 }
 
@@ -4934,4 +5084,59 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod plugin_input_validation_tests {
+    use super::{validate_github_repo, validate_marketplace_id, validate_plugin_id};
+
+    #[test]
+    fn plugin_id_accepts_real_forms() {
+        assert!(validate_plugin_id("my-plugin@my-market").is_ok());
+        assert!(validate_plugin_id("foo.bar_baz@org/repo").is_ok());
+    }
+
+    #[test]
+    fn plugin_id_rejects_injection() {
+        assert!(validate_plugin_id("foo\n/plugin uninstall victim").is_err());
+        assert!(validate_plugin_id("foo bar").is_err());
+        assert!(validate_plugin_id("foo\"; rm -rf").is_err());
+        assert!(validate_plugin_id("").is_err());
+    }
+
+    #[test]
+    fn marketplace_id_rejects_traversal_and_absolute() {
+        assert!(validate_marketplace_id("my-market").is_ok());
+        assert!(validate_marketplace_id("..").is_err());
+        assert!(validate_marketplace_id("../../evil").is_err());
+        assert!(validate_marketplace_id(r"..\..\evil").is_err());
+        assert!(validate_marketplace_id(r"C:\Windows\Temp\evil").is_err());
+        assert!(validate_marketplace_id("a/b").is_err());
+    }
+
+    #[test]
+    fn github_repo_requires_owner_slash_name() {
+        assert!(validate_github_repo("anthropics/claude-code").is_ok());
+        assert!(validate_github_repo("owner").is_err());
+        assert!(validate_github_repo("owner/name/extra").is_err());
+        assert!(validate_github_repo("-oProxyCommand/name").is_err());
+        assert!(validate_github_repo("owner/na me").is_err());
+        assert!(validate_github_repo("../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_and_survives_overwrite() {
+        use super::write_json_atomic;
+        let dir = std::env::temp_dir().join(format!("unicrew_atomic_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("known.json");
+        write_json_atomic(&path, "{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+        // 既存があっても上書きできる（Windows の rename 失敗フォールバック確認）
+        write_json_atomic(&path, "{\"b\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"b\":2}");
+        // .tmp が残っていない
+        assert!(!path.with_extension("tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
