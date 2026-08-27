@@ -60,6 +60,9 @@ export function extractLastJsonObject(output: string): Record<string, unknown> |
   return last;
 }
 
+/** raw バッファの上限（末尾のみ保持）。JSON/エラーの表示には十分な量。 */
+const MAX_RAW_LENGTH = 256 * 1024;
+
 export interface CodexRcResult {
   /** 抽出できた JSON（無ければ null） */
   json: Record<string, unknown> | null;
@@ -96,6 +99,11 @@ export async function runCodexRc(
         cleanups.push(
           await onPtyData(id, (bytes) => {
             raw += decoder.decode(bytes, { stream: true });
+            // 監査R1: 出力が異常に多い CLI でメモリが膨らまないよう末尾だけ保持
+            // （JSON 行は末尾に出る。エラー表示にも末尾で十分）
+            if (raw.length > MAX_RAW_LENGTH) {
+              raw = raw.slice(-MAX_RAW_LENGTH);
+            }
           }),
         );
         cleanups.push(

@@ -18,7 +18,14 @@ struct PtyEntry {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// 同一 id の開き直しレース対策（2026-08-27 監査R1）。
+    /// 旧 reader thread の終了処理が、開き直された新しい entry を
+    /// registry から消してしまわないよう、世代が一致する時だけ remove する。
+    generation: u64,
 }
+
+/// PTY 開始ごとに増える世代カウンタ。
+static PTY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 static REGISTRY: OnceLock<Mutex<HashMap<String, PtyEntry>>> = OnceLock::new();
 
@@ -52,6 +59,7 @@ pub fn pty_open(
 ) -> Result<(), String> {
     // 同一 id が残っていれば閉じてから作り直す。
     let _ = pty_kill(id.clone());
+    let generation = PTY_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
 
     // resolve_on_path は Windows 専用（#[cfg(target_os="windows")]）。
     // 非 Windows では claude は PATH 上にあり exec が PATH 解決するため
@@ -113,6 +121,7 @@ pub fn pty_open(
     // portable-pty は同期 IO のため出力読み取りは std::thread。
     let app_r = app.clone();
     let id_r = id.clone();
+    let generation_r = generation;
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
@@ -137,9 +146,22 @@ pub fn pty_open(
                 Err(_) => break,
             }
         }
-        let _ = app_r.emit("pty://exit", PtyExit { id: id_r.clone() });
-        if let Ok(mut reg) = registry().lock() {
-            reg.remove(&id_r);
+        // 🚨 世代ガード（監査R1）: 同一 id で開き直された後に旧 reader が
+        // ここへ到達すると、無条件 remove では「動いている新しい PTY」を
+        // registry から消してしまい、以後 write/resize/kill が全部効かなくなる。
+        // exit イベントも同様に、現世代のときだけ通知する。
+        let is_current = registry()
+            .lock()
+            .ok()
+            .map(|reg| reg.get(&id_r).map(|e| e.generation) == Some(generation_r))
+            .unwrap_or(false);
+        if is_current {
+            let _ = app_r.emit("pty://exit", PtyExit { id: id_r.clone() });
+            if let Ok(mut reg) = registry().lock() {
+                if reg.get(&id_r).map(|e| e.generation) == Some(generation_r) {
+                    reg.remove(&id_r);
+                }
+            }
         }
     });
 
@@ -149,6 +171,7 @@ pub fn pty_open(
             writer,
             master: pair.master,
             child,
+            generation,
         },
     );
     Ok(())

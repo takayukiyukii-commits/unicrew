@@ -223,7 +223,8 @@ impl CliProvider for CursorProvider {
             // アプリ再起動をまたぐ再開: thread に保存された CLI session_id から始める
             cli_chat_id: Arc::new(Mutex::new(opts.resume_cli_session_id)),
             event_sender,
-            stopped: Arc::new(Mutex::new(false)),
+            stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            child: Arc::new(Mutex::new(None)),
         }))
     }
 }
@@ -237,15 +238,31 @@ pub struct CursorSessionHandle {
     /// cursor-agent 側の chat id（system.init の session_id）。2ターン目以降 --resume に使う。
     cli_chat_id: Arc<Mutex<Option<String>>>,
     event_sender: UnboundedSender<NormalizedEvent>,
-    stopped: Arc<Mutex<bool>>,
+    /// 停止フラグ（監査R1: 停止後に stdout/stderr task からイベントが流れ続けるのを止める）
+    stopped: Arc<std::sync::atomic::AtomicBool>,
+    /// 実行中の cursor-agent（監査R1: stop() で実プロセスを kill できるよう保持する。
+    /// --trust で走るため「停止したのにファイル操作が続く」を許さない）
+    child: Arc<Mutex<Option<tokio::process::Child>>>,
 }
 
 #[async_trait::async_trait]
 impl SessionHandle for CursorSessionHandle {
     async fn send_user_message(&mut self, text: &str) -> Result<(), ProviderError> {
-        if *self.stopped.lock().await {
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
+
+        // 監査R2: --trust を常時付与するため、workspace 未設定のまま起動すると
+        // UNICREW プロセスの cwd（インストール先等）を「信頼済み」として
+        // cursor-agent に渡してしまう。承認済み workspace が無ければ起動を拒否する。
+        let workspace = match self.workspace.as_ref().filter(|w| !w.trim().is_empty()) {
+            Some(w) => w.clone(),
+            None => {
+                return Err(ProviderError::Session(
+                    "Cursor はワークスペース必須です。ワークスペースを開いてから送信してください（--trust を未承認ディレクトリに付けないための制約）".into(),
+                ));
+            }
+        };
 
         let mut args: Vec<String> = vec![
             "-p".into(),
@@ -277,10 +294,8 @@ impl SessionHandle for CursorSessionHandle {
         };
 
         let mut cmd = build_cursor_command(&args);
-        if let Some(ws) = &self.workspace {
-            // Windows では wsl.exe が cwd を /mnt/<drive>/... に自動変換する（実測済み）
-            cmd.current_dir(ws);
-        }
+        // Windows では wsl.exe が cwd を /mnt/<drive>/... に自動変換する（実測済み）
+        cmd.current_dir(&workspace);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -308,14 +323,30 @@ impl SessionHandle for CursorSessionHandle {
             ProviderError::Session("cursor subprocess の stderr が取得できません".into())
         })?;
 
+        // 監査R1: stop() が実プロセスを kill できるよう handle に保持する。
+        // 前ターンの child が残っていれば reap 済みか完了済みのはずだが、
+        // 念のため置換前に kill する（1スレッド=1ターンの前提を強制）。
+        {
+            let mut guard = self.child.lock().await;
+            if let Some(mut old) = guard.take() {
+                let _ = old.start_kill();
+            }
+            *guard = Some(child);
+        }
+
         let session_id = self.session_id.clone();
         let event_sender = self.event_sender.clone();
         let chat_id_store = Arc::clone(&self.cli_chat_id);
+        let stopped_flag = Arc::clone(&self.stopped);
+        let child_for_reap = Arc::clone(&self.child);
 
         // stdout: NDJSON を1行ずつ NormalizedEvent へ
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = reader.next_line().await {
+                if stopped_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
                 for ev in parse_cursor_line(&session_id, &line) {
                     // chat id は次ターンの --resume 用に保持
                     if let NormalizedEvent::CliSessionId { cli_session_id, .. } = &ev {
@@ -323,18 +354,34 @@ impl SessionHandle for CursorSessionHandle {
                         *guard = Some(cli_session_id.clone());
                     }
                     if event_sender.send(ev).is_err() {
-                        return;
+                        break;
                     }
                 }
+            }
+            // ゾンビ防止: 出力終端（プロセス終了）後にここで reap する。
+            // stop() が先に take していれば None → no-op。
+            if let Some(mut ch) = child_for_reap.lock().await.take() {
+                let _ = ch.wait().await;
             }
         });
 
         // stderr: エラーらしき行だけ Error イベントへ（gemini と同方針）
         let session_id_err = self.session_id.clone();
         let event_sender_err = self.event_sender.clone();
+        let stopped_flag_err = Arc::clone(&self.stopped);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
+                if stopped_flag_err.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                // WSL フォールバック時、wsl.exe 自身が cursor-agent 以前に吐く
+                // 既知の無害警告は Error にしない（実測 2026-08-27:
+                // "wsl: Failed to start the systemd user session for 'root'" が
+                // 毎回出る環境があり、"failed" フィルタで誤って Error 表示になる）
+                if line.contains("Failed to start the systemd user session") {
+                    continue;
+                }
                 let lower = line.to_lowercase();
                 if lower.contains("error")
                     || lower.contains("failed")
@@ -346,11 +393,6 @@ impl SessionHandle for CursorSessionHandle {
                     });
                 }
             }
-        });
-
-        // ゾンビ防止
-        tokio::spawn(async move {
-            let _ = child.wait().await;
         });
 
         Ok(())
@@ -366,7 +408,15 @@ impl SessionHandle for CursorSessionHandle {
     }
 
     async fn stop(&mut self) -> Result<(), ProviderError> {
-        *self.stopped.lock().await = true;
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // 監査R1: 実行中の cursor-agent を実際に止める（--trust で走るため、
+        // 停止後もツール実行が続くことを許さない）。
+        let mut guard = self.child.lock().await;
+        if let Some(mut ch) = guard.take() {
+            let _ = ch.start_kill();
+            let _ = ch.wait().await;
+        }
         Ok(())
     }
 }
