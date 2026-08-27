@@ -169,6 +169,7 @@ export function SettingsModal({
     kiro: { status: null, stage: "idle", line: "" },
     qwen: { status: null, stage: "idle", line: "" },
     kimi: { status: null, stage: "idle", line: "" },
+    grok: { status: null, stage: "idle", line: "" },
   };
   const [acpStates, setAcpStates] =
     useState<Record<AcpCliProvider, AcpCliState>>(initialAcpState);
@@ -205,6 +206,7 @@ export function SettingsModal({
         acpCliStatus("kiro"),
         acpCliStatus("qwen"),
         acpCliStatus("kimi"),
+        acpCliStatus("grok"),
       ]);
       const val = <T,>(i: number): T | null =>
         results[i].status === "fulfilled"
@@ -231,6 +233,7 @@ export function SettingsModal({
         kiro: { ...prev.kiro, status: acpAt(8) ?? prev.kiro.status },
         qwen: { ...prev.qwen, status: acpAt(9) ?? prev.qwen.status },
         kimi: { ...prev.kimi, status: acpAt(10) ?? prev.kimi.status },
+        grok: { ...prev.grok, status: acpAt(11) ?? prev.grok.status },
       }));
     } finally {
       setRefreshing(false);
@@ -1210,6 +1213,13 @@ export function SettingsModal({
                 description: tr("settings.acp.kimi.desc"),
                 installHelpUrl: "https://github.com/moonshotai/kimi-cli",
                 kind: "manual",
+              },
+              {
+                provider: "grok",
+                label: "Grok CLI",
+                description: tr("settings.acp.grok.desc"),
+                installHelpUrl: "https://docs.x.ai/build/cli/reference",
+                kind: "auto",
               },
             ];
             const connected = acpRows.filter(

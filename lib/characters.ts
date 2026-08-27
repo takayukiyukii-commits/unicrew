@@ -94,6 +94,22 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     isTemplate: true,
   },
   {
+    id: "tmpl-grok-normal",
+    name: "Grok（normal）",
+    roleTag: "Grok CLI（xAI 公式）",
+    emoji: "⚫",
+    iconName: undefined,
+    avatarPath: null,
+    accentColor: "#0f1419",
+    description:
+      "xAI 公式 Grok CLI（@xai-official/grok）を ACP 経由で動かす。認証は `grok login` のデバイスコード方式で CLI 側に完結（UNICREW 側にキー管理不要）。grok-4.6（コンテキスト50万トークン）。Windows ネイティブ対応。",
+    systemPrompt: "",
+    defaultModel: "claude-sonnet-4-6",
+    personalityId: null,
+    provider: "grok",
+    isTemplate: true,
+  },
+  {
     id: "tmpl-auto",
     name: "おまかせ",
     roleTag: "自動アサイン",

@@ -256,7 +256,8 @@ export type Provider =
   | "codex-acp"
   | "kiro"
   | "qwen"
-  | "kimi";
+  | "kimi"
+  | "grok";
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
@@ -268,6 +269,7 @@ export const PROVIDER_LABELS: Record<Provider, string> = {
   kiro: "Kiro",
   qwen: "Qwen",
   kimi: "Kimi",
+  grok: "Grok",
 };
 
 export const PROVIDER_COLORS: Record<Provider, string> = {
@@ -280,6 +282,7 @@ export const PROVIDER_COLORS: Record<Provider, string> = {
   kiro: "#7c3aed",
   qwen: "#a855f7",
   kimi: "#06b6d4",
+  grok: "#0f1419",
 };
 
 /**

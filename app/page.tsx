@@ -1850,7 +1850,8 @@ export default function Page() {
         p.provider === "codex-acp" ||
         p.provider === "kiro" ||
         p.provider === "qwen" ||
-        p.provider === "kimi"
+        p.provider === "kimi" ||
+        p.provider === "grok"
       ) {
         acpProvidersInPreset.push(p.provider);
       }
