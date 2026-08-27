@@ -210,15 +210,23 @@ export function AddonsSection({
     setLoading(true);
     setError(null);
     try {
+      // 監査R3: 各取得の失敗を握りつぶすと「0件」と誤表示され、既存アドオンが
+      // 読めていないのに正常に見える。失敗したカテゴリ名を集めて後で通知する。
+      const loadErrors: string[] = [];
+      const guard = <T,>(label: string, pr: Promise<T[]>): Promise<T[]> =>
+        pr.catch((e) => {
+          loadErrors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+          return [] as T[];
+        });
       const [cp, cs, cm, xp, xs, xm, catalog, xcatalog] = await Promise.all([
-        listClaudePlugins().catch(() => []),
-        listClaudeSkills(workspace ?? null).catch(() => []),
-        listClaudeMcp().catch(() => []),
-        listCodexPlugins().catch(() => []),
-        listCodexSkills().catch(() => []),
-        listCodexMcp().catch(() => []),
-        listClaudeMarketplaceCatalog().catch(() => []),
-        listCodexMarketplaceCatalog().catch(() => []),
+        guard("Claude plugins", listClaudePlugins()),
+        guard("Claude skills", listClaudeSkills(workspace ?? null)),
+        guard("Claude MCP", listClaudeMcp()),
+        guard("Codex plugins", listCodexPlugins()),
+        guard("Codex skills", listCodexSkills()),
+        guard("Codex MCP", listCodexMcp()),
+        guard("Claude marketplace", listClaudeMarketplaceCatalog()),
+        guard("Codex marketplace", listCodexMarketplaceCatalog()),
       ]);
       setInstalled({
         "claude-plugin": cp,
@@ -231,12 +239,18 @@ export function AddonsSection({
       });
       setMarketplaceCatalog(catalog);
       setCodexCatalog(xcatalog);
+      // 監査R3: 一部カテゴリの取得に失敗していたら、空表示のまま黙らせずに通知する
+      if (loadErrors.length > 0) {
+        setError(
+          tr("addons.partialLoadError", { detail: loadErrors.join(" / ") }),
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [workspace]);
+  }, [workspace, tr]);
 
   useEffect(() => {
     void reload();
@@ -672,7 +686,8 @@ export function AddonsSection({
                         : undefined
                     }
                     onUninstall={
-                      it.source === "claude" && it.kind !== "skill"
+                      (it.source === "claude" && it.kind !== "skill") ||
+                      (it.source === "codex" && it.kind === "mcp")
                         ? () => void onUninstallItem(it)
                         : undefined
                     }

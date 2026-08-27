@@ -1134,10 +1134,22 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let cli_attempt = cmd.output().await;
-    if let Ok(output) = cli_attempt {
-        if output.status.success() {
-            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+    // 監査R3: CLI 失敗の原因（起動失敗/exit/stderr）を保持し、フォールバックも
+    // 失敗したときのエラーに併記する（"claude 不在" 等の本当の原因を失わない）。
+    let mut cli_reason = String::new();
+    match cmd.output().await {
+        Ok(output) => {
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+            cli_reason = format!(
+                "claude CLI（exit={}）: {}",
+                output.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(e) => {
+            cli_reason = format!("claude CLI を起動できませんでした: {}", e);
         }
     }
     // フォールバック: installed_plugins.json から直接除去
@@ -1148,7 +1160,8 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
         .join("installed_plugins.json");
     if !path.exists() {
         return Err(format!(
-            "claude CLI 経由のアンインストールに失敗し、{} も存在しません",
+            "アンインストールに失敗しました。{}／さらに {} も存在しません",
+            cli_reason,
             path.display()
         ));
     }
@@ -1162,8 +1175,8 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
     }
     if !removed {
         return Err(format!(
-            "プラグイン '{}' が installed_plugins.json に見つかりませんでした",
-            id_trim
+            "アンインストールに失敗しました。{}／プラグイン '{}' は installed_plugins.json にも見つかりませんでした",
+            cli_reason, id_trim
         ));
     }
     let pretty = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
