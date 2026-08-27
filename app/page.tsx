@@ -52,11 +52,6 @@ import {
   saveRoutines,
   shouldFire,
 } from "@/lib/routines";
-import {
-  generateMobileToken,
-  MOBILE_TOKEN_LS_KEY,
-  type MobileStateSnapshot,
-} from "@/lib/mobile-bridge";
 import { remoteNodeManager } from "@/lib/remote-node";
 import { sendLaunchPing } from "@/lib/telemetry";
 import {
@@ -465,8 +460,6 @@ export default function Page() {
   const [mobileOpen, setMobileOpen] = useState(false);
   /** 公式 Remote Control ランチャー */
   const [rcOpen, setRcOpen] = useState(false);
-  /** Mobile bridge: auth POST 完了後に true。snapshot push を 401 させないため。 */
-  const [mobileBridgeReady, setMobileBridgeReady] = useState(false);
   /** クラウドリレー（Phase 2）の現在のペアリングコード。null なら未起動。 */
   const [cloudPairCode, setCloudPairCode] = useState<string | null>(null);
   const cloudChannelRef = useRef<RealtimeChannel | null>(null);
@@ -947,69 +940,6 @@ export default function Page() {
       cloudHeartbeatRef.current = null;
     };
   }, [cloudPairCode]);
-
-  // Phase 2 クラウドリレーの状態 snapshot push は、
-  // primaryStreaming/activeThread が render scope で計算された後の場所で別途配置する。
-
-  /**
-   * モバイルA案: PC側React のmobile bridge ループ。
-   *
-   * 1. 起動時に localStorage から token を取り出し（無ければ生成）→ サーバ側 _store にも登録
-   * 2. 5秒ごとに `/api/mobile/inbox` をポーリングしてスマホ投稿を取り出し、
-   *    アクティブスレッドに `handleSendForThread` で流す
-   * 3. 状態変化があれば `/api/mobile/state` に snapshot を push
-   *
-   * Next.js dev モード前提（Tauri export build では API Route 無効）。
-   */
-  useEffect(() => {
-    if (!hydrated) return;
-    let token = localStorage.getItem(MOBILE_TOKEN_LS_KEY);
-    if (!token) {
-      token = generateMobileToken();
-      localStorage.setItem(MOBILE_TOKEN_LS_KEY, token);
-    }
-    void fetch("/api/mobile/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    })
-      .then(() => setMobileBridgeReady(true))
-      .catch(() => {});
-
-    const pollInbox = async () => {
-      try {
-        const r = await fetch(`/api/mobile/inbox?t=${token}`, {
-          cache: "no-store",
-        });
-        if (!r.ok) return;
-        const j = (await r.json()) as {
-          ok: boolean;
-          items: { threadId: string; text: string }[];
-        };
-        if (!j.ok || !j.items || j.items.length === 0) return;
-        const active = threadsRef.current.find(
-          (t) => t.id === activeIdRef.current,
-        );
-        for (const item of j.items) {
-          const target =
-            item.threadId === "active"
-              ? active
-              : threadsRef.current.find((t) => t.id === item.threadId);
-          if (!target) continue;
-          void handleSendForThread(item.text, target);
-        }
-      } catch {
-        // ignore
-      }
-    };
-    // モーダルを開いてる間は反応性優先で 5 秒、閉じてる時は dev コンソール圧縮のため 30 秒。
-    // スマホが実際に投稿してきても 30 秒以内には吸い上げる。
-    const intervalMs = mobileOpen ? 5000 : 30000;
-    const inboxId = setInterval(pollInbox, intervalMs);
-    void pollInbox();
-    return () => clearInterval(inboxId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, mobileOpen]);
 
   /**
    * アイデア14: ルーティーン自動発火ループ。
@@ -2972,47 +2902,8 @@ ${command}
     accentColor: settings.userAccentColor,
   };
 
-  // モバイルA案: 状態 ref と /api/mobile/state push（render毎に最新化）
-  activeIdRef.current = activeId;
   // クラウドリレーは別の useEffect 内 setInterval で heartbeat する（subscribe 非同期対応）
-  if (typeof window !== "undefined" && hydrated && mobileBridgeReady) {
-    const token = localStorage.getItem(MOBILE_TOKEN_LS_KEY);
-    if (token) {
-      const lastAssistant = activeThread
-        ? [...activeThread.messages]
-            .reverse()
-            .find((m) => m.role === "assistant")
-        : null;
-      const snap: MobileStateSnapshot = {
-        updatedAt: Date.now(),
-        activeThreadId: activeThread?.id ?? null,
-        activeThreadTitle: activeThread?.title ?? null,
-        threads: threads
-          .slice()
-          .sort((a, b) => b.updatedAt - a.updatedAt)
-          .slice(0, 15)
-          .map((t) => ({
-            id: t.id,
-            title: t.title,
-            updatedAt: t.updatedAt,
-          })),
-        lastAssistantPreview: lastAssistant?.content?.slice(0, 2000) ?? null,
-        isStreaming: primaryStreaming,
-      };
-      // 連投を抑えるため簡易 throttle（1秒以内の連続呼び出しは無視）
-      const last = (window as unknown as { __unicrew_mobile_last?: number })
-        .__unicrew_mobile_last;
-      if (!last || Date.now() - last > 1000) {
-        (window as unknown as { __unicrew_mobile_last?: number })
-          .__unicrew_mobile_last = Date.now();
-        void fetch(`/api/mobile/state?t=${token}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(snap),
-        }).catch(() => {});
-      }
-    }
-  }
+  activeIdRef.current = activeId;
   // Command Palette が表示するコマンド配列。毎レンダ再計算（state を捕まえるため）。
   const paletteCommands: Command[] = (() => {
     const list: Command[] = [

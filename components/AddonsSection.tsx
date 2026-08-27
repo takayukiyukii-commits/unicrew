@@ -37,6 +37,7 @@ import {
   applyAddonUpdate,
   checkAddonUpdates,
   installClaudePlugin,
+  installCodexPlugin,
   listClaudeMarketplaceCatalog,
   listClaudeMcp,
   listCodexMcp,
@@ -50,6 +51,7 @@ import {
   toggleClaudeMcp,
   toggleCodexMcp,
   uninstallClaudePlugin,
+  uninstallCodexPlugin,
   type AddonItem,
   type AddonSource,
   type AddonUpdateItem,
@@ -58,6 +60,7 @@ import {
 import {
   CURATED_ADDONS,
   uniProductsByCategory,
+  UNI_PRODUCTS,
   type CuratedAddon,
   type UniCategory,
 } from "@/lib/addons";
@@ -187,7 +190,12 @@ export function AddonsSection({
   const [marketplaceCatalog, setMarketplaceCatalog] = useState<AddonItem[]>([]);
   const [codexCatalog, setCodexCatalog] = useState<AddonItem[]>([]);
   const [pendingToggle, setPendingToggle] = useState<string | null>(null);
-  const [pendingInstall, setPendingInstall] = useState<string | null>(null);
+  // 監査LOW（2026-08-28 Codex）: id だけだと Claude/Codex で同名 id が衝突した
+  // ときに別ソースのカードまで pending 表示になるため source も持つ。
+  const [pendingInstall, setPendingInstall] = useState<{
+    src: "claude" | "codex";
+    id: string;
+  } | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -289,11 +297,30 @@ export function AddonsSection({
 
   const onInstallPlugin = useCallback(
     async (id: string) => {
-      setPendingInstall(id);
+      setPendingInstall({ src: "claude", id });
       setError(null);
       setInfo(null);
       try {
         const result = await installClaudePlugin(id);
+        setInfo(tr("addons.installedToast", { id, detail: result ? `: ${result.slice(0, 200)}` : "" }));
+        await reload();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPendingInstall(null);
+      }
+    },
+    [reload, tr],
+  );
+
+  /** Codex プラグインの1クリック追加（`codex plugin add`・2026-08-28 実装）。 */
+  const onInstallCodexPlugin = useCallback(
+    async (id: string) => {
+      setPendingInstall({ src: "codex", id });
+      setError(null);
+      setInfo(null);
+      try {
+        const result = await installCodexPlugin(id);
         setInfo(tr("addons.installedToast", { id, detail: result ? `: ${result.slice(0, 200)}` : "" }));
         await reload();
       } catch (e) {
@@ -445,8 +472,9 @@ export function AddonsSection({
 
   const onUninstallItem = useCallback(
     async (item: AddonItem) => {
-      // Codex MCP は対応済（codex mcp remove 経由）。それ以外の Codex（plugin/skill）は Phase D 留保
-      if (item.source === "codex" && item.kind !== "mcp") {
+      // Codex MCP（codex mcp remove）・Codex プラグイン（codex plugin remove）は対応済み。
+      // Codex スキルのみ手動（配置ディレクトリ直削除）のまま。
+      if (item.source === "codex" && item.kind === "skill") {
         setError(tr("addons.uninstallCodexUnsupported"));
         return;
       }
@@ -460,6 +488,9 @@ export function AddonsSection({
         } else if (item.kind === "mcp") {
           await removeClaudeMcp(item.name);
           setInfo(tr("addons.removedClaudeMcp", { name: item.name }));
+        } else if (item.kind === "plugin" && item.source === "codex") {
+          const r = await uninstallCodexPlugin(item.id);
+          setInfo(tr("addons.removedPlugin", { name: item.name, detail: r.slice(0, 200) }));
         } else if (item.kind === "plugin") {
           const r = await uninstallClaudePlugin(item.id);
           setInfo(tr("addons.removedPlugin", { name: item.name, detail: r.slice(0, 200) }));
@@ -586,8 +617,12 @@ export function AddonsSection({
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--color-border)] pb-2">
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          // uni-series は「公開中（live）の実数」を出す。旧実装は null → "Soon"
+          // バッジ固定だったが、販売中製品が並んだため件数表示に統一（2026-08-28）。
           const count =
-            tab.id === "uni-series" ? null : installed[tab.id].length;
+            tab.id === "uni-series"
+              ? UNI_PRODUCTS.filter((p) => p.status === "live").length
+              : installed[tab.id].length;
           const isActive = active === tab.id;
           return (
             <button
@@ -602,29 +637,16 @@ export function AddonsSection({
             >
               <Icon size={13} />
               {tr(tab.labelKey)}
-              {count !== null ? (
-                <span
-                  className={clsx(
-                    "ml-0.5 px-1.5 rounded-full text-[10.5px] font-mono",
-                    isActive
-                      ? "bg-white/25 text-white"
-                      : "bg-[var(--color-surface)] text-[var(--color-muted)]",
-                  )}
-                >
-                  {count}
-                </span>
-              ) : (
-                <span
-                  className={clsx(
-                    "ml-0.5 px-1.5 rounded-full text-[10px] font-medium uppercase tracking-wider",
-                    isActive
-                      ? "bg-white/25 text-white"
-                      : "bg-amber-100 text-amber-700",
-                  )}
-                >
-                  {tr("addons.soon")}
-                </span>
-              )}
+              <span
+                className={clsx(
+                  "ml-0.5 px-1.5 rounded-full text-[10.5px] font-mono",
+                  isActive
+                    ? "bg-white/25 text-white"
+                    : "bg-[var(--color-surface)] text-[var(--color-muted)]",
+                )}
+              >
+                {count}
+              </span>
             </button>
           );
         })}
@@ -710,11 +732,15 @@ export function AddonsSection({
                 key={c.id}
                 item={c}
                 locale={locale}
-                installing={pendingInstall === c.id}
+                installing={
+                  pendingInstall?.id === c.id && pendingInstall.src === c.source
+                }
                 onInstall={
                   c.kind === "plugin" && c.source === "claude"
                     ? () => void onInstallPlugin(c.id)
-                    : undefined
+                    : c.kind === "plugin" && c.source === "codex"
+                      ? () => void onInstallCodexPlugin(c.id)
+                      : undefined
                 }
               />
             ))}
@@ -728,24 +754,23 @@ export function AddonsSection({
           catalog={marketplaceCatalog}
           installed={installed["claude-plugin"]}
           locale={locale}
-          pendingInstall={pendingInstall}
+          pendingInstall={
+            pendingInstall?.src === "claude" ? pendingInstall.id : null
+          }
           onInstall={(id) => void onInstallPlugin(id)}
         />
       )}
-      {/* Codex プラグインタブ：bundled-marketplaces から全件 */}
+      {/* Codex プラグインタブ：bundled-marketplaces から全件。
+          `codex plugin add` が公式提供された（v0.147 実測）ため1クリック追加できる。 */}
       {active === "codex-plugin" && codexCatalog.length > 0 && (
         <MarketplaceCatalogPanel
           catalog={codexCatalog}
           installed={installed["codex-plugin"]}
           locale={locale}
-          pendingInstall={null}
-          onInstall={(id) => {
-            // Codex CLI には Claude の `/plugin install` 相当が公式提供されていないため、
-            // 1クリックは MCP（add_codex_mcp 経由）に限定し、プラグインは
-            // ~/.codex/config.toml 直編集が必要であることを明示する。
-            // 「Phase D」みたいな曖昧な文言で詰まらせない方針。
-            setError(tr("addons.codexPluginInstallNote", { id }));
-          }}
+          pendingInstall={
+            pendingInstall?.src === "codex" ? pendingInstall.id : null
+          }
+          onInstall={(id) => void onInstallCodexPlugin(id)}
         />
       )}
 

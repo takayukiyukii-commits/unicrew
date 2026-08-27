@@ -344,15 +344,6 @@ export function UniMcpModal({ open, onClose }: Props) {
             <X size={12} />
             {t("mcp.disconnectAll")}
           </button>
-          <a
-            href="https://drop.uni-core.jp/mcp"
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
-          >
-            {t("mcp.catalog")}
-            <ExternalLink size={11} />
-          </a>
         </div>
 
         {error && (

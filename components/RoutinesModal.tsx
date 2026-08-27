@@ -263,7 +263,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                       <Trash2 size={11} />
                     </button>
                   </div>
-                  <div className="mt-1 text-[11px] text-[var(--color-muted)] line-clamp-2">
+                  <div className="mt-1 text-[11px] text-[var(--color-muted)] whitespace-pre-wrap break-words">
                     {r.prompt}
                   </div>
                   {r.schedule.lastFiredDay && (

@@ -1185,20 +1185,6 @@ export async function graphifyUpdate(workspace: string): Promise<string> {
   return invoke<string>("graphify_update", { workspace });
 }
 
-/**
- * PC の LAN IP（IPv4）を返す（スマホ連携モーダル用）。
- * 取得失敗時は null を返してフォールバック表示にさせる。
- */
-export async function getLanIp(): Promise<string | null> {
-  if (!isTauri()) return null;
-  try {
-    const invoke = await loadInvoke();
-    return await invoke<string>("get_lan_ip");
-  } catch {
-    return null;
-  }
-}
-
 export async function addClaudeMcp(req: McpAddRequest): Promise<void> {
   if (!isTauri()) throw new Error("MCP 追加は Tauri 環境のみ対応");
   const invoke = await loadInvoke();
@@ -1215,6 +1201,20 @@ export async function installClaudePlugin(id: string): Promise<string> {
   if (!isTauri()) throw new Error("プラグイン追加は Tauri 環境のみ対応");
   const invoke = await loadInvoke();
   return invoke<string>("install_claude_plugin", { id });
+}
+
+/** Codex プラグインを marketplace からインストール（`codex plugin add <id>`）。 */
+export async function installCodexPlugin(id: string): Promise<string> {
+  if (!isTauri()) throw new Error("プラグイン追加は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("install_codex_plugin", { id });
+}
+
+/** Codex プラグインを削除（`codex plugin remove <id>`）。 */
+export async function uninstallCodexPlugin(id: string): Promise<string> {
+  if (!isTauri()) throw new Error("プラグイン削除は Tauri 環境のみ対応");
+  const invoke = await loadInvoke();
+  return invoke<string>("uninstall_codex_plugin", { id });
 }
 
 export async function uninstallClaudePlugin(id: string): Promise<string> {

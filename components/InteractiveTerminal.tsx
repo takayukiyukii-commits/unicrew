@@ -52,6 +52,7 @@ export function InteractiveTerminal({
   command,
   onOutput,
   onExited,
+  onCwd,
 }: {
   workspace?: string | null;
   /**
@@ -74,6 +75,11 @@ export function InteractiveTerminal({
   /** PTY プロセス終了時に親へ通知（remote-control の状態表示用）。 */
   onExited?: () => void;
   /**
+   * PTY を実際に開いた作業ディレクトリを親へ通知（ペインヘッダーの表示用）。
+   * workspace 切替でも PTY は維持されるため、表示は「実際の cwd」を正とする。
+   */
+  onCwd?: (cwd: string | null) => void;
+  /**
    * 起動プログラムの直接指定（ターミナルのマルチAI対応）。指定時は kind の
    * 既定プログラム決定を上書きする。**マウント時の値で固定**（paneKey ごとに
    * 1 CLI の想定。同一ペインでの差し替えは想定しない＝PTY は再起動しない）。
@@ -87,6 +93,18 @@ export function InteractiveTerminal({
   onOutputRef.current = onOutput;
   const onExitedRef = useRef<typeof onExited>(onExited);
   onExitedRef.current = onExited;
+  const onCwdRef = useRef<typeof onCwd>(onCwd);
+  onCwdRef.current = onCwd;
+  /**
+   * 【2026-08-28 修正】workspace は effect の依存から外し ref で参照する。
+   * 旧実装は依存に workspace が入っており、アクティブスレッドの切替等で
+   * workspace 値が変わるたびに cleanup → ptyKill が走り、
+   * 「他の画面を見ている間にターミナルが勝手に閉じる（セッションが死ぬ）」
+   * 直接原因になっていた。VS Code と同じく、開いた後のターミナルは
+   * プロジェクト切替でも維持し、cwd は「PTY を開く瞬間」の workspace で確定する。
+   */
+  const workspaceRef = useRef<typeof workspace>(workspace);
+  workspaceRef.current = workspace;
   // command はマウント時の値で固定（参照変化で PTY を再起動させない）
   const commandRef = useRef(command);
   // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
@@ -246,7 +264,7 @@ export function InteractiveTerminal({
     let fitTimer: ReturnType<typeof setTimeout> | undefined;
     let compCleanup: (() => void) | undefined;
     const scrollDisposables: Array<{ dispose(): void }> = [];
-    // workspace 切替等で PTY を開き直す際、前セッションのバー状態を持ち越さない
+    // ペイン再マウントで PTY を開き直す際、前セッションのバー状態を持ち越さない
     setScroll({ top: 0, max: 0, rows: 0 });
     setTuiMouse(false);
 
@@ -643,8 +661,11 @@ export function InteractiveTerminal({
                   if (!(e.ctrlKey || e.metaKey)) return;
                   // 設計書③: workspace 直下に無ければ Rust 側で配下を探索し、
                   // 見つからなければトースト表示（無言握り潰しをやめる）。
-                  // workspace が null の時は PTY の cwd を基準にフォールバックする。
-                  void openFileSmart(mt.openPath, workspace ?? null, ptyCwd).catch(
+                  // 監査MED（2026-08-28 Codex）: リンク解決は「このペインの PTY が
+                  // 開いた世界」＝ptyCwd で行う。現在の workspace を使うと、
+                  // workspace 切替後に古い PTY 出力の相対パスが新 workspace 側へ
+                  // 解決されてしまう（PTY を凍結したのだからリンク基準も凍結する）。
+                  void openFileSmart(mt.openPath, ptyCwd, ptyCwd).catch(
                     () => {
                       /* openFileSmart 内でトースト表示済み */
                     },
@@ -762,9 +783,19 @@ export function InteractiveTerminal({
         );
       });
 
+      // フォント＆レイアウト確定後に確定 fit してから PTY を開く。
+      // これで「開いた直後から打った文字と表示位置がズレる」現象を防ぐ。
+      await fitBeforeOpen();
+      if (disposed) return;
+
+      // cwd は「PTY を開く瞬間」（＝初回表示時）の workspace で確定する。
+      // fitBeforeOpen が表示まで待つので、ターミナルビューを開いた時点の
+      // アクティブ workspace が反映される。以後 workspace が変わっても
+      // この PTY は開き直さない（セッション維持・2026-08-28 修正）。
       // workspace が無いと PTY が親プロセス(unicrew.exe)の cwd を継承してしまい
       // C: 基点で開いてしまう。明示的にデフォルト workspace へフォールバックする。
-      let cwd = workspace && workspace.trim() ? workspace : null;
+      const wsAtOpen = workspaceRef.current;
+      let cwd = wsAtOpen && wsAtOpen.trim() ? wsAtOpen : null;
       if (!cwd) {
         try {
           cwd = await defaultWorkspacePath();
@@ -774,11 +805,11 @@ export function InteractiveTerminal({
       }
 
       ptyCwd = cwd;
-
-      // フォント＆レイアウト確定後に確定 fit してから PTY を開く。
-      // これで「開いた直後から打った文字と表示位置がズレる」現象を防ぐ。
-      await fitBeforeOpen();
-      if (disposed) return;
+      try {
+        onCwdRef.current?.(cwd);
+      } catch {
+        /* 表示用フックの失敗でターミナルを壊さない */
+      }
 
       // 設計書⑤: 起動プログラムの決定。shell は Rust 側でOS別に解決する。
       let program = "claude";
@@ -1036,7 +1067,10 @@ export function InteractiveTerminal({
         /* noop */
       }
     };
-  }, [workspace, paneKey, kind]);
+    // workspace は意図的に依存へ入れない（ref 参照）。入れると workspace 変化の
+    // たびに ptyKill → 開き直しが走り、ターミナルが勝手に閉じる（2026-08-28 根治）。
+    // nudgeTuiThumb は useCallback([]) の恒等安定な関数（入れても再実行されない）。
+  }, [paneKey, kind, nudgeTuiThumb]);
 
   if (!isTauri()) {
     return (

@@ -10,6 +10,17 @@
   --color-accent-soft: #eff6ff;
 }
 
+/* Tailwind v4 の preflight は button { cursor: default }（v3 の pointer を廃止）。
+   「AIの選択にカーソル（指マーク）が出ない」というユーザー報告（2026-08-28）の
+   原因はこれ。公式移行ガイドの逆転パッチで、押せるボタン・サマリーには
+   pointer を出す（無効ボタンは default のまま）。 */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+select:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
 html, body {
   background: var(--color-bg);
   color: var(--color-text);

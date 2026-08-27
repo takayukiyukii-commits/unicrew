@@ -1008,9 +1008,9 @@ fn write_json_atomic(path: &std::path::Path, contents: &str) -> Result<(), Strin
 // ---------- プラグイン/マーケットプレイス入力の検証（2026-08-27 監査） ----------
 //
 // build_silent_command は Command::new+.arg なので OS シェル注入は起きないが、
-// (a) id を claude CLI の `--print "/plugin install <id>"` 文字列に埋めるため、
-//     改行・スラッシュコマンド・制御文字が混じると CLI 内部パーサが別コマンドとして
-//     解釈しうる（Codex 監査 HIGH）。
+// (a) id は `claude plugin install <id>` の引数として渡す（2026-08-28 に --print
+//     文字列埋め込みを廃止）。引数分離でも改行・制御文字は CLI 側の解釈事故に
+//     なりうるため、検証は引き続き行う（Codex 監査 HIGH の再発防止）。
 // (b) marketplace の id を `marketplaces/<id>` に join するため、`..` やパス区切り・
 //     絶対パスで clone 先が想定外の場所に化ける（Path::join は `..` を正規化せず、
 //     絶対パスは base を丸ごと置換することを実測。両系統一致 HIGH）。
@@ -1092,16 +1092,24 @@ fn validate_github_repo(repo: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// claude CLI 経由でプラグインをインストール。
-/// 内部で `claude --print "/plugin install <id>"` を CREATE_NO_WINDOW で spawn。
-/// 成功時は stdout テキストを返す（呼び出し側でログ表示用）。
-#[tauri::command]
-async fn install_claude_plugin(id: String) -> Result<String, String> {
-    let id_trim = id.trim();
-    validate_plugin_id(id_trim)?;
+/// `claude plugin <subcommand> <id>` を実行する共通処理。
+///
+/// 🚨【2026-08-28 根治】旧実装は `claude --print "/plugin install <id>"` だった。
+/// `--print` はヘッドレスの1回対話であり、スラッシュコマンドは実行されず
+/// **モデルが文章で返答して exit=0 で終わるだけ**（実測）。そのため
+/// 「くるくる→成功トースト→でも一覧に出ない（何も入っていない）」という
+/// ユーザー報告の直接原因になっていた。本物のサブコマンド
+/// `claude plugin install|uninstall|update` を使う。
+///
+/// 実測（2026-08-28・パイプ無しで計測）: 失敗時は exit=1 を正しく返す。
+/// 念のため出力の失敗マーカー「✘」も補助判定に使う（成功出力には出ない）。
+/// ※当初「exit=0 で偽成功」と観測したのは `| head` 越しに測った誤り（head の
+///   終了コードを拾っていた）。
+async fn run_claude_plugin_cmd(subcommand: &str, id: &str) -> Result<String, String> {
     let mut cmd = build_silent_command("claude");
-    cmd.arg("--print")
-        .arg(format!("/plugin install {}", id_trim))
+    cmd.arg("plugin")
+        .arg(subcommand)
+        .arg(id)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1111,15 +1119,27 @@ async fn install_claude_plugin(id: String) -> Result<String, String> {
         .map_err(|e| format!("claude CLI を起動できませんでした: {}", e))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
+    let combined = format!("{}\n{}", stdout.trim(), stderr.trim());
+    let failed_marker = combined.contains('✘');
+    if !output.status.success() || failed_marker {
         return Err(format!(
-            "プラグイン追加に失敗しました（exit={}）\nstdout: {}\nstderr: {}",
+            "claude plugin {} が失敗しました（exit={}）\n{}",
+            subcommand,
             output.status.code().unwrap_or(-1),
-            stdout.trim(),
-            stderr.trim()
+            combined.trim()
         ));
     }
     Ok(stdout)
+}
+
+/// claude CLI 経由でプラグインをインストール。
+/// 内部で `claude plugin install <id>` を CREATE_NO_WINDOW で spawn。
+/// 成功時は stdout テキストを返す（呼び出し側でログ表示用）。
+#[tauri::command]
+async fn install_claude_plugin(id: String) -> Result<String, String> {
+    let id_trim = id.trim();
+    validate_plugin_id(id_trim)?;
+    run_claude_plugin_cmd("install", id_trim).await
 }
 
 /// claude CLI 経由でプラグインをアンインストール。
@@ -1128,28 +1148,16 @@ async fn install_claude_plugin(id: String) -> Result<String, String> {
 async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
     let id_trim = id.trim().to_string();
     validate_plugin_id(&id_trim)?;
-    let mut cmd = build_silent_command("claude");
-    cmd.arg("--print")
-        .arg(format!("/plugin uninstall {}", id_trim))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    // 本物のサブコマンド `claude plugin uninstall` を使う（2026-08-28 根治。
+    // 旧 `--print "/plugin uninstall"` はモデルへの文章になるだけで実行されず、
+    // exit=0 の偽成功で early return し、フォールバック削除にも到達しなかった）。
     // 監査R3: CLI 失敗の原因（起動失敗/exit/stderr）を保持し、フォールバックも
     // 失敗したときのエラーに併記する（"claude 不在" 等の本当の原因を失わない）。
-    let mut cli_reason = String::new();
-    match cmd.output().await {
-        Ok(output) => {
-            if output.status.success() {
-                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-            }
-            cli_reason = format!(
-                "claude CLI（exit={}）: {}",
-                output.status.code().unwrap_or(-1),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
+    let cli_reason: String;
+    match run_claude_plugin_cmd("uninstall", &id_trim).await {
+        Ok(stdout) => return Ok(stdout),
         Err(e) => {
-            cli_reason = format!("claude CLI を起動できませんでした: {}", e);
+            cli_reason = e;
         }
     }
     // フォールバック: installed_plugins.json から直接除去
@@ -1185,6 +1193,54 @@ async fn uninstall_claude_plugin(id: String) -> Result<String, String> {
         "プラグイン '{}' を installed_plugins.json から削除しました（CLI 経由は不可だったためファイル直編集）",
         id_trim
     ))
+}
+
+/// `codex plugin <add|remove> <id>` を実行する共通処理。
+///
+/// 実測（2026-08-28・codex v0.147）: `codex plugin add/remove` が公式に実在し、
+/// `PLUGIN@MARKETPLACE` 形式を受け付ける。失敗時は exit=1 を正しく返す
+/// （存在しないプラグインで「Error: plugin ... was not found」＋ exit=1 を確認）。
+/// ※以前コード内に書かれていた「Codex CLI には install 相当が無い」は旧版の話。
+async fn run_codex_plugin_cmd(subcommand: &str, id: &str) -> Result<String, String> {
+    let mut cmd = build_silent_command("codex");
+    cmd.arg("plugin")
+        .arg(subcommand)
+        .arg(id)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("codex CLI を起動できませんでした: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "codex plugin {} が失敗しました（exit={}）\n{}\n{}",
+            subcommand,
+            output.status.code().unwrap_or(-1),
+            stdout.trim(),
+            stderr.trim()
+        ));
+    }
+    Ok(stdout)
+}
+
+/// codex CLI 経由でプラグインをインストール（`codex plugin add <id>`）。
+#[tauri::command]
+async fn install_codex_plugin(id: String) -> Result<String, String> {
+    let id_trim = id.trim();
+    validate_plugin_id(id_trim)?;
+    run_codex_plugin_cmd("add", id_trim).await
+}
+
+/// codex CLI 経由でプラグインを削除（`codex plugin remove <id>`）。
+#[tauri::command]
+async fn uninstall_codex_plugin(id: String) -> Result<String, String> {
+    let id_trim = id.trim();
+    validate_plugin_id(id_trim)?;
+    run_codex_plugin_cmd("remove", id_trim).await
 }
 
 /// 任意 marketplace（GitHub repo）を known_marketplaces.json に登録 + git clone。
@@ -1629,6 +1685,65 @@ fn parse_marketplace_json(
     out
 }
 
+/// `codex plugin marketplace list` の出力から「マーケットプレイス名 → ルート」を取る。
+///
+/// 実測（2026-08-28・codex v0.150）: マーケットプレイスの実体は
+/// `~/.cache/codex-runtimes/.../plugins/<name>` や `~/.codex/.tmp/plugins` にあり、
+/// 旧来の `~/.codex/.tmp/bundled-marketplaces` だけを見ると **現行カタログの
+/// 未インストール分（linear / slack / teams 等）が一覧に出ない**。
+/// CLI に在処を聞くのが唯一の追従方法（パス規約は codex 側の内部実装で変わる）。
+/// codex 不在・失敗時は空を返し、呼び出し側が旧ディレクトリ探索へフォールバックする。
+fn codex_marketplace_roots() -> Vec<(String, std::path::PathBuf)> {
+    let program: String = {
+        #[cfg(target_os = "windows")]
+        {
+            resolve_on_path("codex")
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "codex".to_string())
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            "codex".to_string()
+        }
+    };
+    let mut cmd = std::process::Command::new(&program);
+    cmd.args(["plugin", "marketplace", "list"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = match cmd.output() {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut roots: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with("MARKETPLACE") {
+            continue; // 空行とヘッダ行
+        }
+        // 「名前 <空白> ルートパス」。パスには空白が入り得るので最初の空白で割る
+        let Some(idx) = line.find(char::is_whitespace) else {
+            continue;
+        };
+        let name = line[..idx].trim().to_string();
+        let root = line[idx..].trim().to_string();
+        if name.is_empty() || root.is_empty() {
+            continue;
+        }
+        let path = std::path::PathBuf::from(&root);
+        if path.is_dir() {
+            roots.push((name, path));
+        }
+    }
+    roots
+}
+
 /// Codex 側 marketplace（~/.codex/.tmp/bundled-marketplaces/, ~/.codex/plugins/marketplaces/）の全件カタログ。
 #[tauri::command]
 fn list_codex_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
@@ -1641,7 +1756,10 @@ fn list_codex_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
         .map(|t| t.keys().cloned().collect())
         .unwrap_or_default();
 
-    let mut out: Vec<AddonItem> = Vec::new();
+    // 一次情報源: codex CLI 自身に marketplace の在処を聞く（2026-08-28 修正。
+    // 旧来のディレクトリ決め打ちでは現行カタログの未インストール分が出なかった）。
+    let mut sources: Vec<(String, std::path::PathBuf)> = codex_marketplace_roots();
+    // フォールバック: 旧ディレクトリ探索（codex CLI が実行できない環境用）
     for root in [
         home.join(".codex").join(".tmp").join("bundled-marketplaces"),
         home.join(".codex").join("plugins").join("marketplaces"),
@@ -1663,17 +1781,26 @@ fn list_codex_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
-            let mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "codex");
-            let known: std::collections::HashSet<String> =
-                mp_json.iter().map(|x| x.name.clone()).collect();
-            out.extend(mp_json);
-            let mut walked: Vec<AddonItem> = Vec::new();
-            find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
-            for mut item in walked {
-                if !known.contains(&item.name) {
-                    item.source = "codex".into();
-                    out.push(item);
-                }
+            sources.push((mp_id, mp_path));
+        }
+    }
+
+    let mut out: Vec<AddonItem> = Vec::new();
+    let mut seen_mp: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (mp_id, mp_path) in sources {
+        if mp_id.is_empty() || !seen_mp.insert(mp_id.clone()) {
+            continue; // 同名 marketplace は CLI 由来（先頭）を優先
+        }
+        let mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "codex");
+        let known: std::collections::HashSet<String> =
+            mp_json.iter().map(|x| x.name.clone()).collect();
+        out.extend(mp_json);
+        let mut walked: Vec<AddonItem> = Vec::new();
+        find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
+        for mut item in walked {
+            if !known.contains(&item.name) {
+                item.source = "codex".into();
+                out.push(item);
             }
         }
     }
@@ -2391,8 +2518,8 @@ fn semver_lt(current: &str, latest: &str) -> bool {
 /// 指定アドオンを実際に更新する。
 ///
 /// - kind="cli", id="claude"|"codex": npm install -g <pkg>@latest（既存 update_cli を流用）
-/// - kind="claude_plugin", id="<name>@<marketplace>": claude --print /plugin install <id>
-///   （CLI の install コマンドは再実行で latest に差し替わる）
+/// - kind="claude_plugin", id="<name>@<marketplace>": claude plugin update <id>
+///   （反映にはアプリ/CLI の再起動が必要）
 /// - kind="skill", id=<absolute path>: git pull --ff-only
 #[tauri::command]
 async fn apply_addon_update(
@@ -2410,24 +2537,10 @@ async fn apply_addon_update(
             if id_trim.is_empty() {
                 return Err("プラグイン ID が空です".into());
             }
-            let mut cmd = build_silent_command("claude");
-            cmd.arg("--print")
-                .arg(format!("/plugin install {}", id_trim))
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let output = cmd
-                .output()
-                .await
-                .map_err(|e| format!("claude CLI を起動できませんでした: {}", e))?;
-            if !output.status.success() {
-                return Err(format!(
-                    "プラグイン更新に失敗しました（exit={}）\nstderr: {}",
-                    output.status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
-            }
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+            validate_plugin_id(id_trim)?;
+            // 本物のサブコマンド `claude plugin update`（2026-08-28 根治。
+            // 旧 --print 経由は実行されない偽成功だった）。反映には再起動が要る。
+            run_claude_plugin_cmd("update", id_trim).await
         }
         "skill" | "codex_marketplace" => {
             // skill / codex marketplace どちらも git ディレクトリのフォルダ更新で同じ動作。
@@ -5069,6 +5182,8 @@ pub fn run() {
             remove_claude_mcp,
             install_claude_plugin,
             uninstall_claude_plugin,
+            install_codex_plugin,
+            uninstall_codex_plugin,
             add_claude_marketplace,
             list_claude_marketplace_catalog,
             list_codex_marketplace_catalog,
