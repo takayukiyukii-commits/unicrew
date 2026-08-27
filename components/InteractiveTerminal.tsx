@@ -49,6 +49,7 @@ export function InteractiveTerminal({
   workspace,
   paneKey,
   kind = "claude",
+  command,
   onOutput,
   onExited,
 }: {
@@ -72,6 +73,12 @@ export function InteractiveTerminal({
   onOutput?: (text: string) => void;
   /** PTY プロセス終了時に親へ通知（remote-control の状態表示用）。 */
   onExited?: () => void;
+  /**
+   * 起動プログラムの直接指定（ターミナルのマルチAI対応）。指定時は kind の
+   * 既定プログラム決定を上書きする。**マウント時の値で固定**（paneKey ごとに
+   * 1 CLI の想定。同一ペインでの差し替えは想定しない＝PTY は再起動しない）。
+   */
+  command?: { program: string; args?: string[] };
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // onOutput/onExited は毎レンダーで参照が変わりうるので ref で持つ
@@ -80,6 +87,8 @@ export function InteractiveTerminal({
   onOutputRef.current = onOutput;
   const onExitedRef = useRef<typeof onExited>(onExited);
   onExitedRef.current = onExited;
+  // command はマウント時の値で固定（参照変化で PTY を再起動させない）
+  const commandRef = useRef(command);
   // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
   // term インスタンスは effect 内ローカルだったが、ドラッグ操作（React イベント）
   // から scrollToLine を呼ぶために ref 化する。
@@ -779,7 +788,11 @@ export function InteractiveTerminal({
         // このPCのセッションに接続できる。会話はスマホ/ブラウザ側で行う。
         args = ["remote-control"];
       }
-      if (kind === "shell") {
+      if (commandRef.current) {
+        // マルチAI: 指定プログラムをそのまま起動（PATH 解決は Rust 側）。
+        program = commandRef.current.program;
+        args = commandRef.current.args ?? [];
+      } else if (kind === "shell") {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
           const info = await invoke<{

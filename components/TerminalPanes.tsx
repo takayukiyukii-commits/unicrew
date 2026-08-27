@@ -1,8 +1,20 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Columns2, X, FolderOpen, SquareTerminal } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  Columns2,
+  X,
+  FolderOpen,
+  SquareTerminal,
+  Bot,
+  ChevronDown,
+} from "lucide-react";
 import { InteractiveTerminal } from "./InteractiveTerminal";
+import {
+  availableTerminalClis,
+  terminalCliById,
+  type TerminalCli,
+} from "@/lib/terminal-clis";
 import { useTranslation } from "@/lib/i18n";
 
 /**
@@ -19,6 +31,13 @@ interface Pane {
   key: string;
   /** 設計書⑤: ペインで起動するプログラム。claude（既定）または OS シェル。 */
   kind: "claude" | "shell";
+  /**
+   * マルチAI: lib/terminal-clis.ts の CLI id。指定時は該当 CLI を PTY で起動する。
+   * - "claude"（または未指定）→ 従来どおり kind="claude" 経路（完全互換）
+   * - その他 → kind="shell" + command 指定（claude 固有のペースト特殊処理を
+   *   他 CLI に送らないため。起動プログラムは command が上書きする）
+   */
+  cliId?: string;
 }
 
 interface Props {
@@ -48,6 +67,8 @@ function placement(index: number, total: number): { row: number; col: number } {
  *
  * チャットの「並列ペイン」（Columns2 アイコン）と同じ感覚で
  * ターミナルでもワンクリックでペインを増やせる「扉ボタン」を提供する。
+ * さらに「＋AI」メニューから Claude 以外の対話 CLI（Codex / Gemini / Grok /
+ * OpenCode / Qwen / Kimi / Goose 等）も同じ PTY 基盤で開ける（マルチAI対応）。
  * ペインを増やしても 1 ペインあたりの PTY は独立しており、
  * `/clear` や `/compact` 等はそのペインだけに作用する。
  *
@@ -66,19 +87,50 @@ export function TerminalPanes({ workspace = null }: Props) {
       kind: "claude",
     },
   ]);
+  /** ＋AI メニューを開いているペインの key（1つだけ開く） */
+  const [aiMenuFor, setAiMenuFor] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  const handleSplit = useCallback((kind: "claude" | "shell" = "claude") => {
-    setPanes((prev) => {
-      if (prev.length >= MAX_PANES) return prev;
-      return [
-        ...prev,
-        {
-          key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          kind,
-        },
-      ];
-    });
-  }, []);
+  const isWindows =
+    typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
+  const clis = availableTerminalClis(isWindows);
+
+  // 外側クリックで ＋AI メニューを閉じる
+  useEffect(() => {
+    if (!aiMenuFor) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setAiMenuFor(null);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [aiMenuFor]);
+
+  const handleSplit = useCallback(
+    (kind: "claude" | "shell" = "claude", cliId?: string) => {
+      setPanes((prev) => {
+        if (prev.length >= MAX_PANES) return prev;
+        return [
+          ...prev,
+          {
+            key: `pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            kind,
+            cliId,
+          },
+        ];
+      });
+      setAiMenuFor(null);
+    },
+    [],
+  );
+
+  const handleSplitCli = useCallback(
+    (cli: TerminalCli) => {
+      // claude は従来経路（完全互換）。他 CLI は shell 扱い + command 上書き。
+      if (cli.id === "claude") handleSplit("claude", "claude");
+      else handleSplit("shell", cli.id);
+    },
+    [handleSplit],
+  );
 
   const handleClose = useCallback((key: string) => {
     setPanes((prev) => {
@@ -104,6 +156,10 @@ export function TerminalPanes({ workspace = null }: Props) {
         const { row, col } = placement(idx, n);
         const canSplit = panes.length < MAX_PANES;
         const canClose = panes.length > 1;
+        const cli =
+          pane.cliId && pane.cliId !== "claude"
+            ? terminalCliById(pane.cliId)
+            : undefined;
         return (
           <div
             key={pane.key}
@@ -121,12 +177,62 @@ export function TerminalPanes({ workspace = null }: Props) {
                   </span>
                 </span>
               )}
-              {pane.kind === "shell" && (
+              {cli ? (
+                <span className="shrink-0 px-1 rounded bg-[var(--color-surface)] border border-[var(--color-border)] font-mono text-[10px]">
+                  {cli.label}
+                </span>
+              ) : pane.kind === "shell" ? (
                 <span className="shrink-0 px-1 rounded bg-[var(--color-surface)] border border-[var(--color-border)] font-mono text-[10px]">
                   {t("terminal.shellBadge")}
                 </span>
-              )}
+              ) : null}
               <span className="ml-auto flex items-center gap-0.5 shrink-0">
+                {canSplit && (
+                  <span className="relative">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAiMenuFor((cur) =>
+                          cur === pane.key ? null : pane.key,
+                        )
+                      }
+                      className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-text)] transition inline-flex items-center"
+                      title={t("terminal.newAiTitle")}
+                      aria-label={t("terminal.newAiAria")}
+                    >
+                      <Bot size={13} />
+                      <ChevronDown size={9} className="opacity-60" />
+                    </button>
+                    {aiMenuFor === pane.key && (
+                      <div
+                        ref={menuRef}
+                        className="absolute right-0 top-full mt-1 min-w-[170px] rounded-md border border-[var(--color-border)] bg-white shadow-lg z-50 py-1"
+                        role="menu"
+                      >
+                        {clis.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => handleSplitCli(c)}
+                            className="w-full px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-surface)]"
+                            role="menuitem"
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                        <div className="my-1 border-t border-[var(--color-border)]" />
+                        <button
+                          type="button"
+                          onClick={() => handleSplit("shell")}
+                          className="w-full px-3 py-1.5 text-left text-[12px] hover:bg-[var(--color-surface)]"
+                          role="menuitem"
+                        >
+                          {t("terminal.menuShell")}
+                        </button>
+                      </div>
+                    )}
+                  </span>
+                )}
                 {canSplit && (
                   <button
                     type="button"
@@ -169,6 +275,9 @@ export function TerminalPanes({ workspace = null }: Props) {
                 workspace={workspace}
                 paneKey={pane.key}
                 kind={pane.kind}
+                command={
+                  cli ? { program: cli.program, args: cli.args } : undefined
+                }
               />
             </div>
           </div>
