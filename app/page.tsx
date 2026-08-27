@@ -44,7 +44,6 @@ import { ChatPane } from "@/components/ChatPane";
 import { TaskQueuePanel } from "@/components/TaskQueuePanel";
 import { UniMcpModal } from "@/components/UniMcpModal";
 import { RoutinesModal } from "@/components/RoutinesModal";
-import { MobileBridgeModal } from "@/components/MobileBridgeModal";
 import { RemoteControlModal } from "@/components/RemoteControlModal";
 import {
   loadRoutines,
@@ -54,13 +53,6 @@ import {
 } from "@/lib/routines";
 import { remoteNodeManager } from "@/lib/remote-node";
 import { sendLaunchPing } from "@/lib/telemetry";
-import {
-  isCloudConfigured,
-  joinPairChannel,
-  sendCloudEvent,
-  type CloudEvent,
-} from "@/lib/cloud-bridge";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { FeedbackCard } from "@/components/FeedbackCard";
 import {
   countUserMessages,
@@ -456,13 +448,8 @@ export default function Page() {
   const [uniMcpOpen, setUniMcpOpen] = useState(false);
   /** ルーティーン管理モーダル（アイデア14） */
   const [routinesOpen, setRoutinesOpen] = useState(false);
-  /** スマホ連携モーダル（モバイルA案） */
-  const [mobileOpen, setMobileOpen] = useState(false);
   /** 公式 Remote Control ランチャー */
   const [rcOpen, setRcOpen] = useState(false);
-  /** クラウドリレー（Phase 2）の現在のペアリングコード。null なら未起動。 */
-  const [cloudPairCode, setCloudPairCode] = useState<string | null>(null);
-  const cloudChannelRef = useRef<RealtimeChannel | null>(null);
   /** graphify ナレッジグラフ自動更新（アイデア6）の進捗表示。 */
   const [graphifyStatus, setGraphifyStatus] = useState<{
     state: "updating" | "done" | "error";
@@ -819,127 +806,6 @@ export default function Page() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /**
-   * Phase 2 クラウドリレー：ペアリングコード起動/停止 ハンドラ。
-   * 開始すると Supabase Realtime channel に subscribe し、スマホからの
-   * `from_mobile` イベントを `handleSendForThread` に流す。
-   */
-  const startCloudPairing = (code: string) => {
-    if (cloudChannelRef.current) {
-      void cloudChannelRef.current.unsubscribe();
-      cloudChannelRef.current = null;
-    }
-    const ch = joinPairChannel(code, (ev: CloudEvent) => {
-      if (ev.kind === "from_mobile") {
-        const target =
-          ev.threadId === "active"
-            ? threadsRef.current.find((t) => t.id === activeIdRef.current)
-            : threadsRef.current.find((t) => t.id === ev.threadId);
-        if (target) void handleSendForThread(ev.text, target);
-      } else if (ev.kind === "from_mobile_switch") {
-        // スマホからアクティブスレッド切替依頼
-        const target = threadsRef.current.find((t) => t.id === ev.threadId);
-        if (target) {
-          setActiveId(target.id);
-          // 並列ペインに同じスレッドが入っていたら外す
-          setSplitIds((prev) => prev.filter((x) => x !== target.id));
-        }
-      }
-    });
-    cloudChannelRef.current = ch;
-    setCloudPairCode(code);
-  };
-  const stopCloudPairing = () => {
-    if (cloudHeartbeatRef.current) {
-      clearInterval(cloudHeartbeatRef.current);
-      cloudHeartbeatRef.current = null;
-    }
-    if (cloudChannelRef.current) {
-      void cloudChannelRef.current.unsubscribe();
-      cloudChannelRef.current = null;
-    }
-    setCloudPairCode(null);
-  };
-
-  // Heartbeat 用 setInterval ID
-  const cloudHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /**
-   * Phase 2: クラウドリレー heartbeat。
-   * Supabase Realtime channel の subscribe は非同期で、初回 send は破棄される
-   * 可能性がある。2秒ごとに snapshot push する setInterval を立て、
-   * 接続状態とPC側の現スレッド情報をスマホへ常時流す。
-   */
-  useEffect(() => {
-    if (!cloudPairCode) return;
-    const tick = () => {
-      const ch = cloudChannelRef.current;
-      if (!ch) return;
-      const t = threadsRef.current.find((x) => x.id === activeIdRef.current) ?? null;
-      const lastAssistant = t
-        ? [...t.messages].reverse().find((m) => m.role === "assistant")
-        : null;
-
-      // スレッド情報（プロバイダ・キャラ）を整形
-      const summarize = (th: typeof t) => {
-        if (!th) return { providerLabel: "", characterName: "" };
-        const slots = effectiveParticipants(th);
-        if (slots.length === 1) {
-          const c = getCharacter(slots[0].characterId);
-          const pl =
-            slots[0].provider === "claude"
-              ? "🟠 Claude"
-              : slots[0].provider === "codex"
-              ? "🟢 Codex"
-              : "🔵 Gemini";
-          return { providerLabel: pl, characterName: c?.name ?? "—" };
-        }
-        const hasMod = slots.some((s) => s.role === "moderator");
-        const participantCount = slots.filter((s) => s.role !== "moderator").length;
-        return {
-          providerLabel: hasMod
-            ? `${participantCount}-way＋審判`
-            : `${participantCount}-way 並列`,
-          characterName: "複数キャラ",
-        };
-      };
-      const activeSummary = summarize(t);
-      const threadSummaries = [...threadsRef.current]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 15)
-        .map((th) => {
-          const s = summarize(th);
-          return {
-            id: th.id,
-            title: th.title,
-            providerLabel: s.providerLabel,
-            characterName: s.characterName,
-          };
-        });
-
-      void sendCloudEvent(ch, {
-        kind: "from_pc",
-        activeThreadId: t?.id ?? null,
-        activeThreadTitle: t?.title ?? null,
-        activeProviderLabel: t ? activeSummary.providerLabel : null,
-        activeCharacterName: t ? activeSummary.characterName : null,
-        lastAssistantPreview:
-          lastAssistant?.content?.slice(0, 2000) ?? null,
-        isStreaming: streamingSidsRef.current.size > 0,
-        threads: threadSummaries,
-      }).catch(() => {});
-    };
-    // 1秒後に最初のpush（subscribe完了見込み時刻）、以降は2秒ごと
-    const initial = setTimeout(tick, 1000);
-    const id = setInterval(tick, 2000);
-    cloudHeartbeatRef.current = id;
-    return () => {
-      clearTimeout(initial);
-      clearInterval(id);
-      cloudHeartbeatRef.current = null;
-    };
-  }, [cloudPairCode]);
 
   /**
    * アイデア14: ルーティーン自動発火ループ。
@@ -3007,14 +2873,6 @@ ${command}
         run: () => setRcOpen(true),
       },
       {
-        id: "mobile.open",
-        label: tr("palette.mobile.open"),
-        category: tr("palette.category.action"),
-        icon: Smartphone,
-        keywords: ["mobile", "remote", "phone", "すまほ"],
-        run: () => setMobileOpen(true),
-      },
-      {
         id: "queue.toggle",
         label: taskQueueOpen
           ? tr("palette.queue.hide")
@@ -3246,10 +3104,6 @@ ${command}
         {
           label: tr("menu.file.remoteControl"),
           onSelect: () => setRcOpen(true),
-        },
-        {
-          label: tr("menu.file.mobile"),
-          onSelect: () => setMobileOpen(true),
         },
         { divider: true },
         {
@@ -3845,13 +3699,6 @@ ${command}
         open={rcOpen}
         onClose={() => setRcOpen(false)}
         workspace={activeThread?.workspace ?? null}
-      />
-      <MobileBridgeModal
-        open={mobileOpen}
-        onClose={() => setMobileOpen(false)}
-        cloudPairCode={cloudPairCode}
-        onStartCloudPairing={startCloudPairing}
-        onStopCloudPairing={stopCloudPairing}
       />
       {graphifyStatus && (
         <div

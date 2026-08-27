@@ -1108,6 +1108,18 @@ function MarketplaceCatalogPanel({
                             by {it.author}
                           </span>
                         )}
+                        {/(^https?:\/\/)/.test(it.homepage ?? "") && (
+                          <a
+                            href={it.homepage ?? undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-0.5"
+                            title={tr("addons.marketplaceHomepage")}
+                          >
+                            {tr("addons.marketplaceHomepageShort")}
+                            <ExternalLink size={9} />
+                          </a>
+                        )}
                       </div>
                       {localized.description && (
                         <div className="text-[11px] text-[var(--color-muted)] mt-0.5 line-clamp-2">

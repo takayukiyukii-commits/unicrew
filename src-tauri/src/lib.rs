@@ -357,6 +357,8 @@ pub struct AddonItem {
     pub path: Option<String>,
     pub category: Option<String>,
     pub author: Option<String>,
+    /// 説明ページ（plugin.json の homepage / repository）。UIの「くわしく」リンク用。
+    pub homepage: Option<String>,
 }
 
 fn home_dir() -> Result<std::path::PathBuf, String> {
@@ -499,6 +501,7 @@ fn list_claude_plugins() -> Result<Vec<AddonItem>, String> {
                             path,
                             category: None,
                             author: None,
+                            homepage: None,
                         });
                     }
                 }
@@ -567,6 +570,7 @@ fn collect_skills_from(dir: &std::path::Path, scope: &str, source: &str) -> Vec<
             path: Some(path.to_string_lossy().to_string()),
             category: Some("skill".into()),
             author: None,
+            homepage: None,
         });
     }
     out
@@ -644,6 +648,7 @@ fn list_claude_mcp() -> Result<Vec<AddonItem>, String> {
             path: None,
             category: Some("mcp".into()),
             author: None,
+            homepage: None,
         });
     }
     Ok(out)
@@ -686,6 +691,7 @@ fn list_codex_plugins() -> Result<Vec<AddonItem>, String> {
                 path: None,
                 category: None,
                 author: None,
+                homepage: None,
             });
         }
     }
@@ -837,6 +843,7 @@ fn list_codex_mcp() -> Result<Vec<AddonItem>, String> {
                 path: None,
                 category: None,
                 author: None,
+                homepage: None,
             });
         }
     }
@@ -1132,14 +1139,79 @@ async fn run_claude_plugin_cmd(subcommand: &str, id: &str) -> Result<String, Str
     Ok(stdout)
 }
 
+/// `claude plugin marketplace update <id>` を実行する（install 失敗時の自動復旧用）。
+async fn run_claude_marketplace_update(marketplace_id: &str) -> Result<String, String> {
+    let mut cmd = build_silent_command("claude");
+    cmd.arg("plugin")
+        .arg("marketplace")
+        .arg("update")
+        .arg(marketplace_id)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("claude CLI を起動できませんでした: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "marketplace update が失敗しました（exit={}）\n{}\n{}",
+            output.status.code().unwrap_or(-1),
+            stdout.trim(),
+            stderr.trim()
+        ));
+    }
+    Ok(stdout)
+}
+
 /// claude CLI 経由でプラグインをインストール。
 /// 内部で `claude plugin install <id>` を CREATE_NO_WINDOW で spawn。
 /// 成功時は stdout テキストを返す（呼び出し側でログ表示用）。
+///
+/// 🚨【2026-08-28】「not found in marketplace」で失敗したら、marketplace を
+/// 更新して1回だけ再試行する。実測: ローカルのマーケットプレイスのコピーが
+/// 古いと、一覧には出るのに install できないプラグインが生まれる
+/// （例: security-review は上流で security-guidance に置き換わっており、
+/// 古いローカルコピーにだけ残っていた）。CLI のエラー文自身が
+/// 「try claude plugin marketplace update」と案内している操作を自動化した。
 #[tauri::command]
 async fn install_claude_plugin(id: String) -> Result<String, String> {
     let id_trim = id.trim();
     validate_plugin_id(id_trim)?;
-    run_claude_plugin_cmd("install", id_trim).await
+    match run_claude_plugin_cmd("install", id_trim).await {
+        Ok(out) => Ok(out),
+        Err(first_err) => {
+            // 大小文字差に強くする（監査MED 2026-08-28）
+            let stale = first_err.to_lowercase().contains("not found in marketplace");
+            let mp = id_trim.split_once('@').map(|(_, m)| m);
+            if stale {
+                if let Some(mp) = mp {
+                    if validate_marketplace_id(mp).is_ok() {
+                        // update の失敗は握りつぶさず、最終エラーに併記する（監査MED）。
+                        // 「更新して再試行したが無かった」と「更新自体に失敗した」は別の病気。
+                        let update_result = run_claude_marketplace_update(mp).await;
+                        return run_claude_plugin_cmd("install", id_trim).await.map_err(|e| {
+                            match &update_result {
+                                Ok(_) => format!(
+                                    "{}
+（マーケットプレイス {} を更新して再試行しても見つかりませんでした。このプラグインは提供終了か改名の可能性があります。「再読み込み」を押すと一覧が最新になります）",
+                                    e, mp
+                                ),
+                                Err(update_err) => format!(
+                                    "{}
+（マーケットプレイス {} の更新にも失敗したため、一覧が古いままの可能性があります: {}）",
+                                    e, mp, update_err
+                                ),
+                            }
+                        });
+                    }
+                }
+            }
+            Err(first_err)
+        }
+    }
 }
 
 /// claude CLI 経由でプラグインをアンインストール。
@@ -1675,6 +1747,12 @@ fn parse_marketplace_json(
                 path: None,
                 category,
                 author,
+                // http(s) 以外（javascript: 等）はリンクにしない（UI で <a href> に入るため）
+                homepage: entry
+                    .get("homepage")
+                    .and_then(|s| s.as_str())
+                    .filter(|s| s.starts_with("https://") || s.starts_with("http://"))
+                    .map(|s| s.to_string()),
             });
         }
         // 1 個見つかれば終わり
@@ -1791,12 +1869,36 @@ fn list_codex_marketplace_catalog() -> Result<Vec<AddonItem>, String> {
         if mp_id.is_empty() || !seen_mp.insert(mp_id.clone()) {
             continue; // 同名 marketplace は CLI 由来（先頭）を優先
         }
-        let mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "codex");
+        let mut mp_json = parse_marketplace_json(&mp_path, &mp_id, &installed_ids, "codex");
+        let mut walked: Vec<AddonItem> = Vec::new();
+        find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
+        // 【2026-08-28 修正】Codex の marketplace.json は name/category だけで
+        // description が無い（実測: openai-curated 180件すべて説明なし）。
+        // 一方 各プラグインの plugin.json には description / homepage / author が
+        // 実在する。旧実装は marketplace.json を優先して plugin.json 側を捨てて
+        // いたため「一覧に説明が無くて何のプラグインか分からない」状態だった。
+        // → 一覧は marketplace.json を正としつつ、欠けたメタを plugin.json で補完する。
+        let walked_by_name: std::collections::HashMap<String, &AddonItem> =
+            walked.iter().map(|w| (w.name.clone(), w)).collect();
+        for item in mp_json.iter_mut() {
+            if let Some(w) = walked_by_name.get(&item.name) {
+                if item.description.is_none() {
+                    item.description = w.description.clone();
+                }
+                if item.homepage.is_none() {
+                    item.homepage = w.homepage.clone();
+                }
+                if item.author.is_none() {
+                    item.author = w.author.clone();
+                }
+                if item.version.is_none() {
+                    item.version = w.version.clone();
+                }
+            }
+        }
         let known: std::collections::HashSet<String> =
             mp_json.iter().map(|x| x.name.clone()).collect();
         out.extend(mp_json);
-        let mut walked: Vec<AddonItem> = Vec::new();
-        find_plugin_jsons(&mp_path, &mp_id, &installed_ids, &mut walked, 0);
         for mut item in walked {
             if !known.contains(&item.name) {
                 item.source = "codex".into();
@@ -1870,6 +1972,13 @@ fn parse_plugin_json(
                 a.get("name").and_then(|n| n.as_str()).map(|s| s.to_string())
             }
         });
+    // 説明ページ: homepage が無ければ repository で代用（両方 plugin.json の実フィールド）
+    let homepage = v
+        .get("homepage")
+        .and_then(|s| s.as_str())
+        .or_else(|| v.get("repository").and_then(|s| s.as_str()))
+        .filter(|s| s.starts_with("https://") || s.starts_with("http://"))
+        .map(|s| s.to_string());
     let id = format!("{}@{}", name, marketplace_id);
     let installed = installed_ids.iter().any(|x| x == &id);
     Some(AddonItem {
@@ -1885,6 +1994,7 @@ fn parse_plugin_json(
         path: Some(path.parent()?.to_string_lossy().to_string()),
         category,
         author,
+        homepage,
     })
 }
 

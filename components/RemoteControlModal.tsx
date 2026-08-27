@@ -36,7 +36,7 @@ type CodexPhase = "idle" | "starting" | "ready" | "error";
  * - Codex: `codex remote-control start/pair --json` を PTY で1回ずつ実行し、
  *   手入力ペアコード（例 4VPU-CU3B）を表示する。ChatGPT アプリ側で入力する方式。
  *   🚨 Codex の daemon は Unix 限定（0.150.0 実測）。Windows では案内のみ出す。
- * - 旧・自前リレー（MobileBridgeModal）とは完全に独立。互いに干渉しない。
+ * - 旧・自前リレーは 2026-08-28 に削除済み（本モーダルが唯一のスマホ導線）。
  */
 export function RemoteControlModal({ open, onClose, workspace }: Props) {
   const { t } = useTranslation();
@@ -93,7 +93,7 @@ export function RemoteControlModal({ open, onClose, workspace }: Props) {
     if (parser.sawLoginHint) setLoginHint(true);
   };
 
-  // URL が決まったら QR を生成（MobileBridgeModal と同じ設定）
+  // URL が決まったら QR を生成
   useEffect(() => {
     if (!url) {
       setQrDataUrl("");

@@ -3,21 +3,20 @@
  * Tauri ビルド用の前処理ラッパー。
  *
  * Next.js の `output: "export"` モードでは API Route（特に POST/PUT/DELETE）が
- * 静的化できずビルドが落ちる。一方、UNICREW では LAN モード用に
- * /api/mobile/* を持っている（dev モードのみ動かす想定）。
+ * 静的化できずビルドが落ちる。
  *
  * このスクリプトは:
- *   1. app/api を _api_tauri_backup に一時 rename
+ *   1. app/api があれば _api_tauri_backup に一時 rename
  *   2. `cross-env UNICREW_TAURI=1 next build` を実行
  *   3. 成否に関わらず必ず元に戻す
  *
- * これで dev サーバの LAN モードは動かしつつ、Tauri 配布版ビルド（クラウドモード専用）
- * を成功させられる。
+ * ※ 2026-08-28: 旧スマホ連携（LAN の /api/mobile/* と自前リレー）は削除済み。
+ *   現在 app/api にルートは無いが、将来 API Route を足しても配布ビルドが
+ *   落ちないよう仕組みは残している。
  *
- * また NEXT_PUBLIC_UNICREW_PACKAGED=1 を渡す。これは「app/api を剥がした
- * 配布用静的 export」だけで true になる client 可視フラグで、LAN モード
- * （/api/mobile/* ポーリング）が物理的に動かない配布版を UI 側で正確に
- * 判別するために使う。next dev / tauri dev では未設定のまま＝LAN は使える。
+ * また NEXT_PUBLIC_UNICREW_PACKAGED=1 を渡す（配布用静的 export だけで true に
+ * なる client 可視フラグ。現在の参照箇所は無いが、dev と配布版を区別したい
+ * 将来の UI 向けに維持）。
  */
 const { spawnSync } = require("child_process");
 const fs = require("fs");

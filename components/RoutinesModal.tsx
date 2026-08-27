@@ -214,16 +214,18 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                       : "border-gray-200 bg-gray-50/60 opacity-60"
                   }`}
                 >
-                  <div className="flex items-center gap-2 text-[12.5px]">
-                    <span className="font-mono text-[var(--color-accent)] tabular-nums">
+                  <div className="flex items-start gap-2 text-[12.5px]">
+                    <span className="font-mono text-[var(--color-accent)] tabular-nums shrink-0">
                       {String(r.schedule.hour).padStart(2, "0")}:
                       {String(r.schedule.minute).padStart(2, "0")}
                     </span>
-                    <span className="font-medium truncate flex-1">
-                      {r.label}
-                    </span>
-                    <span className="text-[10.5px] text-[var(--color-muted)] truncate max-w-[120px]">
-                      {thread?.title ?? tr("routines.deletedThread")}
+                    {/* 【2026-08-28 修正】truncate でラベルとスレッド名が切れていた。
+                        折り返して全文見せる（切れて困る、というユーザー報告の根治）。 */}
+                    <span className="flex-1 min-w-0">
+                      <span className="font-medium break-words">{r.label}</span>
+                      <span className="ml-2 text-[10.5px] text-[var(--color-muted)] break-words">
+                        {thread?.title ?? tr("routines.deletedThread")}
+                      </span>
                     </span>
                     {onRunNow && (
                       <button

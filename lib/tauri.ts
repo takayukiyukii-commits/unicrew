@@ -1041,6 +1041,8 @@ export interface AddonItem {
   path: string | null;
   category: string | null;
   author: string | null;
+  /** 説明ページ（plugin.json の homepage / repository）。無ければ null。 */
+  homepage: string | null;
 }
 
 export async function listClaudePlugins(): Promise<AddonItem[]> {
