@@ -47,7 +47,26 @@ export function loadRoutines(): Routine[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Routine[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    // 監査（ファイルタブR1）: 非配列や schedule 欠落の要素で管理画面・発火判定が
+    // TypeError で落ちるのを防ぐ。要素スキーマ（id/threadId/prompt/enabled/schedule）を検証。
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((r): r is Routine => {
+      if (!r || typeof r !== "object") return false;
+      const o = r as Record<string, unknown>;
+      const sc = o.schedule as Record<string, unknown> | undefined;
+      return (
+        typeof o.id === "string" &&
+        typeof o.threadId === "string" &&
+        typeof o.prompt === "string" &&
+        typeof o.enabled === "boolean" &&
+        !!sc &&
+        typeof sc === "object" &&
+        typeof sc.hour === "number" &&
+        typeof sc.minute === "number"
+      );
+    });
   } catch {
     return [];
   }
@@ -87,6 +106,22 @@ export function shouldFire(routine: Routine, now: Date = new Date()): boolean {
   const targetMinutes =
     routine.schedule.hour * 60 + routine.schedule.minute;
   return nowMinutes >= targetMinutes;
+}
+
+/**
+ * 監査（ファイルタブR3）: 新規作成時、当日の指定時刻を既に過ぎている場合に
+ * セットする lastFiredDay を返す。shouldFire は「同日で未発火なら過去時刻を回収」
+ * する仕様のため、これが無いと 18:00 に 09:00 のルーティーンを作った瞬間に発火する。
+ * 未来時刻なら undefined（当日中に正常に発火させる）。
+ */
+export function initialLastFiredDay(
+  hour: number,
+  minute: number,
+  now: Date = new Date(),
+): string | undefined {
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const targetMinutes = hour * 60 + minute;
+  return nowMinutes >= targetMinutes ? todayStamp(now) : undefined;
 }
 
 export function markFired(

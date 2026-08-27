@@ -53,7 +53,14 @@ function loadKeys(): KeysMap {
   if (typeof window === "undefined") return {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as KeysMap) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: KeysMap = {};
+    for (const [k, val] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof val === "string") out[k] = val;
+    }
+    return out;
   } catch {
     return {};
   }
@@ -108,6 +115,16 @@ export function UniMcpModal({ open, onClose }: Props) {
     });
   };
 
+  const forgetKey = (id: string) => {
+    setKeysState((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      saveKeys(next);
+      return next;
+    });
+  };
+
   /**
    * 「target に対して」既に登録されているか。
    * - claude: Claude 側に入っていれば true
@@ -125,7 +142,8 @@ export function UniMcpModal({ open, onClose }: Props) {
 
   const canConnect = (e: UniMcpEndpoint): boolean => {
     if (e.noAuth) return true;
-    return !!(keys[e.id] && keys[e.id].trim());
+    const v = keys[e.id];
+    return typeof v === "string" && v.trim().length > 0;
   };
 
   /** target を踏まえて、UNI MCP を Claude / Codex に追加する（必要な側だけ）。 */
@@ -167,12 +185,12 @@ export function UniMcpModal({ open, onClose }: Props) {
     setError(null);
     try {
       await addForTarget(e);
-      await refreshInstalled();
     } catch (err) {
       setError(
         t("mcp.errConnect", { name: e.name, error: err instanceof Error ? err.message : String(err) }),
       );
     } finally {
+      await refreshInstalled();
       setBusy((s) => {
         const n = new Set(s);
         n.delete(e.id);
@@ -187,12 +205,13 @@ export function UniMcpModal({ open, onClose }: Props) {
     setError(null);
     try {
       await removeForTarget(e);
-      await refreshInstalled();
+      forgetKey(e.id);
     } catch (err) {
       setError(
         t("mcp.errDisconnect", { name: e.name, error: err instanceof Error ? err.message : String(err) }),
       );
     } finally {
+      await refreshInstalled();
       setBusy((s) => {
         const n = new Set(s);
         n.delete(e.id);
@@ -225,16 +244,21 @@ export function UniMcpModal({ open, onClose }: Props) {
   const disconnectAll = async () => {
     setBulkBusy(true);
     setError(null);
+    const failed: string[] = [];
     try {
       for (const e of UNI_MCP_ENDPOINTS) {
         if (!isInstalled(e)) continue;
         try {
           await removeForTarget(e);
+          forgetKey(e.id);
         } catch {
-          // ignore
+          failed.push(e.name);
         }
       }
       await refreshInstalled();
+      if (failed.length > 0) {
+        setError(t("mcp.errDisconnectSome", { names: failed.join(", ") }));
+      }
     } finally {
       setBulkBusy(false);
     }

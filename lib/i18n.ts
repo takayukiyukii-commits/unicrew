@@ -665,6 +665,7 @@ const ja: Dict = {
   "mcp.errTauriOnly": "MCP接続は Tauri デスクトップアプリ起動時のみ可能です。",
   "mcp.errConnect": "{name} の接続に失敗: {error}",
   "mcp.errDisconnect": "{name} の切断に失敗: {error}",
+  "mcp.errDisconnectSome": "一部の切断に失敗しました（{names}）。APIキー付きの設定が残っている可能性があります。再試行してください。",
 
   // ----- Trust prompt -----
   "trust.dialogLabel": "Workspace Trust",
@@ -1820,6 +1821,7 @@ const en: Dict = {
   "mcp.errTauriOnly": "MCP connections are only possible when running the Tauri desktop app.",
   "mcp.errConnect": "Failed to connect {name}: {error}",
   "mcp.errDisconnect": "Failed to disconnect {name}: {error}",
+  "mcp.errDisconnectSome": "Failed to disconnect some ({names}). Settings with API keys may remain. Please retry.",
 
   // ----- Trust prompt -----
   "trust.dialogLabel": "Workspace Trust",

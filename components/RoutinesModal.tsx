@@ -7,6 +7,8 @@ import {
   loadRoutines,
   newRoutineId,
   saveRoutines,
+  markFired,
+  initialLastFiredDay,
   type Routine,
 } from "@/lib/routines";
 import { useTranslation } from "@/lib/i18n";
@@ -52,6 +54,8 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
 
   const add = () => {
     if (!draft.label.trim() || !draft.prompt.trim() || !draft.threadId) return;
+    const hh = parseInt(draft.hour, 10);
+    const mm = parseInt(draft.minute, 10);
     const r: Routine = {
       id: newRoutineId(),
       label: draft.label.trim(),
@@ -59,8 +63,11 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
       prompt: draft.prompt.trim(),
       schedule: {
         type: "daily",
-        hour: parseInt(draft.hour, 10),
-        minute: parseInt(draft.minute, 10),
+        hour: hh,
+        minute: mm,
+        // 監査R3: 当日の指定時刻を過ぎていれば発火済み扱いにし、作成直後の
+        // 即時発火（過去時刻回収）を防ぐ
+        lastFiredDay: initialLastFiredDay(hh, mm),
       },
       enabled: true,
       createdAt: Date.now(),
@@ -221,8 +228,15 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                     {onRunNow && (
                       <button
                         type="button"
-                        onClick={() => onRunNow(r.threadId, r.prompt)}
-                        className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600"
+                        disabled={!thread}
+                        onClick={() => {
+                          if (!thread) return;
+                          onRunNow(r.threadId, r.prompt);
+                          // 監査R3: 手動実行したら発火済みにして、同日の定期実行との
+                          // 二重送信を防ぐ
+                          persist(markFired(routines, r.id, new Date()));
+                        }}
+                        className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed"
                         title={tr("routines.runNow")}
                       >
                         <Play size={11} />

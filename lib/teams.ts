@@ -2,6 +2,20 @@
 
 import { nanoid } from "nanoid";
 import type { AiTeam, ParticipantSlot } from "./types";
+import { PROVIDER_LABELS, type Provider } from "./types";
+
+// 監査（ファイルタブR1）: インポート/復元の入力上限。巨大JSONでのUIフリーズ・
+// localStorage 肥大を防ぐ。
+const MAX_PARTICIPANTS = 8;
+const MAX_NAME_LEN = 120;
+const MAX_DESC_LEN = 2000;
+const KNOWN_PROVIDERS = new Set(Object.keys(PROVIDER_LABELS));
+
+/** 未知 provider は claude にフォールバック（許可リスト照合）。 */
+function normalizeProvider(v: unknown): Provider {
+  const s = typeof v === "string" ? v : "";
+  return (KNOWN_PROVIDERS.has(s) ? s : "claude") as Provider;
+}
 
 /**
  * 組み込みチームテンプレート。
@@ -105,7 +119,16 @@ export function loadUserTeams(): AiTeam[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as AiTeam[];
+    const parsed = JSON.parse(raw);
+    // 監査（R1）: 非配列や壊れた要素で getAllTeams/handleCreateFromTeam が
+    // TypeError で落ちるのを防ぐ。配列でない/participants が配列でない要素は捨てる。
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is AiTeam =>
+        !!t &&
+        typeof t === "object" &&
+        Array.isArray((t as { participants?: unknown }).participants),
+    );
   } catch {
     return [];
   }
@@ -206,7 +229,7 @@ export function importTeamFromJson(json: string): AiTeam {
       `未対応のスキーマです: ${String(obj.schema)} (期待: unicrew.team.v1)`,
     );
   }
-  const name = typeof obj.name === "string" ? obj.name : "";
+  const name = typeof obj.name === "string" ? obj.name.slice(0, MAX_NAME_LEN) : "";
   if (!name.trim()) throw new Error("name フィールドが空です");
 
   const rawParticipants = Array.isArray(obj.participants)
@@ -215,9 +238,17 @@ export function importTeamFromJson(json: string): AiTeam {
   if (rawParticipants.length < 1) {
     throw new Error("participants が1人以上必要です");
   }
+  // 監査（R1）: 参加者数の上限（巨大配列での UI フリーズ・localStorage 肥大を防ぐ）
+  if (rawParticipants.length > MAX_PARTICIPANTS) {
+    throw new Error(`participants が多すぎます（最大 ${MAX_PARTICIPANTS} 人）`);
+  }
   const participants: ParticipantSlot[] = rawParticipants.map((p, i) => {
-    const provider = String(p.provider ?? "claude") as ParticipantSlot["provider"];
-    const characterId = String(p.characterId ?? "tmpl-claude-normal");
+    // 監査（R1）: provider は許可リストで検証（未知値は claude にフォールバック）
+    const provider = normalizeProvider(p.provider);
+    const characterId =
+      typeof p.characterId === "string" && p.characterId.length <= MAX_NAME_LEN
+        ? p.characterId
+        : "tmpl-claude-normal";
     return {
       id: `p${i + 1}`,
       provider,
@@ -230,10 +261,12 @@ export function importTeamFromJson(json: string): AiTeam {
   const moderator: ParticipantSlot | undefined = rawMod
     ? {
         id: "mod",
-        provider: String(
-          rawMod.provider ?? "claude",
-        ) as ParticipantSlot["provider"],
-        characterId: String(rawMod.characterId ?? "tmpl-claude-normal"),
+        provider: normalizeProvider(rawMod.provider),
+        characterId:
+          typeof rawMod.characterId === "string" &&
+          rawMod.characterId.length <= MAX_NAME_LEN
+            ? rawMod.characterId
+            : "tmpl-claude-normal",
         role: "moderator",
       }
     : undefined;
@@ -242,7 +275,10 @@ export function importTeamFromJson(json: string): AiTeam {
   return {
     id: newTeamId(),
     name,
-    description: typeof obj.description === "string" ? obj.description : "",
+    description:
+      typeof obj.description === "string"
+        ? obj.description.slice(0, MAX_DESC_LEN)
+        : "",
     emoji: typeof obj.emoji === "string" ? obj.emoji : "✨",
     defaultConference: Boolean(obj.defaultConference ?? false),
     defaultMaxRounds:
