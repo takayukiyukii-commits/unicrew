@@ -269,4 +269,23 @@ UNICREW は各社のロゴ画像を使用していません（独自ロゴのみ
 
 ---
 
+## 姉妹製品（ZUBOLAND の無料デスクトップアプリ）
+
+| | 何をするもの | 行き先 |
+|---|---|---|
+| **KUZIRA** | マーケター特化のセカンドブラウザ。魚拓・タグ検知・競合ウォッチ | [製品ページ](https://zuboland.jp/products/kuzira) |
+| **UNICREW** | （このリポジトリ）複数のAIと議論しながら作業を進めるAIチーム型ワークスペース | [製品ページ](https://zuboland.jp/products/unicrew) |
+| **HONJIN** | 事業の今と動きを手元で見る作業台 | [Releases](https://github.com/zuboland/honjin/releases/latest) |
+
+3つとも登録不要・無料で使えます。
+
+## UNIシリーズ
+
+AIから動かせるマーケティングの道具。UNICREW の「機能の追加 → UNI製品MCP一括接続」から
+まとめて登録すると、UNICREW 上の AI にこれらの操作を任せられます。
+
+[UNIHUB](https://hub.uni-core.jp) ／ [UNIPOST](https://post.uni-core.jp) ／ [UNISTEP](https://step.uni-core.jp) ／ [UNIREACH](https://reach.uni-core.jp) ／ [UNICORE](https://unilinks.uni-core.jp) ／ [UNIDESK](https://desk.uni-core.jp)
+
+---
+
 ZUBOLAND / uniLinks
