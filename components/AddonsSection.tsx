@@ -66,6 +66,7 @@ import {
 } from "@/lib/addons";
 import { describePlugin, type Locale } from "@/lib/plugin-descriptions";
 import { PluginAvatar } from "./PluginAvatar";
+import { withTracking, UNILINKS } from "@/lib/outbound";
 import { useTranslation } from "@/lib/i18n";
 
 interface Props {
@@ -1209,7 +1210,7 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
                   </div>
                   {p.url && (
                     <a
-                      href={p.url}
+                      href={withTracking(p.url, "addons_uni")}
                       target="_blank"
                       rel="noreferrer"
                       className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-accent)] mt-0.5"
@@ -1232,7 +1233,44 @@ function UniSeriesPanel({ locale }: { locale: Locale }) {
           </div>
         );
       })}
+      <UniLinksBand />
     </div>
+  );
+}
+
+/**
+ * uniLinks（UNIシリーズ使い放題メンバーシップ）の帯。
+ *
+ * 一覧の一番下に置く（先に出すと売り込みの画面になる）。
+ * 🚨 数字は販売ページの掲載値だけを書く。書かれていない限定・締切は足さない。
+ */
+function UniLinksBand() {
+  const { t: tr } = useTranslation();
+  return (
+    <a
+      href={withTracking(UNILINKS.url, "addons_membership")}
+      target="_blank"
+      rel="noreferrer"
+      className="block rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]/50 px-4 py-3 hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]/40 transition group"
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-semibold text-[13px]">uniLinks</span>
+        <span className="text-[11px] text-[var(--color-muted)]">
+          {tr("addons.uni.membershipLead")}
+        </span>
+        <span className="ml-auto inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--color-accent)] group-hover:underline shrink-0">
+          {tr("addons.uni.membershipCta")}
+          <ExternalLink size={11} />
+        </span>
+      </div>
+      <div className="text-[11.5px] text-[var(--color-muted)] mt-1 leading-relaxed">
+        {tr("addons.uni.membershipBody", {
+          price: UNILINKS.price.toLocaleString(),
+          compare: UNILINKS.compare.toLocaleString(),
+          trial: UNILINKS.trial,
+        })}
+      </div>
+    </a>
   );
 }
 

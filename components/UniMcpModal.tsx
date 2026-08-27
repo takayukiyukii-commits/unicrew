@@ -25,6 +25,7 @@ import {
   removeCodexMcp,
   type AddonItem,
 } from "@/lib/tauri";
+import { withTracking } from "@/lib/outbound";
 import { useTranslation } from "@/lib/i18n";
 
 interface Props {
@@ -380,7 +381,7 @@ export function UniMcpModal({ open, onClose }: Props) {
                     {e.shortLabel}.uni-core.jp
                   </span>
                   <a
-                    href={e.apiKeyPath}
+                    href={withTracking(e.apiKeyPath, "mcp_apikey")}
                     target="_blank"
                     rel="noreferrer"
                     className="ml-auto text-[10.5px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-0.5"
