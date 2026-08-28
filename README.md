@@ -10,7 +10,7 @@
 UNICREW は **AI を動かすことだけに特化**したデスクトップアプリです。
 コードエディタは VSCode に任せて、AI セッションの起動・並列・切替・可視化を担当します。
 
-- **9 プロバイダ対応** — Claude / Codex / Gemini / Goose / OpenCode / Codex-ACP / Kiro / Qwen / Kimi を同じ UI で
+- **11 プロバイダ対応** — Claude / Codex / Gemini / Goose / OpenCode / Codex-ACP / Kiro / Qwen / Kimi / Grok / Cursor を同じ UI で
 - **議論モード** — 複数の AI に役割を持たせて議論・相互レビュー（9 プリセット）
 - **並列モード** — 2 社以上を同時実行、レスポンスを横並びで比較
 - **Free モード** — 「1 分で始める」ボタン 1 つで Ollama + OpenCode を自動セットアップ。API キー不要・サブスク不要
@@ -100,9 +100,15 @@ ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apa
 | macOS | `UNICREW_*_universal.dmg` |
 | Linux | `UNICREW_*_amd64.AppImage` / `*_amd64.deb` / `*.x86_64.rpm` |
 
-⚠️ 未署名のため、初回起動時に警告が出ます。
-- **Windows**: SmartScreen →「詳細情報」→「実行」
-- **macOS**: Gatekeeper → アプリを右クリック →「開く」
+**コード署名の状況**
+
+| OS | 署名 | 初回起動時 |
+|---|---|---|
+| **Windows** | **ZUBOLAND株式会社名義で署名済み**（v0.2.47〜） | 通常は警告が出ません。出た場合は「詳細情報」→「実行」で、発行元が ZUBOLAND株式会社 であることを確認してください |
+| **macOS** | 未署名（Apple Developer Program 未加入のため） | Gatekeeper → アプリを右クリック →「開く」 |
+| **Linux** | 未署名 | AppImage は実行権限を付けてから起動してください（`chmod +x`） |
+
+配布物には Tauri Updater 用の署名ファイル（`.sig`）が付いており、自動更新はこの署名を検証してから適用されます。
 
 ### 開発起動
 
@@ -242,6 +248,74 @@ Gemini CLI は npm 配布です。**Node.js（npm）が先に必要**です。
 3. `codex --version` で確認
 
 Codex は任意です。使わない場合は初期セットアップでスキップして構いません。
+
+## 更新
+
+新しい版が出ると、アプリが **GitHub Releases の `latest.json`** を見て通知します（Tauri Updater）。
+
+- 配布物に付いている **minisign 署名（`.sig`）を検証してから**適用します。署名が合わないものは適用されません
+- Windows 版は Authenticode 署名済みの実行ファイルに対して更新署名を作っているため、
+  **手元で差し替えたビルドでは更新が通りません**（正規の配布物だけが更新される設計です）
+
+## データはどこに保存されるか
+
+**すべてあなたのPCの中だけです。** 会話内容・APIキー・個人情報は外部に送信しません。
+
+| OS | 場所 |
+|---|---|
+| Windows | `%APPDATA%\jp.unilinks.unicrew\` |
+| macOS | `~/Library/Application Support/jp.unilinks.unicrew/` |
+| Linux | `~/.local/share/jp.unilinks.unicrew/` |
+
+- AI との会話は、あなたが選んだプロバイダ（Claude / Codex / ローカルの Ollama など）へ直接送られます。UNICREW を経由して当社に届くことはありません
+- Free モード（Ollama）で使う場合、会話はあなたのPCから外に出ません
+- 当社へ送るのは、**何台で使われているかを知るための匿名の起動情報だけ**です。設定でオフにできます（[PRIVACY.md](./PRIVACY.md)）
+
+## アンインストール
+
+- **Windows**: 「設定 → アプリ」から削除（msi 版は「プログラムの追加と削除」）
+- **macOS**: アプリケーションフォルダから削除
+- **Linux**: deb 版は `sudo apt remove <パッケージ名>`（`dpkg -l | grep -i unicrew` で確認）／ AppImage はファイルを削除
+
+上のデータフォルダは残ります。設定やセッション履歴も消したい場合は、手で削除してください。
+なお UNICREW がインストールした AI CLI（Claude Code・Ollama など）は**別のソフト**なので、
+それぞれの手順でアンインストールしてください。
+
+## よくある質問
+
+<details>
+<summary><b>本当に無料ですか？ 何かを買う必要はありますか？</b></summary>
+
+UNICREW 自体は完全無料（Apache-2.0）です。
+AI を動かす経路として、①Free モード（Ollama + OpenCode・0円）②既存のサブスク ③APIキー のどれかを選びます。
+**Free モードだけなら、1円も払わずに使えます。**
+</details>
+
+<details>
+<summary><b>VSCode や Cursor の代わりになりますか？</b></summary>
+
+なりません。UNICREW は**コードエディタではなく、AI を動かすことに特化した道具**です。
+編集は VSCode などに任せて、AI セッションの起動・並列・切替・可視化を UNICREW が担当します。
+</details>
+
+<details>
+<summary><b>会社のコードを触らせても大丈夫ですか？</b></summary>
+
+会話の送り先は、あなたが選んだプロバイダです。UNICREW は中身を預かりません。
+外に出したくない場合は Free モード（ローカルの Ollama）を選んでください。
+</details>
+
+<details>
+<summary><b>黒い画面（ターミナル）は必要ですか？</b></summary>
+
+不要です。AI CLI の導入もアプリ内のボタンから行えます。
+</details>
+
+<details>
+<summary><b>不具合を見つけた・要望がある</b></summary>
+
+[Issues](https://github.com/takayukiyukii-commits/unicrew/issues) へお願いします。
+</details>
 
 ## ライセンス・法的事項
 
