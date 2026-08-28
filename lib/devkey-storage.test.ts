@@ -17,7 +17,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const KEY = "unicrew.devApiKey";
 const OPENAI_KEY = "unicrew.devOpenAiKey";
-const origNodeEnv = process.env.NODE_ENV;
 
 async function loadModuleWith(nodeEnv: string) {
   vi.resetModules();
@@ -30,9 +29,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // NODE_ENV は型上 read-only なので直接代入しない（tsc TS2540）。
+  // vi.unstubAllEnvs() が stubEnv で入れた値を元に戻してくれる。
   vi.unstubAllEnvs();
   vi.resetModules();
-  process.env.NODE_ENV = origNodeEnv;
 });
 
 describe("ブラウザ経路のAPIキー保管", () => {
