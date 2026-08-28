@@ -113,10 +113,35 @@ export function copyTextSync(text: string): boolean {
 
 // ---------- Keychain ----------
 
+// ブラウザ経路（npm run dev）専用の鍵の置き場。
+// Tauri 実行時は OS のキーチェーン（get_api_key / set_api_key）に入るので、
+// ここを通るのは開発時のブラウザだけ。ただし `next build && next start` のような
+// 本番ブラウザ実行でも通り得るため、本番では localStorage に平文で残さず
+// メモリ内だけに持つ（CodeQL js/clear-text-storage-of-sensitive-data）。
+// dev の使い勝手（リロードしても鍵が残る）は従来どおり。
+const devKeyMemory = new Map<string, string>();
+const devKeyPersist = process.env.NODE_ENV !== "production";
+
+function devKeyGet(name: string): string | null {
+  if (typeof window === "undefined") return null;
+  if (!devKeyPersist) return devKeyMemory.get(name) ?? null;
+  return localStorage.getItem(name);
+}
+
+function devKeySet(name: string, key: string): void {
+  if (typeof window === "undefined") return;
+  if (!devKeyPersist) {
+    if (key) devKeyMemory.set(name, key);
+    else devKeyMemory.delete(name);
+    return;
+  }
+  if (key) localStorage.setItem(name, key);
+  else localStorage.removeItem(name);
+}
+
 export async function getApiKey(): Promise<string | null> {
   if (!isTauri()) {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("unicrew.devApiKey");
+    return devKeyGet("unicrew.devApiKey");
   }
   const invoke = await loadInvoke();
   return invoke<string | null>("get_api_key");
@@ -124,9 +149,7 @@ export async function getApiKey(): Promise<string | null> {
 
 export async function setApiKey(key: string): Promise<void> {
   if (!isTauri()) {
-    if (typeof window === "undefined") return;
-    if (key) localStorage.setItem("unicrew.devApiKey", key);
-    else localStorage.removeItem("unicrew.devApiKey");
+    devKeySet("unicrew.devApiKey", key);
     return;
   }
   const invoke = await loadInvoke();
@@ -1139,8 +1162,7 @@ export async function fetchGithubAvatar(
 
 export async function getOpenAiApiKey(): Promise<string | null> {
   if (!isTauri()) {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("unicrew.devOpenAiKey");
+    return devKeyGet("unicrew.devOpenAiKey");
   }
   const invoke = await loadInvoke();
   return invoke<string | null>("get_openai_api_key");
@@ -1148,9 +1170,7 @@ export async function getOpenAiApiKey(): Promise<string | null> {
 
 export async function setOpenAiApiKey(key: string): Promise<void> {
   if (!isTauri()) {
-    if (typeof window === "undefined") return;
-    if (key) localStorage.setItem("unicrew.devOpenAiKey", key);
-    else localStorage.removeItem("unicrew.devOpenAiKey");
+    devKeySet("unicrew.devOpenAiKey", key);
     return;
   }
   const invoke = await loadInvoke();
