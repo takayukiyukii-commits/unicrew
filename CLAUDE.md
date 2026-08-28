@@ -11,6 +11,7 @@
 - claude CLIのログインは非TTYでprintモード化→portable-ptyで実行（v0.2.32で根治済み）
 - IMEカーソルは実カーソル信頼（VS Code方式）。スクレイピング補正はclaude UI刷新で壊れる
 - リリース手順: 版数3ファイル更新→タグpush→CI 3OS success確認→Draft/Publish はメンテナが判断
+- 🚨 出荷前ゲート: タグを打つ前に `python "D:/company/CDO（技術責任者）/スクリプト/readme_facts_check.py" unicrew` を回し、**ERROR 0** を確認する（公開READMEの署名の記述・対応OS・プロバイダ数が実物と合っているか。2026-08-28に「未署名」「9プロバイダ」の古い記述が前日更新のREADMEに残っていた）
 - 🚨 `npm run build:tauri` は前処理で実行中の unicrew.exe を強制終了する（stopDevServers）。アプリを使用中にビルドしないこと（実際に作業中のアプリを落とした事故あり）
 
 ## 全社共通（要遵守）
@@ -23,3 +24,7 @@
 - 合格基準は check.yml と同一の3本：`npx tsc --noEmit -p tsconfig.json` / `npm run lint` / `npm test`
 - 🚨 クラウドに出すのは **Next 側のロジックとテストまで**。Tauri の Rust ビルド・署名・公証・実機確認はクラウド不可（CI とローカル）
 - 運用ルール: `docs/cloud-agent.md`
+
+<!-- HONJIN:vault-rule -->
+@HONJIN.md
+<!-- /HONJIN:vault-rule -->
