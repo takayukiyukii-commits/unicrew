@@ -48,3 +48,7 @@ scripts/*.py
 
 # Claude Code のローカル設定（個人環境・共有しない）
 .claude/settings.local.json
+
+# 社内の作業ルール（社内の絶対パスを含む）。このリポジトリは公開なのでコミットしない
+HONJIN.md
+GEMINI.md
