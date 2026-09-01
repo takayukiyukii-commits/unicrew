@@ -58,15 +58,19 @@ CLI_ARGS = [
 ]
 
 
-def make_secret_image(path: Path) -> str:
-    """ピクセルにしか存在しない単語を焼いた画像を作る。
+def make_probe_image(path: Path) -> str:
+    """ピクセルにしか存在しない合言葉を焼いた画像を作る。
+
+    これは秘密ではなく、毎回使い捨てる検査用の目印。関数名に secret を
+    含めていたら CodeQL に「機密値を平文でログ出力している」と警告された
+    （2026-09-01）。名前が実態とズレていたので、抑制せず名前のほうを直した。
 
     この単語はパス名にもファイル名にも本文にも出てこない。
     AI が言い当てられたら、それは画像を本当に見たということ。
     """
     from PIL import Image, ImageDraw, ImageFont
 
-    word = "UNICREW-" + "".join(random.choices(string.ascii_uppercase, k=3)) + \
+    probe = "UNICREW-" + "".join(random.choices(string.ascii_uppercase, k=3)) + \
         "-" + "".join(random.choices(string.digits, k=4))
     im = Image.new("RGB", (760, 220), (255, 255, 255))
     d = ImageDraw.Draw(im)
@@ -79,9 +83,9 @@ def make_secret_image(path: Path) -> str:
         if os.path.exists(candidate):
             font = ImageFont.truetype(candidate, 46)
             break
-    d.text((30, 80), word, fill=(0, 0, 0), font=font)
+    d.text((30, 80), probe, fill=(0, 0, 0), font=font)
     im.save(path)
-    return word
+    return probe
 
 
 def build_payload_via_rust(text: str, image: Path | None) -> str:
@@ -153,7 +157,7 @@ def main() -> int:
     outside.mkdir(parents=True)
 
     image = outside / "screenshot-verify.png"
-    word = make_secret_image(image)
+    probe = make_probe_image(image)
 
     # lib/attachment-prompt.ts が作るのと同じ本文。
     # 🚨 実装とここがズレたら「別の文面を検証している」ことになるので、機械で照合する。
@@ -187,7 +191,7 @@ def main() -> int:
     print(f"作業場       : {tmp}")
     print(f"ワークスペース: {workspace}")
     print(f"画像         : {image}（ワークスペースの外）")
-    print(f"合言葉       : {word}（画像のピクセルにしか無い）")
+    print(f"合言葉       : {probe}（画像のピクセルにしか無い）")
     print(f"モード       : {'修正前（画像を渡さない）' if legacy else '修正後（画像を渡す）'}")
     print("-" * 70)
 
@@ -203,7 +207,7 @@ def main() -> int:
     print(f"AI の答え    : {seen['text'].strip()[:200]}")
     print("-" * 70)
 
-    found = word in seen["text"]
+    found = probe in seen["text"]
     shutil.rmtree(tmp, ignore_errors=True)
 
     if legacy:

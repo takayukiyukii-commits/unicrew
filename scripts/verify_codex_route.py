@@ -53,11 +53,15 @@ SRC_TAURI = REPO / "src-tauri"
 TIMEOUT_SEC = 300
 
 
-def make_secret_image(path: Path) -> str:
-    """ピクセルにしか存在しない単語を焼いた画像を作る。"""
+def make_probe_image(path: Path) -> str:
+    """ピクセルにしか存在しない合言葉を焼いた画像を作る。
+
+    これは秘密ではなく、毎回使い捨てる検査用の目印。関数名に secret を
+    含めていたら CodeQL に「機密値を平文でログ出力している」と警告された
+    （2026-09-01）。名前が実態とズレていたので、抑制せず名前のほうを直した。"""
     from PIL import Image, ImageDraw, ImageFont
 
-    word = (
+    probe = (
         "UNICREW-"
         + "".join(random.choices(string.ascii_uppercase, k=3))
         + "-"
@@ -74,9 +78,9 @@ def make_secret_image(path: Path) -> str:
         if os.path.exists(candidate):
             font = ImageFont.truetype(candidate, 46)
             break
-    d.text((30, 80), word, fill=(0, 0, 0), font=font)
+    d.text((30, 80), probe, fill=(0, 0, 0), font=font)
     im.save(path)
-    return word
+    return probe
 
 
 def codex_args(*spec: str) -> list[str]:
@@ -152,7 +156,7 @@ def main() -> int:
     outside.mkdir(parents=True)
 
     image = outside / "screenshot-verify.png"
-    word = make_secret_image(image)
+    probe = make_probe_image(image)
 
     results: list[tuple[str, bool, str]] = []
 
@@ -161,7 +165,7 @@ def main() -> int:
         print(f"  {'PASS' if ok else 'FAIL'}  {name}  … {detail}")
 
     print(f"作業場  : {tmp}")
-    print(f"合言葉  : {word}（画像のピクセルにしか無い）")
+    print(f"合言葉  : {probe}（画像のピクセルにしか無い）")
     print("-" * 78)
 
     # 1. AcceptEdits 新規
@@ -201,7 +205,7 @@ def main() -> int:
     print("5) 画像添付（ワークスペースの外にある画像）")
     a = codex_args("accept", "--cd", str(ws), "--image", str(image))
     r = run_codex(a, "この画像に書いてある単語をそのまま1つだけ答えて。説明は不要。", ws)
-    check("画像が届く", word in r["text"],
+    check("画像が届く", probe in r["text"],
           f"text={r['text'][:60]!r}")
     check("ファイルを開きに行っていない", not r["commands"],
           f"実行したコマンド={len(r['commands'])}件")
