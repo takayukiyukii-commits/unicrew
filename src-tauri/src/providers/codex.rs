@@ -9,6 +9,7 @@
 //!  - ChatGPT Plus/Pro の OAuth は CLI 側で完結（UNICREW は触らない）
 //!  - サブスク or API キーの切替は CLI が認識する標準 env / 認証ファイルに任せる
 
+use crate::providers::images::InputImage;
 use crate::providers::types::{AuthMode, NormalizedEvent, PermissionMode, ProviderError, SpawnOpts};
 use crate::providers::{CliProvider, SessionHandle};
 use serde_json::Value;
@@ -62,6 +63,123 @@ impl CliProvider for CodexProvider {
     }
 }
 
+/// `codex` に渡す引数を組み立てる（プログラム名は含まない）。
+///
+/// # なぜ純粋関数なのか
+///
+/// ここは「引数を1つ間違えると CLI が exit code 2 で即死し、UI からは
+/// 『応答が来ない』としか見えない」場所で、実際に2回それが起きている:
+///
+/// 1. `-C` を `codex exec resume` に渡していた → 議論モードの2ラリー目から応答が消えた
+/// 2. `--ask-for-approval` / `--sandbox` を `resume` にも渡していた
+///    → **Plan モードが新規・再開の両方で起動即死**（2026-09-01 実測で発見）
+///
+/// どちらも「その組み合わせを一度も動かしていない」ことが原因だった。
+/// 引数を目で読んで確かめるのをやめて、テストと実機検証が同じ関数を通るようにしてある。
+///
+/// # 🚨 codex の版差
+///
+/// `codex exec` と `codex exec resume` で使えるフラグが違う（0.150.1 実測）:
+///
+/// | | `exec` | `exec resume` |
+/// |---|---|---|
+/// | `-C, --cd` | ある | **無い** |
+/// | `-s, --sandbox` | ある | **無い** |
+/// | `--ask-for-approval` | **無い** | **無い** |
+/// | `-c, --config` | ある | ある |
+/// | `-i, --image` | ある | ある |
+/// | `--dangerously-bypass-approvals-and-sandbox` | ある | ある |
+///
+/// だから両方で通るものだけを使う。読み取り専用は `-c` の設定上書きで表現する。
+pub fn build_codex_args(
+    resume_sid: Option<&str>,
+    permission_mode: PermissionMode,
+    model: &str,
+    workspace: Option<&str>,
+    image_paths: &[String],
+) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+
+    if let Some(sid) = resume_sid {
+        v.push("exec".into());
+        v.push("resume".into());
+        v.push(sid.into());
+    } else {
+        v.push("exec".into());
+    }
+
+    // 共通フラグ。
+    v.push("--json".into());
+    v.push("--skip-git-repo-check".into());
+
+    // パーミッションモード（Shift+Tab トグル）。
+    // - AcceptEdits: codex exec は非対話なので承認 UI を出せず、UNICREW 側で
+    //   Workspace Trust 済の前提で承認待ち（item.started のまま固まる）を回避する。
+    // - Plan: 読み取り・分析専用。書込・実行は静かに拒否し、走査と要約だけ通す。
+    //
+    // 🚨 Plan は 2026-09-01 まで `--sandbox read-only --ask-for-approval never` を
+    //    渡しており、**Codex 経路の Plan モードは起動即死していた**（実測）:
+    //      error: unexpected argument '--ask-for-approval' found   → exit code 2
+    //    しかも `codex exec resume` には `--sandbox` すら無いので、新規・再開の
+    //    どちらも死んでいた。自社コードは1文字も変えていないのに、codex 側が
+    //    フラグを整理した時点で壊れた形。
+    //
+    //    いまは `-c` の設定上書きで同じことを表現している。2026-09-01 実測で
+    //    読み取りは通り、書き込みは
+    //    「patch rejected: writing is blocked by read-only sandbox」で実際に止まる
+    //    （依頼したファイルが作られないことをファイルシステムで確認済み）。
+    match permission_mode {
+        PermissionMode::AcceptEdits => {
+            v.push("--dangerously-bypass-approvals-and-sandbox".into());
+        }
+        PermissionMode::Plan => {
+            v.push("-c".into());
+            v.push("sandbox_mode=\"read-only\"".into());
+            v.push("-c".into());
+            v.push("approval_policy=\"never\"".into());
+        }
+    }
+
+    // UNICREW の `ModelId` 型は claude-* しか持っておらず、Codex キャラの defaultModel にも
+    // `claude-sonnet-4-6` が入ってしまっている。これを `codex exec -m claude-sonnet-4-6`
+    // にそのまま渡すと OpenAI 側が即 400 invalid_request_error を返し、subprocess が
+    // 一瞬で終了する（UI からは「接続が切れた」ように見える）。
+    // claude- 始まりは明らかに誤渡し。空文字も含めて落とす → codex CLI の既定モデル
+    // （`~/.codex/config.toml`）を使わせる。OpenAI モデルが明示指定されてる時だけ尊重。
+    if !model.is_empty() && !model.starts_with("claude-") {
+        v.push("-m".into());
+        v.push(model.into());
+    }
+
+    // 🚨 `-C` は `codex exec` 専用フラグで、`codex exec resume` には存在しない。
+    //    resume に渡すと clap が「unexpected argument '-C'」で即 exit code 2 で死ぬ
+    //    → 議論モードの2ラリー目以降で Codex の応答が消える原因だった。
+    //    resume 時は元セッションの cwd を引き継ぐので -C 不要。新規 exec の時だけ渡す。
+    if resume_sid.is_none() {
+        if let Some(ws) = workspace {
+            v.push("-C".into());
+            v.push(ws.into());
+        }
+    }
+
+    // 添付画像。
+    //
+    // 🚨 必ず `--image=<path>` と **= 連結の1引数** で渡す。`--image <path>` と
+    //    分けると、可変長引数（`<FILE>...`）が直後の `-`（stdin 指定）まで
+    //    画像ファイルとして飲み込む。claude の `--allowedTools` と同じ罠。
+    for path in image_paths {
+        v.push(format!("--image={}", path));
+    }
+
+    // Windows の codex.cmd へ argv で渡すと、Rust 1.77+ が CVE-2024-24576 対策で
+    // 改行入りの引数を弾く（"batch file arguments are invalid"）。
+    // システムプロンプトが必ず複数行なので、`-` を引数に置いて stdin から流す方式にしている。
+    // codex exec は引数末尾が `-` のとき stdin を読む。
+    v.push("-".into());
+
+    v
+}
+
 pub struct CodexSessionHandle {
     /// UNICREW 内部 ID（React 側で使う）
     session_id: String,
@@ -80,74 +198,76 @@ pub struct CodexSessionHandle {
 #[async_trait::async_trait]
 impl SessionHandle for CodexSessionHandle {
     async fn send_user_message(&mut self, text: &str) -> Result<(), ProviderError> {
+        self.send_user_message_with_images(text, &[]).await
+    }
+
+    /// 添付画像を **本物の画像として** codex に渡す。
+    ///
+    /// codex CLI には公式の受け口がある（2026-09-01 実測で発見）:
+    ///   `codex exec --image=<FILE>` / `codex exec resume <sid> --image=<FILE>`
+    /// どちらにも `-i, --image` があるので、新規・再開のどちらでも渡せる。
+    ///
+    /// UNICREW はこれを一度も使っておらず、画像は本文にパスを書いて
+    /// 「開いて見て」と頼むだけだった。codex は自力で開けることが多く
+    /// claude 経路ほど露骨には壊れていなかったが、読み取り専用の Plan モードや
+    /// 権限の外にあるファイルでは同じ壁に当たる。
+    ///
+    /// 実測（2026-09-01）: `--image=` で渡すと、コマンド実行を1回もせずに
+    /// 画像のピクセルにしか無い単語を答えた。
+    async fn send_user_message_with_images(
+        &mut self,
+        text: &str,
+        images: &[InputImage],
+    ) -> Result<(), ProviderError> {
         if *self.stopped.lock().await {
             return Ok(());
+        }
+
+        let (image_paths, skipped) =
+            crate::providers::images::usable_image_paths(images);
+        if skipped > 0 {
+            eprintln!(
+                "[unicrew/codex] 添付画像 {} 件は添付を見送りました（形式・サイズ・枚数のいずれか）。本文のパス経由で従来どおり処理されます",
+                skipped
+            );
         }
 
         let cli_session = self.cli_session_id.lock().await.clone();
         let mut cmd = crate::build_silent_command("codex");
 
-        if let Some(sid) = cli_session.as_ref() {
-            cmd.arg("exec").arg("resume").arg(sid);
-        } else {
-            cmd.arg("exec");
-        }
-
-        // 共通フラグ。
-        cmd.args(["--json", "--skip-git-repo-check"]);
-
-        // パーミッションモード（Shift+Tab トグル）。
-        // - AcceptEdits: 既存挙動。codex exec は非対話なので承認 UI を出せず、UNICREW 側で
-        //   Workspace Trust 済の前提で `--dangerously-bypass-approvals-and-sandbox` を付けて
-        //   承認待ち（item.started のまま固まる）を回避する。
-        // - Plan: 読み取り・分析専用。`--sandbox read-only --ask-for-approval never` で
-        //   書込・実行は静かに拒否。ファイルツリー走査と要約だけ通す。
-        match self.permission_mode {
-            PermissionMode::AcceptEdits => {
-                cmd.arg("--dangerously-bypass-approvals-and-sandbox");
-            }
-            PermissionMode::Plan => {
-                cmd.args([
-                    "--sandbox",
-                    "read-only",
-                    "--ask-for-approval",
-                    "never",
-                ]);
-            }
-        }
-
-        // UNICREW の `ModelId` 型は claude-* しか持っておらず、Codex キャラの defaultModel にも
-        // `claude-sonnet-4-6` が入ってしまっている。これを `codex exec -m claude-sonnet-4-6`
-        // にそのまま渡すと OpenAI 側が即 400 invalid_request_error を返し、subprocess が
-        // 一瞬で終了する（UI からは「接続が切れた」ように見える）。
-        // claude- 始まりは明らかに誤渡し。空文字も含めて落とす → codex CLI の既定モデル
-        // （`~/.codex/config.toml`）を使わせる。OpenAI モデルが明示指定されてる時だけ尊重。
-        if !self.model.is_empty() && !self.model.starts_with("claude-") {
-            cmd.arg("-m").arg(&self.model);
-        }
-
-        // `-C` は `codex exec` 専用フラグで、`codex exec resume` には存在しない。
-        // resume に渡すと clap が「unexpected argument '-C'」で即 exit code 2 で死ぬ
-        // → 議論モードの2ラリー目以降で Codex の応答が消える原因だった。
-        // resume 時は元セッションの cwd を引き継ぐので -C 不要。新規 exec の時だけ渡す。
-        if cli_session.is_none() {
-            if let Some(ws) = &self.workspace {
-                cmd.arg("-C").arg(ws);
-            }
-        }
-
         // システムプロンプトは Codex の config 経由（-c instructions=...）。
         // ただし長文の場合 TOML エスケープに弱いので、最初のメッセージ前置きとして合成する。
+        // 画像を添付できたときは、本文に残っているパス行を見て
+        // 律儀にファイルを開きに行かないよう一文を足す（claude 経路と同じ扱い）。
+        let text_owned = if image_paths.is_empty() {
+            text.to_string()
+        } else {
+            format!(
+                "{}{}",
+                text,
+                crate::providers::images::inline_notice(image_paths.len())
+            )
+        };
+        let text = text_owned.as_str();
+
         let prompt = if cli_session.is_none() && !self.system_prompt.is_empty() {
             format!("{}\n\n---\n\n{}", self.system_prompt, text)
         } else {
             text.to_string()
         };
-        // Windows の codex.cmd へ argv で渡すと、Rust 1.77+ が CVE-2024-24576 対策で
-        // 改行入りの引数を弾く（"batch file arguments are invalid"）。
-        // システムプロンプトが必ず複数行なので、`-` を引数に置いて stdin から流す方式に変更。
-        // codex exec は引数末尾が `-` のとき stdin を読む。
-        cmd.arg("-");
+        // 引数の組み立ては build_codex_args に一本化してある。
+        // ユニットテストも実機検証（examples/print_codex_args.rs）も
+        // **この同じ関数**を通るので、「テストは通るが実物は違う」が起きない。
+        for a in build_codex_args(
+            cli_session.as_deref(),
+            self.permission_mode,
+            &self.model,
+            self.workspace.as_deref(),
+            &image_paths,
+        ) {
+            cmd.arg(a);
+        }
+
 
         // 認証モード制御
         match self.auth_mode {
@@ -595,4 +715,96 @@ fn extract_session_id(v: &Value) -> Option<String> {
         return Some(s.to_string());
     }
     None
+}
+
+#[cfg(test)]
+mod codex_args_tests {
+    use super::*;
+
+    fn has_pair(v: &[String], flag: &str, value: &str) -> bool {
+        v.windows(2).any(|w| w[0] == flag && w[1] == value)
+    }
+
+    #[test]
+    fn plan_mode_never_uses_flags_that_codex_removed() {
+        // 🚨 これが本体。2026-09-01 まで Plan モードは
+        //    `--sandbox read-only --ask-for-approval never` を渡して起動即死していた。
+        for sid in [None, Some("01a05ca9-f5bf-75a3-98c2-181a48ab50a0")] {
+            let v = build_codex_args(sid, PermissionMode::Plan, "", Some("C:/ws"), &[]);
+            assert!(
+                !v.iter().any(|a| a == "--ask-for-approval"),
+                "codex exec / resume のどちらにも --ask-for-approval は無い"
+            );
+            assert!(
+                !v.iter().any(|a| a == "--sandbox" || a == "-s"),
+                "codex exec resume に --sandbox は無い"
+            );
+            // 代わりに -c の設定上書きで読み取り専用を表現する
+            assert!(has_pair(&v, "-c", "sandbox_mode=\"read-only\""));
+            assert!(has_pair(&v, "-c", "approval_policy=\"never\""));
+        }
+    }
+
+    #[test]
+    fn accept_edits_bypasses_approval() {
+        let v = build_codex_args(None, PermissionMode::AcceptEdits, "", None, &[]);
+        assert!(v.iter().any(|a| a == "--dangerously-bypass-approvals-and-sandbox"));
+    }
+
+    #[test]
+    fn cd_flag_is_only_for_new_sessions() {
+        // 🚨 `-C` を resume に渡すと exit code 2 で即死する（過去の実害）
+        let fresh = build_codex_args(None, PermissionMode::AcceptEdits, "", Some("C:/ws"), &[]);
+        assert!(has_pair(&fresh, "-C", "C:/ws"));
+
+        let resumed =
+            build_codex_args(Some("sid-1"), PermissionMode::AcceptEdits, "", Some("C:/ws"), &[]);
+        assert!(!resumed.iter().any(|a| a == "-C"));
+        assert_eq!(&resumed[0..3], &["exec", "resume", "sid-1"]);
+    }
+
+    #[test]
+    fn images_are_passed_as_one_argument_each() {
+        // 🚨 `--image` は可変長引数。分けて渡すと直後の `-`（stdin指定）まで飲み込む。
+        let imgs = vec!["C:/a/one.png".to_string(), "C:/a/two.png".to_string()];
+        let v = build_codex_args(None, PermissionMode::AcceptEdits, "", None, &imgs);
+        assert!(v.iter().any(|a| a == "--image=C:/a/one.png"));
+        assert!(v.iter().any(|a| a == "--image=C:/a/two.png"));
+        assert!(
+            !v.iter().any(|a| a == "--image" || a == "-i"),
+            "= 連結にせず単独の --image を出してはいけない"
+        );
+    }
+
+    #[test]
+    fn images_work_on_resume_too() {
+        // codex exec resume にも -i, --image がある（0.150.1 実測）
+        let imgs = vec!["C:/a/one.png".to_string()];
+        let v = build_codex_args(Some("sid-1"), PermissionMode::AcceptEdits, "", None, &imgs);
+        assert!(v.iter().any(|a| a == "--image=C:/a/one.png"));
+    }
+
+    #[test]
+    fn stdin_marker_is_always_last() {
+        // `-` が最後でないと、codex が stdin を読まずにプロンプトを取り違える
+        for imgs in [vec![], vec!["C:/a/one.png".to_string()]] {
+            for sid in [None, Some("sid-1")] {
+                let v = build_codex_args(sid, PermissionMode::Plan, "gpt-5", Some("C:/ws"), &imgs);
+                assert_eq!(v.last().map(String::as_str), Some("-"));
+            }
+        }
+    }
+
+    #[test]
+    fn claude_model_names_are_never_forwarded_to_codex() {
+        // claude-* を渡すと OpenAI が 400 を返して subprocess が即死する（過去の実害）
+        let v = build_codex_args(None, PermissionMode::AcceptEdits, "claude-sonnet-4-6", None, &[]);
+        assert!(!v.iter().any(|a| a == "-m"));
+
+        let v = build_codex_args(None, PermissionMode::AcceptEdits, "gpt-5", None, &[]);
+        assert!(has_pair(&v, "-m", "gpt-5"));
+
+        let v = build_codex_args(None, PermissionMode::AcceptEdits, "", None, &[]);
+        assert!(!v.iter().any(|a| a == "-m"));
+    }
 }

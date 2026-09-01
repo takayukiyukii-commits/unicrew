@@ -84,6 +84,7 @@ import {
   acpCliStatus,
   agentPermissionResponse,
   agentSend,
+  inlineableImages,
   agentStart,
   agentStop,
   checkUnicrewUpdate,
@@ -2314,6 +2315,13 @@ ${command}
     thread: Thread,
     attachments?: MessageAttachment[],
   ) => {
+    // 添付画像は「パスの文字列」ではなく本物の画像として CLI に渡す。
+    // 従来はワークスペース外のパスを AI に開かせていたため、Claude Code の
+    // 「ワークスペース外の読み取りには許可が要る」に必ず引っかかっていた
+    // （2026-09-01 実測で再現）。渡せない形式（SVG 等）は除かれ、その場合は
+    // 本文のパス行が残るので従来動作に戻るだけ。
+    const inlineImages = inlineableImages(attachments);
+
     const allSlots = effectiveParticipants(thread);
     const participantSlots = allSlots.filter((s) => s.role !== "moderator");
     // moderator は初回ターンには発火させない（各ラウンド完了後に総括する）
@@ -2390,7 +2398,7 @@ ${command}
           await ensureSlotSession(thread, slot);
           // 完了 Promise を agentSend より先に登録（resolve 取りこぼし防止）
           const completion = awaitSlotCompletion(sid);
-          await agentSend(sid, promptForSlot);
+          await agentSend(sid, promptForSlot, inlineImages);
           await completion;
 
           // 完了したら自分の応答を取り出して次へ渡す
@@ -2460,7 +2468,7 @@ ${command}
       const sid = makeSlotSid(thread.id, slot.id, parallel);
       try {
         await ensureSlotSession(thread, slot);
-        await agentSend(sid, text);
+        await agentSend(sid, text, inlineImages);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const errMsg = {

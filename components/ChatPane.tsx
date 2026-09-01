@@ -28,6 +28,7 @@ import type {
   Thread,
 } from "@/lib/types";
 import { saveAvatarFromFile, pickAttachment } from "@/lib/tauri";
+import { buildAttachmentPrompt } from "@/lib/attachment-prompt";
 import {
   PERMISSION_MODE_LABELS,
   PROVIDER_COLORS,
@@ -226,34 +227,12 @@ export function ChatPane({
     // /compact /clear 等の会話系 REPL コマンドは headless の claude に
     // 素送りするとプロセスが落ちる（os error 232）。自然言語へ書き換える。
     const effectiveValue = rewriteSlashForHeadless(value) ?? value;
-    // 添付画像は CLI へテキストで渡すため、ただのパスだと AI が「画像」と
-    // 認識せず素通りしがち。Read ツールは画像対応なので「このパスは画像。
-    // Read で画像として開いて中身を見てから答えて」と明示する。
-    const imgs = attachments.filter((a) => a.kind === "image");
-    const docs = attachments.filter((a) => a.kind !== "image");
-    const lines: string[] = [];
-    imgs.forEach((a, n) =>
-      lines.push(
-        `添付画像${imgs.length > 1 ? ` ${n + 1}` : ""}（${a.name}）: ${a.path}`,
-      ),
-    );
-    docs.forEach((a, n) =>
-      lines.push(
-        `添付ファイル${docs.length > 1 ? ` ${n + 1}` : ""}（${a.name}）: ${a.path}`,
-      ),
-    );
-    const notes: string[] = [];
-    if (imgs.length > 0)
-      notes.push(
-        "上記の画像ファイルは Read ツールで開き、テキストではなく画像として内容を確認したうえで回答してください。",
-      );
-    if (docs.length > 0)
-      notes.push(
-        "上記の添付ファイルは Read ツールで開いて中身を読んだうえで回答してください。",
-      );
-    const note = notes.length ? "\n\n" + notes.join("\n") : "";
-    const textForAi =
-      [effectiveValue, ...lines].filter(Boolean).join("\n\n") + note;
+    // 添付の扱いは lib/attachment-prompt.ts に切り出してある（テスト可能にするため）。
+    //
+    // 画像そのものは agentSend が本物の image ブロックとして CLI に渡す（Claude 経路）。
+    // ここで本文に足すパス行は「名前で呼べるラベル」と、画像を直接受け取れない
+    // プロバイダ用のフォールバックを兼ねる。
+    const textForAi = buildAttachmentPrompt(effectiveValue, attachments);
     onSend(textForAi, attachments);
     setInput("");
     setAttachments([]);
