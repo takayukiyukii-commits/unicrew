@@ -952,11 +952,37 @@ export async function agentStart(params: AgentStartParams): Promise<void> {
   });
 }
 
-export async function agentSend(sessionId: string, text: string): Promise<void> {
+/** CLI に本物の画像として渡せる添付（Anthropic の image ブロックが受け付ける形式）。 */
+const INLINEABLE_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp"];
+
+/**
+ * 添付のうち「画像としてそのまま渡せるもの」だけを抜き出す。
+ *
+ * 🚨 SVG は除く。Anthropic の image ブロックが受け付けないので、渡すと送信ごと
+ *    壊れる。除いたものは本文のパス行が残っているので従来どおり AI 自身が開く。
+ */
+export function inlineableImages(
+  attachments?: { kind: string; path: string; mime?: string }[],
+): { path: string; mime: string | null }[] {
+  if (!attachments || attachments.length === 0) return [];
+  return attachments
+    .filter((a) => {
+      if (a.kind !== "image") return false;
+      const ext = (a.path.split(".").pop() || "").toLowerCase();
+      return INLINEABLE_IMAGE_EXTS.includes(ext);
+    })
+    .map((a) => ({ path: a.path, mime: a.mime ?? null }));
+}
+
+export async function agentSend(
+  sessionId: string,
+  text: string,
+  images: { path: string; mime: string | null }[] = [],
+): Promise<void> {
   if (!isTauri()) throw new Error("agentSend は Tauri 環境のみ対応");
   const invoke = await loadInvoke();
   await invoke("agent_send", {
-    req: { session_id: sessionId, text },
+    req: { session_id: sessionId, text, images },
   });
 }
 

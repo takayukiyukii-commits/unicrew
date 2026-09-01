@@ -4445,6 +4445,13 @@ fn default_permission_mode() -> String {
 struct AgentSendRequest {
     session_id: String,
     text: String,
+    /// 添付画像（パスのみ）。Claude 経路ではこれを base64 の image ブロックに
+    /// して本物の画像として渡す。他プロバイダは無視する（従来どおり本文の
+    /// パス行だけが渡る）。
+    ///
+    /// `serde(default)` なので、画像を送らない既存の呼び出しはそのまま通る。
+    #[serde(default)]
+    images: Vec<crate::providers::images::InputImage>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -4525,7 +4532,7 @@ async fn agent_send(
         .get_mut(&req.session_id)
         .ok_or_else(|| format!("session not found: {}", req.session_id))?;
     session
-        .send_user_message(&req.text)
+        .send_user_message_with_images(&req.text, &req.images)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())

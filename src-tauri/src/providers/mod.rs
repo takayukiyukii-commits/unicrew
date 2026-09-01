@@ -27,6 +27,7 @@ pub mod cursor;
 pub mod gemini;
 pub mod goose;
 pub mod grok;
+pub mod images;
 pub mod kimi;
 pub mod kiro;
 pub mod opencode;
@@ -34,6 +35,7 @@ pub mod qwen;
 pub mod stream_parser;
 pub mod types;
 
+use crate::providers::images::InputImage;
 use crate::providers::types::{NormalizedEvent, ProviderError, SpawnOpts};
 use std::sync::Arc;
 
@@ -60,6 +62,24 @@ pub trait CliProvider: Send + Sync {
 pub trait SessionHandle: Send + Sync {
     /// ユーザーメッセージを送信。CLI の stdin に stream-json で書き込む。
     async fn send_user_message(&mut self, text: &str) -> Result<(), ProviderError>;
+
+    /// 添付画像つきでユーザーメッセージを送信。
+    ///
+    /// 既定は **画像を捨てて従来どおりテキストだけ送る**。
+    /// 画像を本当に画像として渡せるのは、いまのところ stream-json 入力で
+    /// image ブロックを受け取れる Claude 経路だけなので、そこだけが
+    /// このメソッドを上書きする。
+    ///
+    /// こうしておくと、残り11プロバイダのコードには一切触れずに済み、
+    /// 挙動も1バイトも変わらない（画像は本文のパス行として今までどおり渡る）。
+    async fn send_user_message_with_images(
+        &mut self,
+        text: &str,
+        images: &[InputImage],
+    ) -> Result<(), ProviderError> {
+        let _ = images;
+        self.send_user_message(text).await
+    }
 
     /// 許可応答（permission prompt が来た時）を送信。
     async fn send_permission_response(

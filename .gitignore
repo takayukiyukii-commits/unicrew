@@ -45,6 +45,10 @@ scripts/_handoff_*.md
 scripts/_handoff_*.md
 scripts/*.py
 !scripts/build_tauri.js
+# 検証スクリプトは追跡する（次に触る人が同じ手順で測り直せないと意味がない）
+!scripts/verify_image_attachment.py
+!scripts/verify_codex_route.py
+__pycache__/
 
 # Claude Code のローカル設定（個人環境・共有しない）
 .claude/settings.local.json

@@ -8,6 +8,7 @@
 //!  - OAuth トークンは UNICREW 側で読み書きしない（CLI が `~/.claude/credentials` 等で自前管理）
 //!  - サブスクモード時は `ANTHROPIC_API_KEY` を env から外して CLI のサブスク認証経路に乗せる
 
+use crate::providers::images::InputImage;
 use crate::providers::types::{AuthMode, NormalizedEvent, PermissionMode, ProviderError, SpawnOpts};
 use crate::providers::{stream_parser, CliProvider, SessionHandle};
 use std::collections::HashMap;
@@ -364,14 +365,35 @@ impl Drop for ClaudeSessionHandle {
 #[async_trait::async_trait]
 impl SessionHandle for ClaudeSessionHandle {
     async fn send_user_message(&mut self, text: &str) -> Result<(), ProviderError> {
-        // stream-json input 形式で1行JSON
-        let payload = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": text,
-            },
-        });
+        self.send_user_message_with_images(text, &[]).await
+    }
+
+    /// 添付画像を **本物の画像として** CLI に渡す。
+    ///
+    /// claude CLI は `--input-format stream-json` の user メッセージで
+    /// content 配列 + image ブロック（base64）を受け取れる（2026-09-01 実測。
+    /// 画像のピクセルにしか無い単語を読ませて正答させた）。
+    /// これにより「ワークスペース外のファイルを読む許可」の問題ごと消える。
+    ///
+    /// 画像が1枚も無いときは従来どおり `content` を **文字列** のまま送る。
+    /// 形を変えないほうが安全（既存の全経路がこの形で通っている）。
+    async fn send_user_message_with_images(
+        &mut self,
+        text: &str,
+        images: &[InputImage],
+    ) -> Result<(), ProviderError> {
+        // 組み立ては images::build_user_payload に一本化してある。
+        // ユニットテストも実機検証（examples/print_user_payload.rs）も
+        // **この同じ関数**を通るので、「テストは通るが実物は違う」が起きない。
+        let (payload, skipped) =
+            crate::providers::images::build_user_payload(text, images);
+        if skipped > 0 {
+            eprintln!(
+                "[unicrew/claude] 添付画像 {} 件はインライン化を見送りました（形式・サイズ・枚数のいずれか）。本文のパス経由で従来どおり処理されます",
+                skipped
+            );
+        }
+
         let mut line = serde_json::to_string(&payload)?;
         line.push('\n');
         // 書き込み失敗の多くは claude が起動直後に終了しているケース
