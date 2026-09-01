@@ -495,8 +495,13 @@ export default function Page() {
     new Set(),
   );
   const [characterRevision, setCharacterRevision] = useState(0);
-  const [pendingPermission, setPendingPermission] =
-    useState<PendingPermission | null>(null);
+  // 承認要求は「待ち行列」で持つ。
+  // 単一の state だと、2つのセッションがほぼ同時に許可を求めたときに後勝ちで上書きされ、
+  // 先に聞いてきた側が返事をもらえないまま固まる（CLI は stdin の返事を待って止まる）。
+  const [permissionQueue, setPermissionQueue] = useState<PendingPermission[]>(
+    [],
+  );
+  const pendingPermission = permissionQueue[0] ?? null;
   /** session_id -> ActiveDraft（split時は2つ、single時は1つ） */
   const [drafts, setDrafts] = useState<Record<string, ActiveDraft>>({});
   const [streamingSids, setStreamingSids] = useState<Set<string>>(new Set());
@@ -892,11 +897,18 @@ export default function Page() {
     }
 
     if (event.kind === "permission_request") {
-      setPendingPermission({
-        sessionId: event.session_id,
-        requestId: event.request_id,
-        toolName: event.tool_name,
-        input: event.input,
+      setPermissionQueue((queue) => {
+        // 同じ request_id が二度届いても二重に積まない
+        if (queue.some((q) => q.requestId === event.request_id)) return queue;
+        return [
+          ...queue,
+          {
+            sessionId: event.session_id,
+            requestId: event.request_id,
+            toolName: event.tool_name,
+            input: event.input,
+          },
+        ];
       });
       return;
     }
@@ -2652,12 +2664,22 @@ ${command}
     decision: "allow" | "deny" | "allow_once",
   ) => {
     if (!pendingPermission) return;
-    await agentPermissionResponse(
-      pendingPermission.sessionId,
-      pendingPermission.requestId,
-      decision,
-    );
-    setPendingPermission(null);
+    const answered = pendingPermission;
+    try {
+      await agentPermissionResponse(
+        answered.sessionId,
+        answered.requestId,
+        decision,
+      );
+    } catch (e) {
+      // セッションが既に閉じている等で返信に失敗しても、行列は必ず進める。
+      // ここで止まるとモーダルが閉じられなくなり、以降の操作が全部できなくなる。
+      console.error("[unicrew] permission response failed", e);
+    } finally {
+      setPermissionQueue((queue) =>
+        queue.filter((q) => q.requestId !== answered.requestId),
+      );
+    }
   };
 
   // ペイン単位で drafts と isStreaming を計算する（slotIdキー）
