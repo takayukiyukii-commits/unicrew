@@ -86,6 +86,8 @@ import {
   inlineableImages,
   agentStart,
   agentStop,
+  worktreePrepare,
+  worktreeRemove,
   checkUnicrewUpdate,
   claudeStatus,
   codexStatus,
@@ -116,6 +118,8 @@ import {
   updateParticipant,
   addParticipant,
 } from "@/lib/participants";
+import { shouldIsolate, withSlotWorktree } from "@/lib/worktree";
+import { showToast } from "@/lib/toast";
 import {
   TEMPLATE_TEAMS,
   cloneFromTemplateTeam,
@@ -518,6 +522,10 @@ export default function Page() {
   >({});
 
   const sessionsStartedRef = useRef<Set<string>>(new Set());
+
+  /** worktree 隔離に失敗したスレッド（警告は1回だけ出す） */
+
+  const isolationWarnedRef = useRef<Set<string>>(new Set());
   const paneAreaRef = useRef<HTMLDivElement>(null);
   const draftsRef = useRef<Record<string, ActiveDraft>>({});
   draftsRef.current = drafts;
@@ -1826,6 +1834,14 @@ export default function Page() {
         sessionsStartedRef.current.delete(id);
       }
     }
+    // worktree 隔離（v0.4.0）: スレッドと一緒に作業場を片付ける（ブランチは残る）
+    if (t?.workspace) {
+      for (const slot of effectiveParticipants(t)) {
+        if (slot.worktreePath) {
+          void worktreeRemove(t.workspace, slot.worktreePath).catch(() => {});
+        }
+      }
+    }
     setThreads((prev) => prev.filter((tt) => tt.id !== id));
     setSplitIds((prev) => prev.filter((x) => x !== id));
     if (activeId === id) {
@@ -2248,9 +2264,31 @@ export default function Page() {
       ? `${promptWithMemo}\n\n---\n\n${historyBlock}`
       : promptWithMemo;
 
+    // worktree 隔離（v0.4.0）: 並列・議論モードでは AI ごとに独立した作業場（git worktree）を切る。
+    // 失敗（git 管理外・コミット無し）は従来どおり同じフォルダで続行し、警告を1回だけ出す。
+    let slotCwd = thread.workspace;
+    if (thread.workspace && shouldIsolate(thread, slot)) {
+      try {
+        const info = await worktreePrepare(thread.workspace, thread.id, slot.id);
+        slotCwd = info.path;
+        if (slot.worktreePath !== info.path || slot.worktreeBranch !== info.branch) {
+          updateThread(thread.id, (t) => withSlotWorktree(t, slot.id, info));
+        }
+      } catch (e) {
+        const key = `${thread.id}:isolation`;
+        if (!isolationWarnedRef.current.has(key)) {
+          isolationWarnedRef.current.add(key);
+          showToast(
+            `AIごとの作業場を分けられないため、同じフォルダで実行します: ${e instanceof Error ? e.message : String(e)}`,
+            "error",
+          );
+        }
+      }
+    }
+
     await agentStart({
       sessionId: sid,
-      workspace: thread.workspace,
+      workspace: slotCwd,
       systemPrompt: promptWithHistory,
       model: thread.model,
       authMode: settings.authMode,

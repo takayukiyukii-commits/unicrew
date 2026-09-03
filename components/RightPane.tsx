@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ChevronDown,
   UserPlus,
@@ -29,6 +29,9 @@ import { effectiveParticipants } from "@/lib/participants";
 import { getPersonality } from "@/lib/personalities";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { useTranslation } from "@/lib/i18n";
+import { gitInitWorkspace, gitProbe, worktreeIntegrate, type GitProbe } from "@/lib/tauri";
+import { isolatedSlots } from "@/lib/worktree";
+import { showToast } from "@/lib/toast";
 
 interface Props {
   thread: Thread | null;
@@ -194,6 +197,9 @@ export function RightPane({
                   />
                 ))}
               </div>
+
+              {/* worktree 隔離（v0.4.0）: 作業場の状態と取り込み */}
+              <WorkspaceIsolation thread={thread} />
 
               {/* 参加者追加ボタン群（最大4人＋審判1人まで） */}
               {onAddParticipant && (
@@ -759,6 +765,101 @@ function PersistentMemorySection({
             {t("rightPane.memoryFooter")}
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * worktree 隔離（v0.4.0）の状態表示と取り込み。
+ * 足す表示は「1行＋隔離中スロットの行」だけ（UI複雑化5原則）。プロバイダ毎の節や色は作らない。
+ */
+function WorkspaceIsolation({ thread }: { thread: Thread }) {
+  const { t } = useTranslation();
+  const [probe, setProbe] = useState<GitProbe | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const ws = thread.workspace;
+  const slots = isolatedSlots(thread);
+  const refresh = useCallback(() => {
+    if (!ws) return;
+    gitProbe(ws)
+      .then(setProbe)
+      .catch(() => setProbe(null));
+  }, [ws]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  if (!ws) return null;
+
+  const integrate = async (slot: ParticipantSlot, mode: "merge" | "patch") => {
+    if (!slot.worktreeBranch) return;
+    setBusy(slot.id);
+    try {
+      const r = await worktreeIntegrate(ws, slot.worktreeBranch, mode);
+      const extra = r.conflicts.length > 0 ? ` / ${t("rightPane.isolation.conflicts")}: ${r.conflicts.join(", ")}` : "";
+      const patch = r.patch_path ? ` → ${r.patch_path}` : "";
+      showToast(`${r.message}${extra}${patch}`, r.ok ? "info" : "error");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const init = async () => {
+    setBusy("init");
+    try {
+      showToast(await gitInitWorkspace(ws));
+      refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const btn =
+    "shrink-0 px-1.5 py-0.5 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-text)] hover:opacity-80 disabled:opacity-50";
+
+  return (
+    <div className="rounded-md border border-[var(--color-border)] px-2.5 py-2 text-[11.5px] leading-relaxed text-[var(--color-muted)] space-y-1.5">
+      {slots.length > 0 ? (
+        <>
+          <div className="font-semibold text-[var(--color-text)]">
+            {t("rightPane.isolation.active").replace("{count}", String(slots.length))}
+          </div>
+          {slots.map((s) => {
+            const c = getCharacter(s.characterId);
+            return (
+              <div key={s.id} className="flex items-center gap-1.5">
+                <span className="flex-1 min-w-0 truncate" title={s.worktreePath}>
+                  {c?.name ?? s.id} <span className="opacity-70">({s.worktreeBranch})</span>
+                </span>
+                <button type="button" className={btn} disabled={busy !== null} onClick={() => integrate(s, "merge")}>
+                  {t("rightPane.isolation.merge")}
+                </button>
+                <button type="button" className={btn} disabled={busy !== null} onClick={() => integrate(s, "patch")}>
+                  {t("rightPane.isolation.patch")}
+                </button>
+              </div>
+            );
+          })}
+          <div className="opacity-80">{t("rightPane.isolation.hint")}</div>
+        </>
+      ) : probe && !probe.is_repo ? (
+        <div className="flex items-center gap-2">
+          <span className="flex-1">{t("rightPane.isolation.noGit")}</span>
+          <button type="button" className={btn} disabled={busy !== null} onClick={init}>
+            {t("rightPane.isolation.gitInit")}
+          </button>
+        </div>
+      ) : probe && !probe.has_head ? (
+        <div className="flex items-center gap-2">
+          <span className="flex-1">{t("rightPane.isolation.noHead")}</span>
+          <button type="button" className={btn} disabled={busy !== null} onClick={init}>
+            {t("rightPane.isolation.firstCommit")}
+          </button>
+        </div>
+      ) : (
+        <div>{t("rightPane.isolation.pending")}</div>
       )}
     </div>
   );

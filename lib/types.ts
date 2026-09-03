@@ -92,6 +92,14 @@ export interface ParticipantSlot {
    * "moderator"        = 中立審判。議論を読み合意度・残論点・推奨アクションをJSONで返す
    */
   role?: ParticipantRole;
+  /**
+   * worktree 隔離（v0.4.0）。並列・議論モードで AI ごとに切った独立チェックアウトの場所。
+   * 設定されていれば subprocess の cwd はこのパスになる（thread.workspace ではなく）。
+   * 単独スレッド・plan モード・moderator・git 管理外では未設定のまま。
+   */
+  worktreePath?: string;
+  /** 上の worktree に対応するブランチ名（unicrew/<thread8>/<slot>）。取り込みに使う。 */
+  worktreeBranch?: string;
 }
 
 export interface Character {

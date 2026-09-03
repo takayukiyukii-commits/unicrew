@@ -4981,6 +4981,301 @@ async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- worktree 隔離（v0.4.0・並列/議論モードで AI ごとに作業場を分ける） ----------
+//
+// 並列・議論モードは全スロットが同じ workspace を acceptEdits（自動編集）で共有していた
+// （4極議論なら4プロセスが同じフォルダを同時に書き換えうる）。git worktree で AI ごとに
+// 独立したチェックアウトを切り、cwd を差し替えるだけで 11 プロバイダ全部に効かせる。
+// - worktree の実体はリポジトリの外（AppData/worktrees 配下）に置き、利用者の `git status` を汚さない
+// - ブランチ名は unicrew/<thread8>/<slot>。AI の成果はブランチとして残る（削除しない）
+// - 取り込み（merge）で衝突したら abort して人に渡す。自動では解決しない
+
+#[derive(Debug, Serialize)]
+struct GitProbe {
+    is_repo: bool,
+    has_head: bool,
+    toplevel: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct WorktreeInfo {
+    path: String,
+    branch: String,
+    toplevel: String,
+}
+
+#[derive(Debug, Serialize)]
+struct IntegrateResult {
+    ok: bool,
+    message: String,
+    conflicts: Vec<String>,
+    patch_path: Option<String>,
+}
+
+/// スレッド/スロットIDをパス・ブランチ名に使える文字だけに絞る。
+fn sanitize_id(s: &str, max: usize) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(max)
+        .collect()
+}
+
+/// リポジトリのパスから worktree 置き場のフォルダ名を作る（同一リポジトリ→同一名）。
+fn short_hash(s: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.to_lowercase().replace('\\', "/").hash(&mut h);
+    format!("{:016x}", h.finish())[..12].to_string()
+}
+
+/// git を1回実行して stdout（trim済み）を返す。失敗時は stderr（無ければ stdout）を Err にする。
+async fn git_out(cwd: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let raw = git_raw(cwd, args).await?;
+    Ok(String::from_utf8_lossy(&raw).trim().to_string())
+}
+
+/// git を1回実行して stdout を生のまま返す（diff 等の改行保持用）。
+async fn git_raw(cwd: &std::path::Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let mut cmd = build_silent_command("git");
+    cmd.current_dir(cwd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("git を起動できませんでした: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let so = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Err(if err.is_empty() { so } else { err });
+    }
+    Ok(out.stdout)
+}
+
+fn worktrees_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("worktrees"))
+}
+
+/// workspace が git 管理下か・最初のコミットがあるかを返す（UI の案内文分岐用）。
+#[tauri::command]
+async fn git_probe(workspace: String) -> Result<GitProbe, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    if !ws.is_dir() {
+        return Ok(GitProbe { is_repo: false, has_head: false, toplevel: None });
+    }
+    let toplevel = match git_out(&ws, &["rev-parse", "--show-toplevel"]).await {
+        Ok(t) => t,
+        Err(_) => return Ok(GitProbe { is_repo: false, has_head: false, toplevel: None }),
+    };
+    let has_head = git_out(&ws, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .is_ok();
+    Ok(GitProbe { is_repo: true, has_head, toplevel: Some(toplevel) })
+}
+
+/// スロット用の worktree を用意する（冪等：既にあればそのまま返す）。
+#[tauri::command]
+async fn worktree_prepare(
+    app: AppHandle,
+    workspace: String,
+    thread_id: String,
+    slot_id: String,
+) -> Result<WorktreeInfo, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "このフォルダは git 管理外です（git init すると AI ごとの作業場を分けられます）".to_string())?;
+    git_out(&ws, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .map_err(|_| "まだコミットが1つもありません（最初のコミットを作ると作業場を分けられます）".to_string())?;
+    let top = std::path::PathBuf::from(&toplevel);
+    let t8 = sanitize_id(&thread_id, 8);
+    let slot = sanitize_id(&slot_id, 16);
+    if t8.is_empty() || slot.is_empty() {
+        return Err("スレッド/スロットIDが不正です".into());
+    }
+    let branch = format!("unicrew/{}/{}", t8, slot);
+    let base = worktrees_root(&app)?.join(short_hash(&toplevel)).join(&t8);
+    tokio::fs::create_dir_all(&base)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = base.join(&slot);
+    let path_s = path.to_string_lossy().to_string();
+    // 既に有効な worktree ならそのまま使う（再起動・再開で同じ場所に戻る）
+    if path.join(".git").exists()
+        && git_out(&path, &["rev-parse", "--is-inside-work-tree"]).await.is_ok()
+    {
+        return Ok(WorktreeInfo { path: path_s, branch, toplevel });
+    }
+    // 残骸（消されたフォルダの登録など）を掃除してから作り直す
+    let _ = git_out(&top, &["worktree", "prune"]).await;
+    if path.exists() {
+        let _ = tokio::fs::remove_dir_all(&path).await;
+    }
+    git_out(&top, &["worktree", "add", "-B", &branch, &path_s, "HEAD"])
+        .await
+        .map_err(|e| format!("worktree を作れませんでした: {}", e))?;
+    Ok(WorktreeInfo { path: path_s, branch, toplevel })
+}
+
+/// スロットの worktree を消す（ブランチは残す＝AI の成果を勝手に捨てない）。
+#[tauri::command]
+async fn worktree_remove(app: AppHandle, workspace: String, path: String) -> Result<(), String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let p = std::path::PathBuf::from(&path);
+    if p.exists() {
+        // 安全弁: UNICREW の worktree 置き場の外は消さない
+        let root = worktrees_root(&app)?;
+        let cp = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
+        let cr = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+        if !cp.starts_with(&cr) {
+            return Err("worktree の場所が想定外なので削除しません".into());
+        }
+        let _ = git_out(&ws, &["worktree", "remove", "--force", &path]).await;
+        if p.exists() {
+            tokio::fs::remove_dir_all(&p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = git_out(&ws, &["worktree", "prune"]).await;
+    Ok(())
+}
+
+/// AI のブランチを取り込む。mode="merge" は --no-ff --no-commit（衝突なら abort して人に渡す）、
+/// mode="patch" は差分ファイルを書き出す。
+#[tauri::command]
+async fn worktree_integrate(
+    app: AppHandle,
+    workspace: String,
+    branch: String,
+    mode: String,
+) -> Result<IntegrateResult, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"]).await?;
+    let top = std::path::PathBuf::from(&toplevel);
+    if !branch.starts_with("unicrew/") || branch.contains("..") {
+        return Err("UNICREW が作ったブランチ以外は取り込みません".into());
+    }
+    let refname = format!("refs/heads/{}", branch);
+    git_out(&top, &["rev-parse", "--verify", "--quiet", &refname])
+        .await
+        .map_err(|_| "ブランチが見つかりません（worktree を削除済みか、まだ何も変更していません）".to_string())?;
+    if mode == "patch" {
+        let base = git_out(&top, &["merge-base", "HEAD", &branch]).await?;
+        let diff = git_raw(&top, &["diff", "--binary", &base, &branch]).await?;
+        if diff.is_empty() {
+            return Ok(IntegrateResult {
+                ok: false,
+                message: "このAIのブランチには変更がありません".into(),
+                conflicts: vec![],
+                patch_path: None,
+            });
+        }
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("patches");
+        tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let file = dir.join(format!("{}_{}.patch", branch.replace('/', "_"), ts));
+        tokio::fs::write(&file, &diff).await.map_err(|e| e.to_string())?;
+        let lines = diff.iter().filter(|b| **b == b'\n').count();
+        return Ok(IntegrateResult {
+            ok: true,
+            message: format!("パッチを書き出しました（{} 行）", lines),
+            conflicts: vec![],
+            patch_path: Some(file.to_string_lossy().to_string()),
+        });
+    }
+    // merge: 取り込み先に未コミットの変更があれば止める（人の作業を巻き込まない）
+    let dirty = git_out(&top, &["status", "--porcelain", "--untracked-files=no"]).await?;
+    if !dirty.is_empty() {
+        return Ok(IntegrateResult {
+            ok: false,
+            message: "取り込み先にコミットされていない変更があります。先にコミットか退避（stash）してください".into(),
+            conflicts: vec![],
+            patch_path: None,
+        });
+    }
+    match git_out(&top, &["merge", "--no-ff", "--no-commit", &branch]).await {
+        Ok(_) => Ok(IntegrateResult {
+            ok: true,
+            message: "取り込みました（まだコミットしていません。内容を確認してからコミットしてください）".into(),
+            conflicts: vec![],
+            patch_path: None,
+        }),
+        Err(e) => {
+            let conflicts: Vec<String> = git_out(&top, &["diff", "--name-only", "--diff-filter=U"])
+                .await
+                .unwrap_or_default()
+                .lines()
+                .map(String::from)
+                .collect();
+            let _ = git_out(&top, &["merge", "--abort"]).await;
+            Ok(IntegrateResult {
+                ok: false,
+                message: format!("衝突があるため取り込みを中止しました（自動では解決しません）: {}", e),
+                conflicts,
+                patch_path: None,
+            })
+        }
+    }
+}
+
+/// git 管理外のフォルダを git 管理下にする（作業場の隔離とチェックポイントの前提）。
+/// 既にリポジトリで HEAD が無いだけなら初期コミットだけ作る。
+#[tauri::command]
+async fn git_init_workspace(workspace: String) -> Result<String, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    if !ws.is_dir() {
+        return Err("フォルダが見つかりません".into());
+    }
+    let is_repo = git_out(&ws, &["rev-parse", "--show-toplevel"]).await.is_ok();
+    if !is_repo {
+        git_out(&ws, &["init", "-q"]).await?;
+        // 巨大な生成物を最初のコミットに巻き込まないための最小 .gitignore（無いときだけ）
+        let gi = ws.join(".gitignore");
+        if !gi.exists() {
+            let _ = tokio::fs::write(
+                &gi,
+                "node_modules/\n.next/\ndist/\nbuild/\ntarget/\n.env\n.env.*\n*.log\n",
+            )
+            .await;
+        }
+    }
+    if git_out(&ws, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.is_ok() {
+        return Ok("既に git 管理下です".into());
+    }
+    git_out(&ws, &["add", "-A"]).await?;
+    git_out(
+        &ws,
+        &[
+            "-c",
+            "user.name=UNICREW",
+            "-c",
+            "user.email=unicrew@localhost",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "UNICREW: 初期コミット（AI ごとの作業場の隔離と巻き戻しのため）",
+        ],
+    )
+    .await?;
+    Ok("git 管理下にしました（初期コミットを作成）".into())
+}
+
 // ---------- App setup ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5009,6 +5304,11 @@ pub fn run() {
             set_api_key,
             delete_api_key,
             default_workspace_path,
+            git_probe,
+            worktree_prepare,
+            worktree_remove,
+            worktree_integrate,
+            git_init_workspace,
             save_avatar_image,
             save_avatar_bytes,
             delete_avatar_image,

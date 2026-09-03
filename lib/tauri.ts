@@ -298,6 +298,70 @@ export async function defaultWorkspacePath(): Promise<string | null> {
   return invoke<string>("default_workspace_path");
 }
 
+// ---------- worktree 隔離（v0.4.0） ----------
+
+export interface GitProbe {
+  is_repo: boolean;
+  has_head: boolean;
+  toplevel: string | null;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  toplevel: string;
+}
+
+export interface IntegrateResult {
+  ok: boolean;
+  message: string;
+  conflicts: string[];
+  patch_path: string | null;
+}
+
+/** workspace が git 管理下か・最初のコミットがあるか。非 Tauri では null。 */
+export async function gitProbe(workspace: string): Promise<GitProbe | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return invoke<GitProbe>("git_probe", { workspace });
+}
+
+/** スロット用の worktree を用意する（冪等）。git 管理外・コミット無しは Error を投げる。 */
+export async function worktreePrepare(
+  workspace: string,
+  threadId: string,
+  slotId: string,
+): Promise<WorktreeInfo> {
+  if (!isTauri()) throw new Error("worktree 隔離は Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<WorktreeInfo>("worktree_prepare", { workspace, threadId, slotId });
+}
+
+/** スロットの worktree を消す（ブランチは残る）。 */
+export async function worktreeRemove(workspace: string, path: string): Promise<void> {
+  if (!isTauri()) return;
+  const invoke = await loadInvoke();
+  await invoke("worktree_remove", { workspace, path });
+}
+
+/** AI のブランチを取り込む（merge = --no-ff --no-commit / patch = 差分ファイル書き出し）。 */
+export async function worktreeIntegrate(
+  workspace: string,
+  branch: string,
+  mode: "merge" | "patch",
+): Promise<IntegrateResult> {
+  if (!isTauri()) throw new Error("取り込みは Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<IntegrateResult>("worktree_integrate", { workspace, branch, mode });
+}
+
+/** git 管理外のフォルダを git 管理下にする（初期コミットまで）。 */
+export async function gitInitWorkspace(workspace: string): Promise<string> {
+  if (!isTauri()) throw new Error("git init は Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<string>("git_init_workspace", { workspace });
+}
+
 // ---------- Avatar image ----------
 
 /** ユーザーに画像を選ばせて、AppData/avatars/ にコピーし、保存先絶対パスを返す。 */
