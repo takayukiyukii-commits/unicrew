@@ -237,6 +237,16 @@ export interface Thread {
    * worktree 隔離中はスロットごとに cwd が違うので複数持つ。未記録なら HEAD 比較に落ちる。
    */
   turnBase?: Record<string, string>;
+  /**
+   * サイドチャット（v0.4.0）。"side" は本線（parentId）から派生した脇の相談（plan 固定・入れ子不可）。
+   * 未設定は本線。
+   */
+  kind?: "side";
+  parentId?: string;
+  /** 閉じたスレッド（削除しない・サイドバーから隠す）。サイドチャットの「閉じる」はこれ */
+  archived?: boolean;
+  /** 「親に戻す」で受け取ったサイドの結論。次の送信に「## サイドチャットの結論」として前置きして消える */
+  pendingSideConclusions?: string[];
 }
 
 export type PermissionMode = "acceptEdits" | "plan" | "deepThink" | "careful";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ClipboardEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, useCallback, useMemo } from "react";
 import {
   Bot,
   Send,
@@ -17,6 +17,10 @@ import {
   Image as ImageIcon,
   Paperclip,
   FileText,
+  ChevronUp,
+  ChevronDown,
+  CornerUpLeft,
+  Search as SearchIcon,
 } from "lucide-react";
 import type {
   Block,
@@ -41,6 +45,7 @@ import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
 import { hasCheckpoint } from "@/lib/checkpoint";
 import { isAuditSlotId } from "@/lib/audit";
+import { matchingMessageIds } from "@/lib/search";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
@@ -105,6 +110,10 @@ interface Props {
   onRestoreCheckpoint?: (message: Message) => void;
   /** 相互監査（v0.4.0）「指摘を実装AIに渡す」。監査役の応答にだけボタンが出る。 */
   onForwardAudit?: (message: Message) => void;
+  /** サイドチャット（v0.4.0）「親に戻す」。thread.kind === "side" のときだけ渡される。 */
+  onReturnToParent?: () => void;
+  /** スレッド内検索（Ctrl+F）／会話検索からのジャンプ要求。nonce が変わるたびに処理する。 */
+  findRequest?: { nonce: number; query?: string; messageId?: string } | null;
   /**
    * メッセージ末尾に差し込むカード。フィードバックアンケート等の単発UIをここから注入する。
    * 主ペインだけに渡し、split側には出さない（重複表示防止）。
@@ -152,6 +161,8 @@ export function ChatPane({
   onSosForError,
   onRestoreCheckpoint,
   onForwardAudit,
+  onReturnToParent,
+  findRequest,
   feedbackSlot,
   peekActive = false,
   onTogglePeek,
@@ -310,6 +321,47 @@ export function ChatPane({
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
+  // スレッド内検索（v0.4.0・Ctrl+F）。メッセージ単位で当たりを数え、現在位置を枠で強調する
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIdx, setFindIdx] = useState(0);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const findMatches = useMemo(
+    () => (thread ? matchingMessageIds(thread.messages, findQuery) : []),
+    [thread, findQuery],
+  );
+  const jumpToMessage = useCallback((id: string) => {
+    setHighlightId(id);
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ block: "center" });
+  }, []);
+  useEffect(() => {
+    if (!findRequest) return;
+    setFindOpen(true);
+    if (findRequest.query !== undefined) {
+      setFindQuery(findRequest.query);
+      setFindIdx(0);
+    }
+    if (findRequest.messageId) {
+      // 切替直後はまだ描画されていないことがあるので少し待ってから飛ぶ
+      const id = findRequest.messageId;
+      const h = window.setTimeout(() => jumpToMessage(id), 60);
+      return () => window.clearTimeout(h);
+    }
+    requestAnimationFrame(() => findInputRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findRequest?.nonce]);
+  const findStep = (dir: 1 | -1) => {
+    if (findMatches.length === 0) return;
+    const next = (findIdx + dir + findMatches.length) % findMatches.length;
+    setFindIdx(next);
+    jumpToMessage(findMatches[next]);
+  };
+  const closeFind = () => {
+    setFindOpen(false);
+    setHighlightId(null);
+  };
+
   const isSplitPane = paneRole === "split";
   const paneBorderClass = isSplitPane
     ? "border-l border-[var(--color-border)]"
@@ -344,6 +396,11 @@ export function ChatPane({
         <span className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
           {thread.title}
         </span>
+        {thread.kind === "side" && (
+          <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-[var(--color-accent)] text-[var(--color-accent)] font-medium">
+            {t("side.badge")}
+          </span>
+        )}
         {!isParallel && character && (
           <span className="flex items-center gap-1 text-[11px] text-[var(--color-muted)] truncate">
             <span className="truncate">
@@ -381,6 +438,16 @@ export function ChatPane({
               aria-pressed={peekActive}
             >
               {peekActive ? t("chat.peekActive") : t("chat.peekInactive")}
+            </button>
+          )}
+          {onReturnToParent && (
+            <button
+              onClick={onReturnToParent}
+              className="px-2 py-1 rounded text-[10.5px] font-medium transition border bg-white border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface)] inline-flex items-center gap-1"
+              title={t("side.returnTitle")}
+            >
+              <CornerUpLeft size={12} />
+              {t("side.returnToParent")}
             </button>
           )}
           {onSplit && (
@@ -447,6 +514,60 @@ export function ChatPane({
         </div>
       )}
 
+      {findOpen && (
+        <div className="shrink-0 border-b border-[var(--color-border)] px-4 py-1.5 flex items-center gap-2 bg-white text-[11.5px]">
+          <SearchIcon size={12} className="text-[var(--color-muted)] shrink-0" />
+          <input
+            ref={findInputRef}
+            value={findQuery}
+            onChange={(e) => {
+              setFindQuery(e.target.value);
+              setFindIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                findStep(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                closeFind();
+              }
+            }}
+            placeholder={t("find.placeholder")}
+            className="flex-1 min-w-0 bg-transparent outline-none"
+          />
+          <span className="text-[var(--color-muted)] font-mono shrink-0">
+            {findMatches.length === 0
+              ? t("find.none")
+              : t("find.count", { index: findIdx + 1, total: findMatches.length })}
+          </span>
+          <button
+            type="button"
+            onClick={() => findStep(-1)}
+            className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
+            title={t("find.prev")}
+          >
+            <ChevronUp size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => findStep(1)}
+            className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
+            title={t("find.next")}
+          >
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={closeFind}
+            className="p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)]"
+            title={t("find.close")}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
       <div
         ref={scrollerRef}
         className="flex-1 overflow-y-auto min-h-0 unicrew-scroll"
@@ -477,6 +598,7 @@ export function ChatPane({
             onExecuteCommand={onExecuteCommand}
             onRestoreCheckpoint={onRestoreCheckpoint}
             onForwardAudit={onForwardAudit}
+            highlightId={highlightId}
           />
         ) : (
           <SingleView
@@ -489,6 +611,7 @@ export function ChatPane({
             onSosForError={onSosForError}
             onRestoreCheckpoint={onRestoreCheckpoint}
             onForwardAudit={onForwardAudit}
+            highlightId={highlightId}
           />
         )}
         {feedbackSlot}
@@ -728,6 +851,7 @@ function SingleView({
   onSosForError,
   onRestoreCheckpoint,
   onForwardAudit,
+  highlightId,
 }: {
   messages: Message[];
   character: ReturnType<typeof getCharacter>;
@@ -738,6 +862,7 @@ function SingleView({
   onSosForError?: (errorText: string) => void;
   onRestoreCheckpoint?: (message: Message) => void;
   onForwardAudit?: (message: Message) => void;
+  highlightId?: string | null;
 }) {
   return (
     <>
@@ -754,6 +879,7 @@ function SingleView({
             onRestoreCheckpoint && hasCheckpoint(m) ? () => onRestoreCheckpoint(m) : undefined
           }
           onForwardAudit={m.audit && onForwardAudit ? () => onForwardAudit(m) : undefined}
+          highlighted={highlightId === m.id}
         />
       ))}
       {drafts.map((d) => (
@@ -851,6 +977,7 @@ function NwayView({
   onExecuteCommand,
   onRestoreCheckpoint,
   onForwardAudit,
+  highlightId,
 }: {
   messages: Message[];
   slots: ParticipantSlot[];
@@ -862,6 +989,7 @@ function NwayView({
   onExecuteCommand?: (command: string, lang: string) => void;
   onRestoreCheckpoint?: (message: Message) => void;
   onForwardAudit?: (message: Message) => void;
+  highlightId?: string | null;
 }) {
   const groups = groupMessagesForNway(messages, slots);
   const hasDrafts = Object.values(drafts).some((d) => d != null);
@@ -905,6 +1033,7 @@ function NwayView({
                   ? () => onRestoreCheckpoint(g.message)
                   : undefined
               }
+              highlighted={highlightId === g.message.id}
             />
           );
         }
@@ -918,6 +1047,7 @@ function NwayView({
               userProfile={userProfile}
               onExecute={onExecuteCommand}
               onForwardAudit={onForwardAudit ? () => onForwardAudit(g.message) : undefined}
+              highlighted={highlightId === g.message.id}
             />
           );
         }

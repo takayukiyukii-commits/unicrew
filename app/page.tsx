@@ -16,11 +16,22 @@ import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { TrustPromptModal } from "@/components/TrustPromptModal";
 import { RestoreCheckpointModal } from "@/components/RestoreCheckpointModal";
+import { ConversationSearchModal } from "@/components/ConversationSearchModal";
+import {
+  createSideThread,
+  isSideThread,
+  parseSideCommand,
+  prependConclusions,
+  sideConclusion,
+  withPendingConclusion,
+} from "@/lib/side";
+import type { SearchHit } from "@/lib/search";
 import { isWorkspaceTrusted, trustWorkspace } from "@/lib/trust";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { applyAppearance } from "@/lib/appearance";
 import {
   Plus,
+  Search as SearchIcon,
   FolderOpen as IconFolderOpen,
   Settings as IconSettings,
   Puzzle as IconPuzzle,
@@ -574,6 +585,10 @@ export default function Page() {
     targets: RestoreTarget[];
   } | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  /** 会話検索（v0.4.0）モーダル */
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** スレッド内検索（Ctrl+F）／検索結果からのジャンプ要求。主ペインの ChatPane が nonce で拾う */
+  const [findRequest, setFindRequest] = useState<{ nonce: number; query?: string; messageId?: string } | null>(null);
   const paneAreaRef = useRef<HTMLDivElement>(null);
   const draftsRef = useRef<Record<string, ActiveDraft>>({});
   draftsRef.current = drafts;
@@ -844,6 +859,13 @@ export default function Page() {
       if (isPalette) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      // 会話検索（v0.4.0）: Ctrl+Shift+F＝全スレッド検索 / Ctrl+F＝主ペインのスレッド内検索
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        if (e.shiftKey) setSearchOpen(true);
+        else setFindRequest((r) => ({ nonce: (r?.nonce ?? 0) + 1 }));
       }
     };
     document.addEventListener("keydown", onKey);
@@ -2330,6 +2352,17 @@ export default function Page() {
     const promptWithHistory = historyBlock
       ? `${promptWithMemo}\n\n---\n\n${historyBlock}`
       : promptWithMemo;
+    // サイドチャット（v0.4.0）: 本線（親スレッド）の直近会話を注入し、文脈を持ったまま脇で相談できるようにする
+    const parent = thread.parentId
+      ? threadsRef.current.find((t) => t.id === thread.parentId)
+      : undefined;
+    const sideBlock = parent
+      ? buildConversationHistoryContext(parent.messages, 10).replace(
+          "## このスレッドの直近の会話",
+          "## 本線（親スレッド）の直近の会話",
+        )
+      : "";
+    const promptWithSide = sideBlock ? `${promptWithHistory}\n\n---\n\n${sideBlock}` : promptWithHistory;
 
     // worktree 隔離（v0.4.0）: 並列・議論モードでは AI ごとに独立した作業場（git worktree）を切る。
     // 失敗（git 管理外・コミット無し）は従来どおり同じフォルダで続行し、警告を1回だけ出す。
@@ -2356,7 +2389,7 @@ export default function Page() {
     await agentStart({
       sessionId: sid,
       workspace: slotCwd,
-      systemPrompt: promptWithHistory,
+      systemPrompt: promptWithSide,
       model: thread.model,
       authMode: settings.authMode,
       apiKey,
@@ -2455,14 +2488,16 @@ ${command}
       }
     }
 
+    // サイドチャット（v0.4.0）: 「親に戻す」で受け取った結論があれば、この送信に前置きして消す
+    const withConclusion = prependConclusions(thread, textWithPeek);
     const userMsg = {
       id: nanoid(8),
       role: "user" as const,
-      content: textWithPeek,
+      content: withConclusion.text,
       attachments,
       createdAt: Date.now(),
     };
-    const next = appendMessage(thread, userMsg);
+    const next = appendMessage(withConclusion.thread, userMsg);
     updateThread(thread.id, () => next);
 
     // チェックポイント（v0.4.0）: ターン開始時の作業ツリーを refs/unicrew/checkpoints に固定し、
@@ -2761,6 +2796,61 @@ ${command}
     }
   };
 
+  // サイドチャット（v0.4.0）: 本線の文脈を持ったまま脇で相談する（plan 固定・入れ子不可・閉じる＝アーカイブ）
+  const openSideChat = (parent: Thread, question: string) => {
+    if (isSideThread(parent)) {
+      showToast(tr("side.noNesting"), "error");
+      return;
+    }
+    const side = createSideThread(parent, question);
+    setThreads((prev) => [side, ...prev]);
+    setActiveId(side.id);
+    setFocusedThreadId(null);
+    setMainView("chat");
+    if (question) void handleSendForThread(question, side);
+  };
+
+  /** サイドの結論（最後のAI発言）を本線の次の送信に前置きし、サイドを閉じる。 */
+  const handleReturnToParent = (side: Thread) => {
+    const parent = side.parentId ? threadsRef.current.find((t) => t.id === side.parentId) : undefined;
+    if (!parent) {
+      showToast(tr("side.noParent"), "error");
+      return;
+    }
+    const conclusion = sideConclusion(side);
+    if (!conclusion) {
+      showToast(tr("side.noConclusion"), "error");
+      return;
+    }
+    updateThread(parent.id, (t) => withPendingConclusion(t, conclusion));
+    updateThread(side.id, (t) => ({ ...t, archived: true }));
+    setSplitIds((prev) => prev.filter((x) => x !== side.id));
+    setActiveId(parent.id);
+    setFocusedThreadId(null);
+    showToast(tr("side.returned"));
+  };
+
+  /** 閉じる＝アーカイブ（削除しない）。開いていたら親（無ければ先頭）へ移る。 */
+  const handleArchiveThread = (id: string) => {
+    const target = threadsRef.current.find((x) => x.id === id);
+    updateThread(id, (x) => ({ ...x, archived: true }));
+    setSplitIds((prev) => prev.filter((x) => x !== id));
+    if (activeId === id) {
+      const fallback =
+        target?.parentId ?? threadsRef.current.find((x) => x.id !== id && !x.archived)?.id ?? null;
+      setActiveId(fallback);
+      setFocusedThreadId(null);
+    }
+  };
+
+  /** 会話検索（v0.4.0）の結果を開く：スレッドへ移り、そのメッセージへ飛ぶ（主ペイン）。 */
+  const handleSearchPick = (hit: SearchHit, query: string) => {
+    setSearchOpen(false);
+    setMainView("chat");
+    if (hit.threadId !== activeId) handleSidebarSelect(hit.threadId);
+    setFindRequest((r) => ({ nonce: (r?.nonce ?? 0) + 1, query, messageId: hit.messageId ?? undefined }));
+  };
+
   /**
    * ChatPane からの送信入口。応答中ならキューに積み（ターミナル風連投）、
    * アイドルなら即送信。flush は streamingSids 変化の useEffect で行う。
@@ -2776,6 +2866,12 @@ ${command}
     const auditCmd = parseAuditCommand(value);
     if (auditCmd) {
       void startAudit(thread, auditCmd);
+      return;
+    }
+    // サイドチャット（v0.4.0）: `/side 質問` は本線から脇のスレッドを開く
+    const sideCmd = parseSideCommand(value);
+    if (sideCmd) {
+      openSideChat(thread, sideCmd.question);
       return;
     }
     if (isThreadBusy(thread)) {
@@ -3354,6 +3450,16 @@ ${command}
           ),
       },
       {
+        id: "conversation.search",
+        label: tr("palette.search.label"),
+        category: tr("palette.category.action"),
+        description: tr("palette.search.desc"),
+        shortcut: "Ctrl+Shift+F",
+        icon: SearchIcon,
+        keywords: ["search", "find", "けんさく", "かいわ", "会話"],
+        run: () => setSearchOpen(true),
+      },
+      {
         id: "issues.open",
         label: tr("palette.issues.open"),
         category: tr("palette.category.help"),
@@ -3647,6 +3753,7 @@ ${command}
           }}
           onDelete={handleDelete}
           onRename={handleRenameThread}
+          onArchive={handleArchiveThread}
           onOpenSettings={() => setSettingsOpen(true)}
           mainView={mainView}
           onOpenAddons={() => setMainView("addons")}
@@ -3790,6 +3897,12 @@ ${command}
                     ? (m) => handleForwardAudit(m, activeThread)
                     : undefined
                 }
+                onReturnToParent={
+                  activeThread && isSideThread(activeThread)
+                    ? () => handleReturnToParent(activeThread)
+                    : undefined
+                }
+                findRequest={findRequest}
                 peekActive={
                   activeThread ? peekPaneIds.has(activeThread.id) : false
                 }
@@ -3858,6 +3971,7 @@ ${command}
                   onSosForError={(err) => handleSosForError(err, t)}
                   onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, t)}
                   onForwardAudit={(m) => handleForwardAudit(m, t)}
+                  onReturnToParent={isSideThread(t) ? () => handleReturnToParent(t) : undefined}
                   peekActive={peekPaneIds.has(t.id)}
                   onTogglePeek={() => togglePeekForThread(t.id)}
                   onTogglePermissionMode={togglePermissionMode}
@@ -3927,6 +4041,12 @@ ${command}
                     ? (m) => handleForwardAudit(m, activeThread)
                     : undefined
                 }
+                onReturnToParent={
+                  activeThread && isSideThread(activeThread)
+                    ? () => handleReturnToParent(activeThread)
+                    : undefined
+                }
+                findRequest={findRequest}
                 peekActive={
                   showSplit && activeThread
                     ? peekPaneIds.has(activeThread.id)
@@ -4008,6 +4128,7 @@ ${command}
                     }
                     onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, splitThread)}
                     onForwardAudit={(m) => handleForwardAudit(m, splitThread)}
+                    onReturnToParent={isSideThread(splitThread) ? () => handleReturnToParent(splitThread) : undefined}
                     peekActive={peekPaneIds.has(splitThread.id)}
                     onTogglePeek={() => togglePeekForThread(splitThread.id)}
                     onTogglePermissionMode={togglePermissionMode}
@@ -4158,6 +4279,12 @@ ${command}
         }}
       />
       <WhatsNewModal open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
+      <ConversationSearchModal
+        open={searchOpen}
+        threads={threads}
+        onClose={() => setSearchOpen(false)}
+        onPick={handleSearchPick}
+      />
       <RestoreCheckpointModal
         open={!!restorePrompt}
         turn={restorePrompt?.turn ?? 0}

@@ -82,6 +82,27 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
     takesArgs: true,
   },
   {
+    command: "/side ",
+    label: "サイドチャットで相談",
+    description:
+      "本線の会話の文脈を持ったまま、脇の読み取り専用スレッドで短い相談をする。質問を続けて書く。結論は「親に戻す」で本線の次の送信に前置きできる。",
+    providers: [
+      "claude",
+      "codex",
+      "gemini",
+      "goose",
+      "opencode",
+      "codex-acp",
+      "kiro",
+      "qwen",
+      "kimi",
+      "grok",
+      "cursor",
+    ],
+    category: "dev",
+    takesArgs: true,
+  },
+  {
     command: "/init",
     label: "CLAUDE.mdを初期化",
     description:

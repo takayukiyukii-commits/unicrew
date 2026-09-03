@@ -39,6 +39,8 @@ interface Props {
   onRestore?: () => void;
   /** 相互監査（v0.4.0）「指摘を実装AIに渡す」。監査役の応答（message.audit）にだけ渡される。 */
   onForwardAudit?: () => void;
+  /** スレッド内検索（v0.4.0）で現在位置のメッセージ。枠で強調する。 */
+  highlighted?: boolean;
   /**
    * AI が応答内で言及したファイル名（NOTE_xxx.md など）を Ctrl+Click で
    * 別ウィンドウのエディタに開けるようにするための workspace 基準パス。
@@ -83,6 +85,7 @@ export function MessageItem({
   onSosForError,
   onRestore,
   onForwardAudit,
+  highlighted = false,
   workspace,
   userProfile,
 }: Props) {
@@ -137,9 +140,11 @@ export function MessageItem({
 
   return (
     <div
+      id={`msg-${message.id}`}
       className={clsx(
         "flex gap-3 px-6 py-4 group",
         isUser ? "" : "bg-[var(--color-surface)]/60",
+        highlighted && "ring-2 ring-inset ring-[var(--color-accent)]",
       )}
     >
       {isUser ? (

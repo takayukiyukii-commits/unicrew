@@ -13,9 +13,11 @@ import {
   X,
   FolderTree,
   Pencil,
+  Archive,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { Thread } from "@/lib/types";
+import { archivedCount, orderThreadsForSidebar } from "@/lib/side";
 import { getCharacter } from "@/lib/characters";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { useTranslation } from "@/lib/i18n";
@@ -38,6 +40,8 @@ interface Props {
   onCreate: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  /** サイドチャット（v0.4.0）を閉じる＝アーカイブ（削除しない）。 */
+  onArchive?: (id: string) => void;
   onOpenSettings: () => void;
   /** 現在中央に表示している view。"addons" の場合はサイドバーのプラグインボタンをアクティブ化。 */
   mainView?: MainView;
@@ -69,6 +73,7 @@ export function Sidebar({
   onCreate,
   onDelete,
   onRename,
+  onArchive,
   onOpenSettings,
   mainView = "chat",
   onOpenAddons,
@@ -81,17 +86,19 @@ export function Sidebar({
   const { t } = useTranslation();
   /** アイデア11: 全スレッド横断検索（最小実装：In-Memoryでタイトル＋メッセージ全文grep） */
   const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  // サイドチャット（v0.4.0）: 本線の直下にサイドを置く。アーカイブは既定で隠す
   const sorted = useMemo(() => {
-    const all = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
+    const entries = orderThreadsForSidebar(threads, showArchived);
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((th) => {
+    if (!q) return entries;
+    return entries.filter(({ thread: th }) => {
       if (th.title.toLowerCase().includes(q)) return true;
       return th.messages.some((m) => m.content.toLowerCase().includes(q));
     });
-  }, [threads, searchQuery]);
+  }, [threads, searchQuery, showArchived]);
   const commitRename = () => {
     if (!editingThreadId) return;
     const title = editingTitle.trim();
@@ -127,7 +134,7 @@ export function Sidebar({
         </button>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-1 py-2 space-y-1 unicrew-scroll">
-          {sorted.map((th) => {
+          {sorted.map(({ thread: th }) => {
             const character = getCharacter(th.characterId);
             const isActive = th.id === activeThreadId;
             const isInSplit = splitThreadIds.includes(th.id);
@@ -282,7 +289,7 @@ export function Sidebar({
               : t("sidebar.noThreads")}
           </div>
         )}
-        {sorted.map((th) => {
+        {sorted.map(({ thread: th, depth }) => {
           const character = getCharacter(th.characterId);
           const isActive = th.id === activeThreadId;
           const isInSplit = splitThreadIds.includes(th.id);
@@ -293,6 +300,8 @@ export function Sidebar({
               key={th.id}
               className={clsx(
                 "group flex items-start gap-2 px-2 py-2 rounded-md cursor-pointer text-sm border",
+                depth > 0 && "ml-4",
+                th.archived && "opacity-60",
                 isActive
                   ? "bg-white border-[var(--color-border)] shadow-sm"
                   : isInSplit
@@ -375,19 +384,45 @@ export function Sidebar({
               >
                 <Pencil size={13} />
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(th.id);
-                }}
-                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-500 transition"
-                title={t("sidebar.deleteThread")}
-              >
-                <Trash2 size={13} />
-              </button>
+              {th.kind === "side" && onArchive && !th.archived ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onArchive(th.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[var(--color-surface)] text-[var(--color-muted)] transition"
+                  title={t("side.archive")}
+                  aria-label={t("side.archive")}
+                >
+                  <Archive size={13} />
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(th.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-red-500 transition"
+                  title={t("sidebar.deleteThread")}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
           );
         })}
+        {archivedCount(threads) > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="w-full mt-1 px-3 py-1.5 rounded-md text-[11px] text-[var(--color-muted)] hover:bg-white/60 flex items-center gap-1.5"
+          >
+            <Archive size={11} />
+            {showArchived
+              ? t("sidebar.hideArchived")
+              : t("sidebar.showArchived", { count: archivedCount(threads) })}
+          </button>
+        )}
       </div>
 
       <div className="border-t border-[var(--color-border)] p-2 space-y-0.5">
