@@ -362,6 +362,68 @@ export async function gitInitWorkspace(workspace: string): Promise<string> {
   return invoke<string>("git_init_workspace", { workspace });
 }
 
+// ---------- 変更の差分ビュー（v0.4.0） ----------
+
+export interface ChangedFile {
+  path: string;
+  /** A=追加 M=変更 D=削除 R=改名 T=種別変更 U=不明 */
+  status: string;
+  /** 改名時のみ旧パス */
+  old_path: string | null;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+export interface WorkspaceChanges {
+  /** 実際に比べた基準（tree oid か HEAD の commit oid） */
+  base: string;
+  /** turn=ターン開始時の tree / head=最後のコミット / empty=コミット無し（全部が追加扱い） */
+  base_kind: "turn" | "head" | "empty";
+  files: ChangedFile[];
+  additions: number;
+  deletions: number;
+  /** 500件で打ち切ったか */
+  truncated: boolean;
+}
+
+export interface FileDiff {
+  /** 基準側（追加ファイルなら空） */
+  original: string;
+  /** 今の作業ツリー側（削除ファイルなら空） */
+  modified: string;
+  binary: boolean;
+  too_large: boolean;
+}
+
+/** ターン開始時の作業ツリーを tree として記録し oid を返す（利用者の index/HEAD は動かさない）。非 Tauri では null。 */
+export async function workspaceSnapshot(workspace: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return invoke<string>("workspace_snapshot", { workspace });
+}
+
+/** 変更ファイル一覧。sinceRef（tree/commit oid）が無ければ HEAD 比較。git 管理外は Error("NOT_A_REPO")。 */
+export async function workspaceChanges(
+  workspace: string,
+  sinceRef?: string,
+): Promise<WorkspaceChanges> {
+  if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<WorkspaceChanges>("workspace_changes", { workspace, sinceRef: sinceRef ?? null });
+}
+
+/** 1ファイルの基準側・今側の本文（読み取り専用の左右比較用）。 */
+export async function workspaceFileDiff(
+  workspace: string,
+  file: string,
+  sinceRef?: string,
+): Promise<FileDiff> {
+  if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<FileDiff>("workspace_file_diff", { workspace, file, sinceRef: sinceRef ?? null });
+}
+
 // ---------- Avatar image ----------
 
 /** ユーザーに画像を選ばせて、AppData/avatars/ にコピーし、保存先絶対パスを返す。 */

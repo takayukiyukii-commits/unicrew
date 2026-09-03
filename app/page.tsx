@@ -88,6 +88,7 @@ import {
   agentStop,
   worktreePrepare,
   worktreeRemove,
+  workspaceSnapshot,
   checkUnicrewUpdate,
   claudeStatus,
   codexStatus,
@@ -119,6 +120,7 @@ import {
   addParticipant,
 } from "@/lib/participants";
 import { shouldIsolate, withSlotWorktree } from "@/lib/worktree";
+import { snapshotCwds, withTurnBase } from "@/lib/changes";
 import { showToast } from "@/lib/toast";
 import {
   TEMPLATE_TEAMS,
@@ -2397,6 +2399,21 @@ ${command}
     };
     const next = appendMessage(thread, userMsg);
     updateThread(thread.id, () => next);
+
+    // 差分ビュー（v0.4.0）: ターン開始時の作業ツリーを git の tree として記録しておく
+    // （利用者の index/HEAD は動かさない）。AI が動く前に取るため await する。
+    // 失敗（git 管理外など）は黙って HEAD 比較に落ちる。今ターンで初めて作られる worktree は
+    // HEAD から切られるので、記録が無くても HEAD 比較で正しい。
+    if (thread.workspace) {
+      const pairs = await Promise.all(
+        snapshotCwds(next).map(
+          async (cwd) => [cwd, await workspaceSnapshot(cwd).catch(() => null)] as const,
+        ),
+      );
+      const trees: Record<string, string> = {};
+      for (const [cwd, tree] of pairs) if (tree) trees[cwd] = tree;
+      updateThread(thread.id, (t) => withTurnBase(t, trees));
+    }
 
     // 議論モード（conferenceMode + N-way）は Sequential：A→B→C と順番に喋らせて、
     // 後の参加者は前の発言を文脈として受け取る。

@@ -8,6 +8,7 @@ import {
   Gavel,
   Save,
   BookMarked,
+  RefreshCw,
 } from "lucide-react";
 import type {
   Thread,
@@ -29,8 +30,17 @@ import { effectiveParticipants } from "@/lib/participants";
 import { getPersonality } from "@/lib/personalities";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { useTranslation } from "@/lib/i18n";
-import { gitInitWorkspace, gitProbe, worktreeIntegrate, type GitProbe } from "@/lib/tauri";
+import {
+  gitInitWorkspace,
+  gitProbe,
+  worktreeIntegrate,
+  workspaceChanges,
+  type GitProbe,
+  type WorkspaceChanges as WorkspaceChangesResult,
+} from "@/lib/tauri";
 import { isolatedSlots } from "@/lib/worktree";
+import { changeTargets, statusGlyph, turnBaseFor, type ChangeTarget } from "@/lib/changes";
+import { openDiffInEditorWindow } from "@/lib/editor-window";
 import { showToast } from "@/lib/toast";
 
 interface Props {
@@ -239,6 +249,9 @@ export function RightPane({
               )}
             </div>
           )}
+
+          {/* 変更の差分ビュー（v0.4.0）: 単独・並列どちらでも1ブロック */}
+          <WorkspaceChanges thread={thread} />
 
           {showModelSection && (
             <div>
@@ -860,6 +873,162 @@ function WorkspaceIsolation({ thread }: { thread: Thread }) {
         </div>
       ) : (
         <div>{t("rightPane.isolation.pending")}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 変更の差分ビュー（v0.4.0）。AI が動いた後に「何が変わったか」を一覧で見せ、クリックで
+ * エディタウィンドウに左右比較（読み取り専用）を開く。足す表示は1ブロックだけ。
+ * 基準は「このターン」（送信時に記録した tree）か「コミット後すべて」（HEAD）。
+ * worktree 隔離中は対象（作業フォルダ／各参加者）をプルダウン1つで切り替える。
+ */
+function WorkspaceChanges({ thread }: { thread: Thread }) {
+  const { t } = useTranslation();
+  const targets = changeTargets(thread);
+  const [targetKey, setTargetKey] = useState("workspace");
+  const [mode, setMode] = useState<"turn" | "head">("turn");
+  const [result, setResult] = useState<WorkspaceChangesResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const target = targets.find((x) => x.key === targetKey) ?? targets[0];
+  const cwd = target?.cwd;
+  const turnBase = cwd ? turnBaseFor(thread, cwd) : undefined;
+  const effectiveMode: "turn" | "head" = mode === "turn" && turnBase ? "turn" : "head";
+  const sinceRef = effectiveMode === "turn" ? turnBase : undefined;
+  // 手動更新用のカウンタ（押すたびに数え直す）
+  const [tick, setTick] = useState(0);
+  // 会話が進む（updatedAt）・対象や基準が変わる・手動更新のたびに、少し遅らせて数え直す（連続更新の間引き）
+  useEffect(() => {
+    if (!cwd) return;
+    let cancelled = false;
+    const h = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const r = await workspaceChanges(cwd, sinceRef);
+        if (cancelled) return;
+        setResult(r);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setResult(null);
+        setError(msg === "NOT_A_REPO" ? null : msg);
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(h);
+    };
+  }, [cwd, sinceRef, thread.updatedAt, tick]);
+  if (!cwd || !target) return null;
+  if (!result && !error) return null; // git 管理外（NOT_A_REPO）か未取得
+
+  const files = result?.files ?? [];
+  const nameOf = (x: ChangeTarget) =>
+    x.slot ? (getCharacter(x.slot.characterId)?.name ?? x.key) : t("rightPane.changes.workspace");
+  const btn =
+    "shrink-0 px-1.5 py-0.5 rounded border border-[var(--color-border)] text-[11px] text-[var(--color-text)] hover:opacity-80 disabled:opacity-50";
+  const pill = (active: boolean) =>
+    `px-1.5 py-0.5 rounded text-[10.5px] border ${
+      active
+        ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+        : "border-[var(--color-border)] text-[var(--color-muted)]"
+    } disabled:opacity-50`;
+
+  return (
+    <div className="rounded-md border border-[var(--color-border)] px-2.5 py-2 text-[11.5px] leading-relaxed text-[var(--color-muted)] space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="font-semibold text-[var(--color-text)] flex-1 min-w-0 truncate">
+          {t("rightPane.changes.title")}
+          {result ? ` (${files.length})` : ""}
+        </span>
+        {result && files.length > 0 && (
+          <span className="text-[10.5px] font-mono">
+            <span className="text-emerald-600">+{result.additions}</span>{" "}
+            <span className="text-rose-600">−{result.deletions}</span>
+          </span>
+        )}
+        <button
+          type="button"
+          className={btn}
+          disabled={busy}
+          onClick={() => setTick((n) => n + 1)}
+          title={t("rightPane.changes.refresh")}
+        >
+          <RefreshCw size={11} className={busy ? "animate-spin" : ""} />
+        </button>
+      </div>
+      <div className="flex items-center gap-1 flex-wrap">
+        <button
+          type="button"
+          className={pill(effectiveMode === "turn")}
+          disabled={!turnBase}
+          onClick={() => setMode("turn")}
+          title={!turnBase ? t("rightPane.changes.noTurnHint") : undefined}
+        >
+          {t("rightPane.changes.sinceTurn")}
+        </button>
+        <button type="button" className={pill(effectiveMode === "head")} onClick={() => setMode("head")}>
+          {t("rightPane.changes.sinceHead")}
+        </button>
+        {targets.length > 1 && (
+          <select
+            value={target.key}
+            onChange={(e) => setTargetKey(e.target.value)}
+            className="ml-auto max-w-[120px] text-[10.5px] border border-[var(--color-border)] rounded px-1 py-0.5 bg-white text-[var(--color-text)]"
+          >
+            {targets.map((x) => (
+              <option key={x.key} value={x.key}>
+                {nameOf(x)}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {error && <div className="text-rose-600 break-all">{error}</div>}
+      {result && files.length === 0 && <div className="opacity-80">{t("rightPane.changes.empty")}</div>}
+      {files.length > 0 && (
+        <ul className="max-h-56 overflow-y-auto space-y-0.5" title={t("rightPane.changes.openDiff")}>
+          {files.map((f) => (
+            <li key={f.path}>
+              <button
+                type="button"
+                className="w-full flex items-center gap-1.5 text-left hover:bg-[var(--color-accent-soft)] rounded px-1"
+                onClick={() =>
+                  void openDiffInEditorWindow({
+                    workspace: cwd,
+                    file: f.path,
+                    base: result?.base,
+                    label: target.slot ? nameOf(target) : undefined,
+                  })
+                }
+              >
+                <span className="w-3 shrink-0 text-center font-mono">{statusGlyph(f.status)}</span>
+                <span
+                  className="flex-1 min-w-0 truncate font-mono text-[10.5px] text-[var(--color-text)]"
+                  title={f.old_path ? `${f.old_path} → ${f.path}` : f.path}
+                >
+                  {f.path}
+                </span>
+                {f.binary ? (
+                  <span className="shrink-0 text-[10px]">{t("rightPane.changes.binary")}</span>
+                ) : (
+                  <span className="shrink-0 text-[10px] font-mono">
+                    <span className="text-emerald-600">+{f.additions}</span>{" "}
+                    <span className="text-rose-600">−{f.deletions}</span>
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {result?.truncated && (
+        <div className="opacity-80">{t("rightPane.changes.truncated", { count: files.length })}</div>
       )}
     </div>
   );

@@ -2,10 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X, Save, FileText, Plus, AlertCircle } from "lucide-react";
+import { X, Save, FileText, Plus, AlertCircle, GitCompare } from "lucide-react";
 import clsx from "clsx";
-import { readTextFile, writeTextFile, isTauri } from "@/lib/tauri";
-import { EDITOR_OPEN_TAB_EVENT } from "@/lib/editor-window";
+import { readTextFile, writeTextFile, isTauri, workspaceFileDiff } from "@/lib/tauri";
+import {
+  EDITOR_OPEN_DIFF_EVENT,
+  EDITOR_OPEN_TAB_EVENT,
+  type DiffRequest,
+} from "@/lib/editor-window";
 import { useTranslation, t as translate } from "@/lib/i18n";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -17,8 +21,20 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 });
 
+const MonacoDiffEditor = dynamic(
+  () => import("@monaco-editor/react").then((m) => m.DiffEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full w-full flex items-center justify-center text-[12px] text-neutral-500">
+        {translate("editor.loading")}
+      </div>
+    ),
+  },
+);
+
 interface Tab {
-  /** ファイル絶対パス */
+  /** ファイル絶対パス（差分タブは `diff://<workspace>::<base>::<file>` の合成キー） */
   path: string;
   /** ファイル名（タブ表示用） */
   name: string;
@@ -32,6 +48,31 @@ interface Tab {
   loading: boolean;
   /** 読み込み失敗時のエラーメッセージ */
   error: string | null;
+  /**
+   * 差分タブ（v0.4.0・読み取り専用）。original=基準側 / content=今側 として使う。
+   * 保存・編集は一切できない（Ctrl+S も無視）。
+   */
+  diff?: DiffRequest;
+  /** 差分タブで本文を出せない理由（バイナリ・大きすぎ）。あれば本文の代わりに表示 */
+  diffNote?: string | null;
+}
+
+function diffTabKey(req: DiffRequest): string {
+  return `diff://${req.workspace}::${req.base ?? "HEAD"}::${req.file}`;
+}
+
+function makeDiffTab(req: DiffRequest): Tab {
+  return {
+    path: diffTabKey(req),
+    name: translate("editor.diffTab", { name: basename(req.file) }),
+    original: "",
+    content: "",
+    language: detectLanguage(req.file),
+    loading: true,
+    error: null,
+    diff: req,
+    diffNote: null,
+  };
 }
 
 function basename(path: string): string {
@@ -152,7 +193,44 @@ export function EditorWindow() {
     }
   }, []);
 
-  // URL ?file=... から初期タブを開く（ウィンドウ生成時の最初のファイル）
+  /** 差分タブを開く（同じ要求なら切り替えだけ）。本文は Rust 側から基準側・今側の2本で受け取る */
+  const openDiff = useCallback(async (req: DiffRequest) => {
+    if (!req || typeof req.file !== "string" || typeof req.workspace !== "string") return;
+    const key = diffTabKey(req);
+    setTabs((prev) => (prev.some((t) => t.path === key) ? prev : [...prev, makeDiffTab(req)]));
+    setActivePath(key);
+    if (!isTauri()) {
+      setTabs((prev) =>
+        prev.map((t) => (t.path === key ? { ...t, loading: false, error: "browser preview" } : t)),
+      );
+      return;
+    }
+    try {
+      const d = await workspaceFileDiff(req.workspace, req.file, req.base);
+      const note = d.binary
+        ? translate("editor.diffBinary")
+        : d.too_large
+          ? translate("editor.diffTooLarge")
+          : null;
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.path === key
+            ? { ...t, original: d.original, content: d.modified, diffNote: note, loading: false }
+            : t,
+        ),
+      );
+    } catch (e) {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.path === key
+            ? { ...t, loading: false, error: e instanceof Error ? e.message : String(e) }
+            : t,
+        ),
+      );
+    }
+  }, []);
+
+  // URL ?file=... / ?diff=... から初期タブを開く（ウィンドウ生成時の最初のファイル）
   useEffect(() => {
     if (initialUrlHandled.current) return;
     initialUrlHandled.current = true;
@@ -162,7 +240,15 @@ export function EditorWindow() {
     if (initial) {
       void openPath(initial);
     }
-  }, [openPath]);
+    const diffRaw = params.get("diff");
+    if (diffRaw) {
+      try {
+        void openDiff(JSON.parse(diffRaw) as DiffRequest);
+      } catch {
+        /* 壊れたクエリは無視 */
+      }
+    }
+  }, [openPath, openDiff]);
 
   // メインウィンドウから飛んでくる「タブ追加」イベントを購読
   useEffect(() => {
@@ -180,17 +266,24 @@ export function EditorWindow() {
           }
         },
       );
-      if (cancelled) {
+      const fnDiff = await listen<DiffRequest>(EDITOR_OPEN_DIFF_EVENT, (event) => {
+        void openDiff(event.payload);
+      });
+      const both = () => {
         fn();
+        fnDiff();
+      };
+      if (cancelled) {
+        both();
       } else {
-        unlisten = fn;
+        unlisten = both;
       }
     })();
     return () => {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [openPath]);
+  }, [openPath, openDiff]);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.path === activePath) ?? null,
@@ -220,6 +313,7 @@ export function EditorWindow() {
 
   const saveActive = useCallback(async () => {
     if (!activeTab) return;
+    if (activeTab.diff) return; // 差分タブは読み取り専用
     if (activeTab.loading) return;
     if (activeTab.original === activeTab.content) return;
     if (!isTauri()) {
@@ -268,7 +362,7 @@ export function EditorWindow() {
         )}
         {tabs.map((t) => {
           const isActive = t.path === activePath;
-          const isDirty = t.original !== t.content && !t.loading;
+          const isDirty = !t.diff && t.original !== t.content && !t.loading;
           return (
             <div
               key={t.path}
@@ -281,13 +375,20 @@ export function EditorWindow() {
               onClick={() => setActivePath(t.path)}
               title={t.path}
             >
-              <FileText
-                size={12}
-                className={clsx(
-                  "shrink-0",
-                  isActive ? "text-sky-400" : "text-neutral-500",
-                )}
-              />
+              {t.diff ? (
+                <GitCompare
+                  size={12}
+                  className={clsx("shrink-0", isActive ? "text-amber-300" : "text-neutral-500")}
+                />
+              ) : (
+                <FileText
+                  size={12}
+                  className={clsx(
+                    "shrink-0",
+                    isActive ? "text-sky-400" : "text-neutral-500",
+                  )}
+                />
+              )}
               <span className="truncate max-w-[200px]">{t.name}</span>
               {isDirty && (
                 <span
@@ -318,20 +419,27 @@ export function EditorWindow() {
       {/* ステータスバー（パス + 保存ボタン） */}
       <div className="flex items-center justify-between gap-2 px-3 py-1 bg-[#181818] border-b border-black/40 text-[11px] text-neutral-400">
         <div className="truncate font-mono">
-          {activeTab ? activeTab.path : "—"}
+          {activeTab
+            ? activeTab.diff
+              ? `${activeTab.diff.file}  ←  ${activeTab.diff.base ? activeTab.diff.base.slice(0, 7) : "HEAD"}${activeTab.diff.label ? ` (${activeTab.diff.label})` : ""}`
+              : activeTab.path
+            : "—"}
         </div>
         <div className="flex items-center gap-2">
-          <span className="opacity-60">{activeTab?.language ?? ""}</span>
+          <span className="opacity-60">
+            {activeTab?.diff ? tr("editor.diffReadOnly") : (activeTab?.language ?? "")}
+          </span>
           <button
             onClick={() => void saveActive()}
             disabled={
               !activeTab ||
+              !!activeTab.diff ||
               activeTab.loading ||
               activeTab.original === activeTab.content
             }
             className={clsx(
               "flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border",
-              activeTab && activeTab.original !== activeTab.content
+              activeTab && !activeTab.diff && activeTab.original !== activeTab.content
                 ? "border-sky-500 text-sky-300 hover:bg-sky-500/10"
                 : "border-neutral-700 text-neutral-600 cursor-not-allowed",
             )}
@@ -365,7 +473,33 @@ export function EditorWindow() {
             {tr("editor.loadFailed", { error: activeTab.error })}
           </div>
         )}
-        {activeTab && !activeTab.loading && !activeTab.error && (
+        {activeTab && !activeTab.loading && !activeTab.error && activeTab.diff && (
+          activeTab.diffNote ? (
+            <div className="h-full w-full flex items-center justify-center text-[12px] text-neutral-400">
+              {activeTab.diffNote}
+            </div>
+          ) : (
+            <MonacoDiffEditor
+              key={activeTab.path}
+              height="100%"
+              theme="vs-dark"
+              language={activeTab.language}
+              original={activeTab.original}
+              modified={activeTab.content}
+              options={{
+                readOnly: true,
+                originalEditable: false,
+                renderSideBySide: true,
+                fontSize: 13,
+                minimap: { enabled: false },
+                wordWrap: "on",
+                automaticLayout: true,
+                scrollBeyondLastLine: false,
+              }}
+            />
+          )
+        )}
+        {activeTab && !activeTab.loading && !activeTab.error && !activeTab.diff && (
           <MonacoEditor
             key={activeTab.path}
             height="100%"

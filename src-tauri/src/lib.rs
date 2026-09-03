@@ -5276,6 +5276,348 @@ async fn git_init_workspace(workspace: String) -> Result<String, String> {
     Ok("git 管理下にしました（初期コミットを作成）".into())
 }
 
+// ---------- 変更の差分ビュー（v0.4.0・AI が何を変えたかを一覧と左右比較で見せる） ----------
+//
+// 「AI が動いた後に何が変わったか」を、利用者の git の状態（index・HEAD・作業ツリー）を
+// 一切動かさずに数える。手順は 1-3 チェックポイントと同じ土台：
+//   一時 index（GIT_INDEX_FILE）に read-tree HEAD → add -A → write-tree
+// で「今の作業ツリー（未追跡含む・.gitignore 尊重）」を tree オブジェクトにし、基準の tree と比べる。
+// - 基準は「ターン開始時の tree」（ユーザー送信のたびに workspace_snapshot で記録）か HEAD
+// - 差分の本文は「基準側」「今側」の2本文で返し、UI 側の DiffEditor で左右比較する
+// - worktree 隔離中は cwd を差し替えるだけで同じ関数が効く（1-1 と同じ考え方）
+
+#[derive(Debug, Serialize)]
+struct ChangedFile {
+    path: String,
+    /// A=追加 M=変更 D=削除 R=改名 T=種別変更 U=不明
+    status: String,
+    /// 改名時のみ旧パス
+    old_path: Option<String>,
+    additions: i64,
+    deletions: i64,
+    binary: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkspaceChanges {
+    /// 実際に比べた基準（tree oid か HEAD の commit oid）
+    base: String,
+    /// "turn"（ターン開始時の tree）/ "head"（最後のコミット）/ "empty"（コミット無し・全部が追加扱い）
+    base_kind: String,
+    files: Vec<ChangedFile>,
+    additions: i64,
+    deletions: i64,
+    /// 上限（500件）で打ち切ったか
+    truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct FileDiff {
+    /// 基準側の本文（追加ファイルなら空）
+    original: String,
+    /// 今の作業ツリーの本文（削除ファイルなら空）
+    modified: String,
+    binary: bool,
+    too_large: bool,
+}
+
+const CHANGES_MAX_FILES: usize = 500;
+const DIFF_MAX_BYTES: usize = 2 * 1024 * 1024;
+const EMPTY_TREE_OID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// 環境変数付きで git を1回実行し stdout を生のまま返す。
+async fn git_raw_env(
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Vec<u8>, String> {
+    let mut cmd = build_silent_command("git");
+    cmd.current_dir(cwd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let out = cmd
+        .output()
+        .await
+        .map_err(|e| format!("git を起動できませんでした: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let so = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Err(if err.is_empty() { so } else { err });
+    }
+    Ok(out.stdout)
+}
+
+async fn git_out_env(
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<String, String> {
+    let raw = git_raw_env(cwd, args, envs).await?;
+    Ok(String::from_utf8_lossy(&raw).trim().to_string())
+}
+
+/// 一時 index のパス（AppData/tmp/index-<nanos>）。利用者の .git/index には触れない。
+fn temp_index_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("tmp");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    Ok(dir.join(format!("index-{}-{}", std::process::id(), nanos)))
+}
+
+/// 今の作業ツリー（未追跡含む・.gitignore 尊重）を一時 index に写して tree oid を返す。
+/// 戻り値の index ファイルは呼び出し側が消す（diff --cached に使い回すため）。
+async fn snapshot_tree(
+    app: &AppHandle,
+    cwd: &std::path::Path,
+) -> Result<(String, std::path::PathBuf), String> {
+    let index = temp_index_path(app)?;
+    let index_s = index.to_string_lossy().to_string();
+    let envs = [("GIT_INDEX_FILE", index_s.as_str())];
+    // HEAD があれば追跡状態を引き継ぐ（無ければ空 index から全部を add）
+    if git_out(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.is_ok() {
+        git_out_env(cwd, &["read-tree", "HEAD"], &envs).await?;
+    }
+    git_out_env(cwd, &["add", "-A", "--", "."], &envs).await?;
+    let tree = git_out_env(cwd, &["write-tree"], &envs).await?;
+    Ok((tree, index))
+}
+
+/// 基準を決める：since_ref が実在する tree/commit ならそれ（turn）、無ければ HEAD、それも無ければ空 tree。
+async fn resolve_base(cwd: &std::path::Path, since_ref: Option<&str>) -> (String, String) {
+    if let Some(r) = since_ref {
+        let r = r.trim();
+        // oid 以外（ブランチ名・`..`・オプション）は受け付けない
+        if !r.is_empty()
+            && r.len() <= 64
+            && r.chars().all(|c| c.is_ascii_hexdigit())
+            && git_out(cwd, &["cat-file", "-e", &format!("{}^{{tree}}", r)]).await.is_ok()
+        {
+            return (r.to_string(), "turn".into());
+        }
+    }
+    if let Ok(h) = git_out(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).await {
+        return (h, "head".into());
+    }
+    (EMPTY_TREE_OID.into(), "empty".into())
+}
+
+/// `git diff --numstat -z` の出力を (path, additions, deletions, binary, old_path) に分解する。
+/// 改名は `add\tdel\t\0old\0new\0`、それ以外は `add\tdel\tpath\0`。
+fn parse_numstat_z(raw: &[u8]) -> Vec<(String, i64, i64, bool, Option<String>)> {
+    let text = String::from_utf8_lossy(raw);
+    let toks: Vec<&str> = text.split('\0').collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let tok = toks[i];
+        i += 1;
+        if tok.is_empty() {
+            continue;
+        }
+        let mut parts = tok.splitn(3, '\t');
+        let a = parts.next().unwrap_or("");
+        let d = parts.next().unwrap_or("");
+        let rest = parts.next().unwrap_or("");
+        let binary = a == "-" || d == "-";
+        let add = a.parse::<i64>().unwrap_or(0);
+        let del = d.parse::<i64>().unwrap_or(0);
+        if rest.is_empty() {
+            // 改名：次の2トークンが old / new
+            let old = toks.get(i).copied().unwrap_or("").to_string();
+            let new = toks.get(i + 1).copied().unwrap_or("").to_string();
+            i += 2;
+            if !new.is_empty() {
+                out.push((new, add, del, binary, Some(old)));
+            }
+        } else {
+            out.push((rest.to_string(), add, del, binary, None));
+        }
+    }
+    out
+}
+
+/// `git diff --name-status -z` の出力を path → status(先頭1文字) に分解する。改名は `R100\0old\0new\0`。
+fn parse_name_status_z(raw: &[u8]) -> HashMap<String, String> {
+    let text = String::from_utf8_lossy(raw);
+    let toks: Vec<&str> = text.split('\0').collect();
+    let mut out = HashMap::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let st = toks[i];
+        i += 1;
+        if st.is_empty() {
+            continue;
+        }
+        let letter = st.chars().next().unwrap_or('U').to_string();
+        if letter == "R" || letter == "C" {
+            let new = toks.get(i + 1).copied().unwrap_or("").to_string();
+            i += 2;
+            if !new.is_empty() {
+                out.insert(new, letter);
+            }
+        } else {
+            let p = toks.get(i).copied().unwrap_or("").to_string();
+            i += 1;
+            if !p.is_empty() {
+                out.insert(p, letter);
+            }
+        }
+    }
+    out
+}
+
+/// ターン開始時の作業ツリーを tree オブジェクトとして記録し oid を返す（利用者の index/HEAD は動かさない）。
+/// ユーザー送信のたびに呼び、「このターンで変わったファイル」の基準にする。
+#[tauri::command]
+async fn workspace_snapshot(app: AppHandle, workspace: String) -> Result<String, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "このフォルダは git 管理外です".to_string())?;
+    let (tree, index) = snapshot_tree(&app, &ws).await?;
+    let _ = tokio::fs::remove_file(&index).await;
+    Ok(tree)
+}
+
+/// 変更されたファイルの一覧（基準＝since_ref の tree／無ければ HEAD）。
+#[tauri::command]
+async fn workspace_changes(
+    app: AppHandle,
+    workspace: String,
+    since_ref: Option<String>,
+) -> Result<WorkspaceChanges, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    if !ws.is_dir() {
+        return Err("フォルダが見つかりません".into());
+    }
+    git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "NOT_A_REPO".to_string())?;
+    let (base, base_kind) = resolve_base(&ws, since_ref.as_deref()).await;
+    let (_tree, index) = snapshot_tree(&app, &ws).await?;
+    let index_s = index.to_string_lossy().to_string();
+    let envs = [("GIT_INDEX_FILE", index_s.as_str())];
+    let numstat = git_raw_env(
+        &ws,
+        &["diff", "--cached", "--numstat", "-M", "-z", "--no-color", &base, "--"],
+        &envs,
+    )
+    .await;
+    let names = git_raw_env(
+        &ws,
+        &["diff", "--cached", "--name-status", "-M", "-z", "--no-color", &base, "--"],
+        &envs,
+    )
+    .await;
+    let _ = tokio::fs::remove_file(&index).await;
+    let numstat = numstat?;
+    let statuses = parse_name_status_z(&names?);
+    let mut files: Vec<ChangedFile> = parse_numstat_z(&numstat)
+        .into_iter()
+        .map(|(path, add, del, binary, old)| {
+            let status = statuses
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| if old.is_some() { "R".into() } else { "U".into() });
+            ChangedFile { path, status, old_path: old, additions: add, deletions: del, binary }
+        })
+        .collect();
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    let additions = files.iter().map(|f| f.additions).sum();
+    let deletions = files.iter().map(|f| f.deletions).sum();
+    let truncated = files.len() > CHANGES_MAX_FILES;
+    files.truncate(CHANGES_MAX_FILES);
+    Ok(WorkspaceChanges { base, base_kind, files, additions, deletions, truncated })
+}
+
+/// 1ファイルの「基準側」「今側」の本文（DiffEditor 用・読み取り専用）。
+#[tauri::command]
+async fn workspace_file_diff(
+    workspace: String,
+    file: String,
+    since_ref: Option<String>,
+) -> Result<FileDiff, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "このフォルダは git 管理外です".to_string())?;
+    let top = std::path::PathBuf::from(&toplevel);
+    // リポジトリの外を読ませない（相対パス・`..` 無し・絶対パス無し）
+    let rel = file.replace('\\', "/");
+    let p = std::path::Path::new(&rel);
+    if p.is_absolute()
+        || rel.starts_with('/')
+        || rel.contains(':')
+        || p.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("リポジトリ内の相対パスだけ開けます".into());
+    }
+    let (base, _) = resolve_base(&ws, since_ref.as_deref()).await;
+    let spec = format!("{}:{}", base, rel);
+    // 基準側：無ければ「追加されたファイル」として空
+    let original = git_raw(&top, &["show", &spec]).await.unwrap_or_default();
+    // 今側：無ければ「削除されたファイル」として空
+    let modified = tokio::fs::read(top.join(&rel)).await.unwrap_or_default();
+    let too_large = original.len() > DIFF_MAX_BYTES || modified.len() > DIFF_MAX_BYTES;
+    let is_bin = |b: &[u8]| b.iter().take(8192).any(|c| *c == 0);
+    let binary = is_bin(&original) || is_bin(&modified);
+    if too_large || binary {
+        return Ok(FileDiff { original: String::new(), modified: String::new(), binary, too_large });
+    }
+    Ok(FileDiff {
+        original: String::from_utf8_lossy(&original).to_string(),
+        modified: String::from_utf8_lossy(&modified).to_string(),
+        binary: false,
+        too_large: false,
+    })
+}
+
+#[cfg(test)]
+mod changes_parse_tests {
+    use super::{parse_name_status_z, parse_numstat_z};
+
+    #[test]
+    fn numstat_z_handles_plain_binary_and_rename() {
+        // 実測（2026-09-03 uc_changes_probe.sh）: 改名は `add\tdel\t\0old\0new\0`、それ以外は `add\tdel\tpath\0`
+        let raw = b"2\t1\ta.txt\0-\t-\timg.png\00\t0\t\0c.txt\0c2.txt\01\t0\tnew.txt\0";
+        let v = parse_numstat_z(raw);
+        assert_eq!(v.len(), 4);
+        assert_eq!(v[0], ("a.txt".to_string(), 2, 1, false, None));
+        assert_eq!(v[1], ("img.png".to_string(), 0, 0, true, None));
+        assert_eq!(v[2], ("c2.txt".to_string(), 0, 0, false, Some("c.txt".to_string())));
+        assert_eq!(v[3], ("new.txt".to_string(), 1, 0, false, None));
+    }
+
+    #[test]
+    fn name_status_z_maps_rename_to_new_path() {
+        let raw = b"M\0a.txt\0D\0b.txt\0R100\0c.txt\0c2.txt\0A\0new.txt\0";
+        let m = parse_name_status_z(raw);
+        assert_eq!(m.get("a.txt").map(String::as_str), Some("M"));
+        assert_eq!(m.get("b.txt").map(String::as_str), Some("D"));
+        assert_eq!(m.get("c2.txt").map(String::as_str), Some("R"));
+        assert!(m.get("c.txt").is_none());
+        assert_eq!(m.get("new.txt").map(String::as_str), Some("A"));
+    }
+
+    #[test]
+    fn empty_input_yields_nothing() {
+        assert!(parse_numstat_z(b"").is_empty());
+        assert!(parse_name_status_z(b"").is_empty());
+    }
+}
+
 // ---------- App setup ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5309,6 +5651,9 @@ pub fn run() {
             worktree_remove,
             worktree_integrate,
             git_init_workspace,
+            workspace_snapshot,
+            workspace_changes,
+            workspace_file_diff,
             save_avatar_image,
             save_avatar_bytes,
             delete_avatar_image,

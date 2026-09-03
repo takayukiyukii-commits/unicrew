@@ -201,6 +201,12 @@ export interface Thread {
    * 未設定（旧スレッド）は acceptEdits 扱い。
    */
   permissionMode?: PermissionMode;
+  /**
+   * 差分ビュー（v0.4.0）の基準。ユーザー送信のたびに「ターン開始時の作業ツリー」を
+   * git の tree オブジェクトとして記録する（cwd → tree oid）。利用者の index/HEAD は動かさない。
+   * worktree 隔離中はスロットごとに cwd が違うので複数持つ。未記録なら HEAD 比較に落ちる。
+   */
+  turnBase?: Record<string, string>;
 }
 
 export type PermissionMode = "acceptEdits" | "plan" | "deepThink" | "careful";
