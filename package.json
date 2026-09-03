@@ -34,7 +34,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
     "monaco-editor": "^0.55.1",
-    "nanoid": "^5.0.7",
+    "nanoid": "^5.1.16",
     "next": "^16.0.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
