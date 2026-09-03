@@ -27,4 +27,8 @@ jobs:
         run: npm run lint --silent
       - name: test (必須)
         run: npm test --silent
+      # 版数の一元化（v0.4.0）: package.json / Cargo.toml / tauri.conf.json / Cargo.lock / whatsnew fallback /
+      # public/whatsnew/<version>.md の一致。5版ぶん告知が止まっていた事故（2026-09-03）の再発防止
+      - name: version sync (必須)
+        run: python3 scripts/verify_version_sync.py --selftest && python3 scripts/verify_version_sync.py
 

@@ -1,6 +1,6 @@
 {
   "name": "unicrew",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "private": true,
   "description": "UNICREW - AIを動かすことに特化したマルチAIデスクトップ。公式 claude / codex CLI を subprocess として束ねる Pure CLI Conductor。",
   "scripts": {
@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
-    "@supabase/supabase-js": "^2.105.4",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.0.1",

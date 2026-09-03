@@ -73,6 +73,7 @@ import {
   type ProviderCategory,
 } from "@/lib/providerCategories";
 import { useTranslation, type Locale } from "@/lib/i18n";
+import { UNICREW_VERSION } from "@/lib/whatsnew";
 
 interface Props {
   open: boolean;
@@ -1520,7 +1521,7 @@ export function SettingsModal({
             </label>
           </section>
 
-          <UnicrewSelfUpdateSection currentVersion="0.2.1" />
+          <UnicrewSelfUpdateSection currentVersion={UNICREW_VERSION} />
 
           <div className="border-t border-[var(--color-border)] pt-5">
             <CharactersSection onCharactersChanged={onCharactersChanged} />

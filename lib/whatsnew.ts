@@ -2,7 +2,9 @@
  * What's New ページの表示判定。
  *
  * - `package.json` の version を `process.env.NEXT_PUBLIC_UNICREW_VERSION` 経由で受ける
- *   （無ければ APP_VERSION 定数で fallback。next.config.ts は触らない方針）
+ *   （next.config.ts が package.json から埋める。無ければ下の fallback 定数）
+ * - fallback 定数は `scripts/verify_version_sync.py` が package.json と一致を検査する（出荷前ゲート）。
+ *   2026-09-03 の実測＝この定数が 0.3.2 で止まり、0.3.3〜0.3.7 の告知が一度も出ていなかった
  * - `unicrew.lastSeenVersion` localStorage と比較
  * - 既知の公開バージョン未満からの初回起動（バージョン記録なし）では出さない
  *   （古い localStorage を壊さないため）
@@ -10,11 +12,14 @@
 
 import { compare as compareVersions } from "./semver-mini";
 
+/** ビルド時に NEXT_PUBLIC_UNICREW_VERSION が無いときの fallback。package.json と同じ値にする（機械検査あり）。 */
+const UNICREW_VERSION_FALLBACK = "0.4.0";
+
 /**
- * 表示中バージョン。リリース時に更新する単一ソース。
+ * 表示中バージョン。正本は package.json（next.config.ts が NEXT_PUBLIC_UNICREW_VERSION に埋める）。
  * `public/whatsnew/{version}.md` と一致させる。
  */
-export const UNICREW_VERSION = "0.3.2";
+export const UNICREW_VERSION: string = process.env.NEXT_PUBLIC_UNICREW_VERSION || UNICREW_VERSION_FALLBACK;
 
 const STORAGE_KEY = "unicrew.lastSeenVersion";
 

@@ -44,6 +44,8 @@ scripts/_handoff_*.md
 *.log
 scripts/_handoff_*.md
 scripts/*.py
+# 出荷前ゲートの検査（verify_*.py）は CI（check.yml）が読むので必ず追跡する（2026-09-04・verify_version_sync.py が黙って ignore されていた）
+!scripts/verify_*.py
 !scripts/build_tauri.js
 # 検証スクリプトは追跡する（次に触る人が同じ手順で測り直せないと意味がない）
 !scripts/verify_image_attachment.py
