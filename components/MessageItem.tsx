@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, FileText, History, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
+import { Check, Copy, FileText, History, Image as ImageIcon, LifeBuoy, Play, Send, ShieldCheck } from "lucide-react";
 import type { Character, Message, MessageAttachment, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
@@ -37,6 +37,8 @@ interface Props {
    * 渡されたときだけホバーでボタンを出す（記録が無い発言には出ない）。
    */
   onRestore?: () => void;
+  /** 相互監査（v0.4.0）「指摘を実装AIに渡す」。監査役の応答（message.audit）にだけ渡される。 */
+  onForwardAudit?: () => void;
   /**
    * AI が応答内で言及したファイル名（NOTE_xxx.md など）を Ctrl+Click で
    * 別ウィンドウのエディタに開けるようにするための workspace 基準パス。
@@ -80,6 +82,7 @@ export function MessageItem({
   onExecute,
   onSosForError,
   onRestore,
+  onForwardAudit,
   workspace,
   userProfile,
 }: Props) {
@@ -163,6 +166,17 @@ export function MessageItem({
               {character.roleTag}
             </span>
           )}
+          {message.audit && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-[var(--color-accent)] text-[var(--color-accent)] text-[10.5px] font-medium"
+              title={message.audit.targetCwd}
+            >
+              <ShieldCheck size={11} />
+              {t("audit.badge")} · {t("audit.layerShort", { layer: message.audit.layer })} ·{" "}
+              {message.audit.depth === "deep" ? t("audit.deep") : t("audit.quick")}
+              {message.audit.sameCompany ? ` · ${t("audit.sameCompany")}` : ""}
+            </span>
+          )}
           {isUser && onRestore && (
             <button
               type="button"
@@ -209,6 +223,17 @@ export function MessageItem({
               <AttachmentPreview key={a.id} attachment={a} />
             ))}
           </div>
+        )}
+        {message.audit && onForwardAudit && (
+          <button
+            type="button"
+            onClick={onForwardAudit}
+            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--color-accent)] text-[var(--color-accent)] text-[11.5px] font-medium hover:bg-[var(--color-accent-soft)] transition"
+            title={t("audit.forwardTitle")}
+          >
+            <Send size={12} />
+            {t("audit.forward")}
+          </button>
         )}
         {showSos && (
           <button

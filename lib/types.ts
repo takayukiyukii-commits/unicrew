@@ -43,6 +43,28 @@ export interface MessageStats {
   thinkingMs: number | null;
 }
 
+export type AuditDepth = "quick" | "deep";
+export type AuditLayer = 1 | 2 | 3;
+
+/**
+ * 相互監査（v0.4.0）。監査役（実装した会社と別の会社のAI・読み取り専用）の応答に付く。
+ */
+export interface AuditMeta {
+  /** 監査役のプロバイダ */
+  auditor: Provider;
+  /** 表示用のキャラ（監査役のアバター） */
+  characterId: string;
+  /** 実装したプロバイダ（分からなければ null） */
+  implementer: Provider | null;
+  /** 観点（1=コードの正しさ 2=表示と実装の一致 3=運用） */
+  layer: AuditLayer;
+  depth: AuditDepth;
+  /** 別会社を用意できず、同じ会社のAIに監査させた（自己点検に近い） */
+  sameCompany: boolean;
+  /** 監査した作業フォルダ（worktree 隔離中はそのスロットの worktree） */
+  targetCwd: string;
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -70,6 +92,8 @@ export interface Message {
    * 「ここに戻す」はこの時点にファイルだけ戻す（会話は消さない・HEAD/index も動かさない）。
    */
   checkpoint?: Record<string, string>;
+  /** 相互監査（v0.4.0）。監査役の応答にだけ付く（バッジ表示・「指摘を実装AIに渡す」の根拠）。 */
+  audit?: AuditMeta;
 }
 
 export interface MessageAttachment {

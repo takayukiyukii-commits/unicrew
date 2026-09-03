@@ -61,6 +61,27 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
 
   // ── 開発支援 ──
   {
+    command: "/監査 ",
+    label: "別のAIに監査させる",
+    description:
+      "最後のコミット以降の変更を、実装したAIとは別の会社のAIに読み取り専用で監査させる。引数: quick|deep、1|2|3（観点の層）、残りは「仕様であって欠陥ではないもの」のメモ。",
+    providers: [
+      "claude",
+      "codex",
+      "gemini",
+      "goose",
+      "opencode",
+      "codex-acp",
+      "kiro",
+      "qwen",
+      "kimi",
+      "grok",
+      "cursor",
+    ],
+    category: "dev",
+    takesArgs: true,
+  },
+  {
     command: "/init",
     label: "CLAUDE.mdを初期化",
     description:

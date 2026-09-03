@@ -92,6 +92,9 @@ import {
   checkpointCreate,
   checkpointRestore,
   checkpointRemoveThread,
+  workspaceChanges,
+  workspacePatch,
+  readTextFile,
   checkUnicrewUpdate,
   claudeStatus,
   codexStatus,
@@ -123,7 +126,22 @@ import {
   addParticipant,
 } from "@/lib/participants";
 import { shouldIsolate, withSlotWorktree } from "@/lib/worktree";
-import { snapshotCwds, withTurnBase } from "@/lib/changes";
+import { changeTargets, snapshotCwds, withTurnBase } from "@/lib/changes";
+import {
+  AUDIT_LAYER_LABELS,
+  auditRequestLine,
+  auditorSystemPrompt,
+  buildAuditBrief,
+  buildForwardPrompt,
+  implementerOf,
+  isAuditSid,
+  isAuditSlotId,
+  nextAuditLayer,
+  parseAuditCommand,
+  pickAuditor,
+  type AuditCommand,
+} from "@/lib/audit";
+import { PROVIDER_LABELS, type AuditMeta } from "@/lib/types";
 import {
   excerpt,
   hasCheckpoint,
@@ -172,6 +190,8 @@ interface ActiveDraft {
   provider: Provider;
   /** moderator 役の場合 true。判定結果は通常列でなくラウンド下部に表示される。 */
   isModerator: boolean;
+  /** 相互監査（v0.4.0）: 監査役の draft。確定時に Message.audit に写す。 */
+  audit?: AuditMeta;
   blocks: Block[];
   toolMap: Map<string, number>;
   startedAt: number;
@@ -214,6 +234,12 @@ const FRESH_DRAFT = (
  * 旧2way構造では slotId が "claude"/"codex" のままなので、effectiveParticipants の
  * 結果と一致する（同じID）。
  */
+/**
+ * 相互監査（v0.4.0）: 監査役の一時スロット。参加者（thread.participants）には入れない
+ * （入れると並列モードに化け、送信・議論・表示の全部が巻き込まれる）。sid → slot。
+ */
+const AUDIT_SLOTS = new Map<string, ParticipantSlot>();
+
 function lookupSlot(
   sid: string,
   threadById: Map<string, Thread>,
@@ -221,7 +247,8 @@ function lookupSlot(
   const { threadId, slotId } = parseSlotSid(sid);
   const thread = threadById.get(threadId) ?? null;
   if (!thread) return { thread: null, slot: null };
-  return { thread, slot: findSlot(thread, slotId) };
+  const slot = findSlot(thread, slotId) ?? (isAuditSlotId(slotId) ? AUDIT_SLOTS.get(sid) ?? null : null);
+  return { thread, slot };
 }
 
 /**
@@ -908,6 +935,8 @@ export default function Page() {
     // 単独モードは sid === thread.id、並列モードは slot id がサフィックス付きで埋まっている。
     if (event.kind === "cli_session_id") {
       const sid = event.session_id;
+      // 監査役の一時セッションはスレッドの resume 用 ID に混ぜない（実装AIの続きが監査役に化ける）
+      if (isAuditSid(sid)) return;
       const cliSid = event.cli_session_id;
       const threadById = new Map(threadsRef.current.map((t) => [t.id, t]));
       const { thread, slot } = lookupSlot(sid, threadById);
@@ -1075,6 +1104,12 @@ export default function Page() {
   const finalizeDraft = (sid: string) => {
     const d = draftsRef.current[sid];
     if (!d) return;
+    if (d.audit) {
+      // 監査役は使い切り：結果を確定したらセッションを畳む（遅延イベントは AUDIT_SLOTS 不在で捨てられる）
+      AUDIT_SLOTS.delete(sid);
+      sessionsStartedRef.current.delete(sid);
+      void agentStop(sid).catch(() => {});
+    }
     // 未解決の tool_use（pending / approved のまま）は最終的に確定させる。
     // WebSearch / WebFetch などサーバーサイドツールは tool_result を返さないため、
     // そのままだと UI に永久に「実行中」のバブルが残ってしまう。
@@ -1111,6 +1146,7 @@ export default function Page() {
         ? ("moderator" as const)
         : ("participant" as const),
       conferenceRound,
+      audit: d.audit,
       stats: {
         inputTokens: d.inputTokens,
         outputTokens: d.outputTokens,
@@ -1134,7 +1170,7 @@ export default function Page() {
     const parallelCtx = thread ? isThreadParallel(thread) : false;
     if (!isEmptyDraft) {
       updateThread(d.threadId, (t) => appendMessage(t, assistantMsg));
-    } else if (parallelCtx) {
+    } else if (parallelCtx || d.audit) {
       updateThread(d.threadId, (t) =>
         appendMessage(t, {
           ...assistantMsg,
@@ -1865,6 +1901,14 @@ export default function Page() {
       // チェックポイント（v0.4.0）: このスレッドの記録（参照）も消す
       void checkpointRemoveThread(t.workspace, id).catch(() => {});
     }
+    // 相互監査（v0.4.0）: 走っている監査役も畳む
+    for (const sid of [...AUDIT_SLOTS.keys()]) {
+      if (sid.startsWith(`${id}::`)) {
+        AUDIT_SLOTS.delete(sid);
+        sessionsStartedRef.current.delete(sid);
+        void agentStop(sid).catch(() => {});
+      }
+    }
     setThreads((prev) => prev.filter((tt) => tt.id !== id));
     setSplitIds((prev) => prev.filter((x) => x !== id));
     if (activeId === id) {
@@ -2580,6 +2624,144 @@ ${command}
   };
 
   /**
+   * 相互監査（v0.4.0・Cursor の Agent Review の輸入）。
+   * 実装したプロバイダと別の会社のAIを読み取り専用（plan）の一時セッションで起動し、
+   * audit-playbook 付録Bの型（対象／差分／仕様であって欠陥でないもの／観点1つ／出力形式）を渡す。
+   * 同じ会話の自己点検は効かない（正本 第06章）。監査役は participants に入れない（AUDIT_SLOTS）。
+   */
+  const startAudit = async (
+    thread: Thread,
+    cmd: AuditCommand & { targetKey?: string },
+  ) => {
+    if (!thread.workspace) {
+      showToast(tr("audit.noWorkspace"), "error");
+      return;
+    }
+    const impl = implementerOf(thread);
+    // 対象＝指定があればそれ、無ければ実装者のスロットの作業場（worktree 隔離中はその worktree）、無ければ作業フォルダ
+    const targets = changeTargets(thread);
+    const target =
+      (cmd.targetKey ? targets.find((x) => x.key === cmd.targetKey) : undefined) ??
+      (impl.slotId ? targets.find((x) => x.key === impl.slotId) : undefined) ??
+      targets[0];
+    if (!target) {
+      showToast(tr("audit.noWorkspace"), "error");
+      return;
+    }
+    const cwd = target.cwd;
+    // 接続済みのプロバイダ（チーム開始時と同じ判定）
+    const available: Provider[] = [];
+    if (settings.authMode === "subscription") {
+      const [cs, cx] = await Promise.all([
+        claudeStatus().catch(() => null),
+        codexStatus().catch(() => null),
+      ]);
+      if (cs?.installed && cs.logged_in) available.push("claude");
+      if (cx?.installed && cx.logged_in) available.push("codex");
+    } else if (await getApiKey()) {
+      available.push("claude", "codex", "gemini");
+    }
+    const picked = pickAuditor(impl.provider, available);
+    if (!picked) {
+      showToast(tr("audit.noAuditor"), "error");
+      return;
+    }
+    if (picked.sameCompany) {
+      showToast(tr("audit.sameCompanyWarn", { provider: PROVIDER_LABELS[picked.auditor] }), "error");
+    }
+    const depth = cmd.depth ?? "quick";
+    let changes;
+    let patch;
+    try {
+      changes = await workspaceChanges(cwd);
+      if (changes.files.length === 0) {
+        showToast(tr("audit.noChanges"));
+        return;
+      }
+      patch = await workspacePatch(cwd, undefined, depth === "deep" ? 160 * 1024 : 64 * 1024);
+    } catch (e) {
+      showToast(tr("audit.failed", { message: e instanceof Error ? e.message : String(e) }), "error");
+      return;
+    }
+    // ワークスペース直下の AUDIT.md（この作業場の監査ルール）があれば注入
+    const auditMd = await readTextFile(`${thread.workspace}/AUDIT.md`).catch(() => "");
+    const layer = cmd.layer ?? nextAuditLayer(thread);
+    const auditor = picked.auditor;
+    const meta: AuditMeta = {
+      auditor,
+      characterId:
+        auditor === "codex" ? "tmpl-codex-normal" : auditor === "claude" ? "tmpl-claude-normal" : thread.characterId,
+      implementer: impl.provider,
+      layer,
+      depth,
+      sameCompany: picked.sameCompany,
+      targetCwd: cwd,
+    };
+    const slot: ParticipantSlot = { id: `audit-${nanoid(6)}`, provider: auditor, characterId: meta.characterId };
+    const sid = `${thread.id}::${slot.id}`;
+    // 依頼を会話に残す（チェックポイントは取らない＝「ここに戻す」は出ない）
+    updateThread(thread.id, (t) =>
+      appendMessage(t, {
+        id: nanoid(8),
+        role: "user",
+        content: auditRequestLine(meta, changes.files.length),
+        createdAt: Date.now(),
+      }),
+    );
+    AUDIT_SLOTS.set(sid, slot);
+    draftsRef.current = { ...draftsRef.current, [sid]: { ...FRESH_DRAFT(thread.id, slot), audit: meta } };
+    setDrafts(draftsRef.current);
+    setStreamingSids((prev) => new Set([...prev, sid]));
+    try {
+      const apiKey = settings.authMode === "apikey" ? await getApiKey() : null;
+      await agentStart({
+        sessionId: sid,
+        workspace: cwd,
+        systemPrompt: buildEffectiveSystemPrompt(auditorSystemPrompt(), null, false, "plan"),
+        model: thread.model,
+        authMode: settings.authMode,
+        apiKey,
+        provider: auditor,
+        resumeCliSessionId: null,
+        permissionMode: "plan",
+      });
+      sessionsStartedRef.current.add(sid);
+      const brief = buildAuditBrief({
+        layer,
+        depth,
+        files: changes.files,
+        patch: patch.patch,
+        patchTruncated: patch.truncated,
+        auditMd,
+        note: cmd.note,
+        implementer: impl.provider,
+        baseKind: changes.base_kind,
+      });
+      await agentSend(sid, brief);
+      showToast(
+        tr("audit.started", {
+          provider: PROVIDER_LABELS[auditor],
+          layer: AUDIT_LAYER_LABELS[layer].split(" ")[0],
+          depth: depth === "deep" ? "Deep" : "Quick",
+        }),
+      );
+    } catch (e) {
+      AUDIT_SLOTS.delete(sid);
+      sessionsStartedRef.current.delete(sid);
+      const cleared = { ...draftsRef.current };
+      delete cleared[sid];
+      draftsRef.current = cleared;
+      setDrafts(cleared);
+      setStreamingSids((prev) => {
+        const n = new Set(prev);
+        n.delete(sid);
+        return n;
+      });
+      showToast(tr("audit.failed", { message: e instanceof Error ? e.message : String(e) }), "error");
+    }
+  };
+
+  /**
    * ChatPane からの送信入口。応答中ならキューに積み（ターミナル風連投）、
    * アイドルなら即送信。flush は streamingSids 変化の useEffect で行う。
    */
@@ -2590,6 +2772,12 @@ ${command}
   ) => {
     const value = text.trim();
     if (!value && (!attachments || attachments.length === 0)) return;
+    // 相互監査（v0.4.0）: `/監査` `/audit` は CLI に送らず、別のAIを監査役として起動する
+    const auditCmd = parseAuditCommand(value);
+    if (auditCmd) {
+      void startAudit(thread, auditCmd);
+      return;
+    }
     if (isThreadBusy(thread)) {
       const q = enqueuedSendsRef.current[thread.id] ?? [];
       q.push({ text: value, attachments });
@@ -2598,6 +2786,12 @@ ${command}
       return;
     }
     void handleSendForThread(value, thread, attachments);
+  };
+
+  /** 相互監査（v0.4.0）: 監査の指摘を実装AI（このスレッドの参加者）に「裏取りしてから直す」指示付きで渡す。 */
+  const handleForwardAudit = (message: Message, thread: Thread) => {
+    if (!message.audit) return;
+    submitOrQueue(buildForwardPrompt(message), thread);
   };
 
   const handleRenameThread = (id: string, title: string) => {
@@ -2652,6 +2846,14 @@ ${command}
       finalizeDraft(thread.id);
       sessionsStartedRef.current.delete(thread.id);
       void agentStop(thread.id).catch(() => {});
+    }
+    // 相互監査（v0.4.0）: 監査役も一緒に止める
+    for (const sid of [...streamingSids]) {
+      if (isAuditSid(sid) && sid.startsWith(`${thread.id}::`)) {
+        finalizeDraft(sid);
+        sessionsStartedRef.current.delete(sid);
+        void agentStop(sid).catch(() => {});
+      }
     }
   };
 
@@ -2777,6 +2979,10 @@ ${command}
       const sid = makeSlotSid(thread.id, slot.id, parallel);
       r[slot.id] = drafts[sid] ?? null;
     }
+    // 相互監査（v0.4.0）: 監査役の一時セッションの draft も表示に乗せる
+    for (const [sid, d] of Object.entries(drafts)) {
+      if (d && isAuditSid(sid) && sid.startsWith(`${thread.id}::`)) r[d.slotId] = d;
+    }
     if (!parallel) {
       // 単独モード時は thread.id がそのまま sid なので拾い直す
       const single = drafts[thread.id] ?? null;
@@ -2789,9 +2995,12 @@ ${command}
     if (!thread) return false;
     const slots = effectiveParticipants(thread);
     const parallel = slots.length >= 2;
-    return slots.some((s) =>
-      streamingSids.has(makeSlotSid(thread.id, s.id, parallel)),
-    );
+    if (slots.some((s) => streamingSids.has(makeSlotSid(thread.id, s.id, parallel)))) return true;
+    // 相互監査（v0.4.0）: 監査役が読んでいる間も「応答中」（停止ボタン・巻き戻し禁止）に含める
+    for (const sid of streamingSids) {
+      if (isAuditSid(sid) && sid.startsWith(`${thread.id}::`)) return true;
+    }
+    return false;
   };
 
   // 並列ペインの実体（順序維持）。削除済み ID は事前に弾く。
@@ -3576,6 +3785,11 @@ ${command}
                     ? (m) => handleRestoreCheckpoint(m, activeThread)
                     : undefined
                 }
+                onForwardAudit={
+                  activeThread
+                    ? (m) => handleForwardAudit(m, activeThread)
+                    : undefined
+                }
                 peekActive={
                   activeThread ? peekPaneIds.has(activeThread.id) : false
                 }
@@ -3643,6 +3857,7 @@ ${command}
                   }
                   onSosForError={(err) => handleSosForError(err, t)}
                   onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, t)}
+                  onForwardAudit={(m) => handleForwardAudit(m, t)}
                   peekActive={peekPaneIds.has(t.id)}
                   onTogglePeek={() => togglePeekForThread(t.id)}
                   onTogglePermissionMode={togglePermissionMode}
@@ -3705,6 +3920,11 @@ ${command}
                 onRestoreCheckpoint={
                   activeThread
                     ? (m) => handleRestoreCheckpoint(m, activeThread)
+                    : undefined
+                }
+                onForwardAudit={
+                  activeThread
+                    ? (m) => handleForwardAudit(m, activeThread)
                     : undefined
                 }
                 peekActive={
@@ -3787,6 +4007,7 @@ ${command}
                       handleSosForError(err, splitThread)
                     }
                     onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, splitThread)}
+                    onForwardAudit={(m) => handleForwardAudit(m, splitThread)}
                     peekActive={peekPaneIds.has(splitThread.id)}
                     onTogglePeek={() => togglePeekForThread(splitThread.id)}
                     onTogglePermissionMode={togglePermissionMode}
@@ -3823,6 +4044,9 @@ ${command}
             onAddParticipant={handleAddParticipant}
             onRemoveParticipant={handleRemoveParticipant}
             onSaveAsTeam={handleSaveAsTeam}
+            onAudit={(key, depth) => {
+              if (focusedThread) void startAudit(focusedThread, { note: "", depth, targetKey: key });
+            }}
             onExportTeamJson={handleExportTeamJson}
             onChangeModel={handleChangeModel}
             onChangePersistentMemory={handleChangePersistentMemory}

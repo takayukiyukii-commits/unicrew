@@ -424,6 +424,32 @@ export async function workspaceFileDiff(
   return invoke<FileDiff>("workspace_file_diff", { workspace, file, sinceRef: sinceRef ?? null });
 }
 
+export interface WorkspacePatch {
+  /** unified diff（`git diff` そのまま） */
+  patch: string;
+  /** max_bytes で打ち切ったか */
+  truncated: boolean;
+  /** 打ち切る前の全体バイト数 */
+  bytes: number;
+  base: string;
+  base_kind: "turn" | "head" | "empty";
+}
+
+/** 変更の差分本文（相互監査で監査役に渡す）。基準は workspaceChanges と同じ。maxBytes 既定 64KB。 */
+export async function workspacePatch(
+  workspace: string,
+  sinceRef?: string,
+  maxBytes?: number,
+): Promise<WorkspacePatch> {
+  if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<WorkspacePatch>("workspace_patch", {
+    workspace,
+    sinceRef: sinceRef ?? null,
+    maxBytes: maxBytes ?? null,
+  });
+}
+
 // ---------- チェックポイント／巻き戻し（v0.4.0） ----------
 
 export interface Checkpoint {

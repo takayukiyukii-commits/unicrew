@@ -40,6 +40,7 @@ import { getPersonality } from "@/lib/personalities";
 import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
 import { hasCheckpoint } from "@/lib/checkpoint";
+import { isAuditSlotId } from "@/lib/audit";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
@@ -53,6 +54,8 @@ interface ActiveDraftLite {
   /** どのスロットの draft か。N-way並列で同じproviderが複数いるケースに対応。 */
   slotId: string;
   provider: Provider;
+  /** 相互監査（v0.4.0）: 監査役の draft。表示用キャラの解決に使う。 */
+  audit?: { characterId: string };
   blocks: Block[];
   startedAt: number;
   firstTextAt: number | null;
@@ -100,6 +103,8 @@ interface Props {
   onSosForError?: (errorText: string) => void;
   /** チェックポイント（v0.4.0）「ここに戻す」。記録があるユーザー発言にだけボタンが出る。 */
   onRestoreCheckpoint?: (message: Message) => void;
+  /** 相互監査（v0.4.0）「指摘を実装AIに渡す」。監査役の応答にだけボタンが出る。 */
+  onForwardAudit?: (message: Message) => void;
   /**
    * メッセージ末尾に差し込むカード。フィードバックアンケート等の単発UIをここから注入する。
    * 主ペインだけに渡し、split側には出さない（重複表示防止）。
@@ -146,6 +151,7 @@ export function ChatPane({
   onExecuteCommand,
   onSosForError,
   onRestoreCheckpoint,
+  onForwardAudit,
   feedbackSlot,
   peekActive = false,
   onTogglePeek,
@@ -470,6 +476,7 @@ export function ChatPane({
             userProfile={userProfile}
             onExecuteCommand={onExecuteCommand}
             onRestoreCheckpoint={onRestoreCheckpoint}
+            onForwardAudit={onForwardAudit}
           />
         ) : (
           <SingleView
@@ -477,13 +484,11 @@ export function ChatPane({
             character={character}
             workspace={thread.workspace ?? null}
             userProfile={userProfile}
-            draft={
-              // 単独モード時はキー何でも先頭1個を採用
-              Object.values(threadDrafts).find((d) => d) ?? null
-            }
+            drafts={Object.values(threadDrafts).filter((d): d is ActiveDraftLite => !!d)}
             onExecuteCommand={onExecuteCommand}
             onSosForError={onSosForError}
             onRestoreCheckpoint={onRestoreCheckpoint}
+            onForwardAudit={onForwardAudit}
           />
         )}
         {feedbackSlot}
@@ -716,21 +721,23 @@ function PermissionModeBadge({
 function SingleView({
   messages,
   character,
-  draft,
+  drafts,
   workspace,
   userProfile,
   onExecuteCommand,
   onSosForError,
   onRestoreCheckpoint,
+  onForwardAudit,
 }: {
   messages: Message[];
   character: ReturnType<typeof getCharacter>;
-  draft: ActiveDraftLite | null;
+  drafts: ActiveDraftLite[];
   workspace?: string | null;
   userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
   onSosForError?: (errorText: string) => void;
   onRestoreCheckpoint?: (message: Message) => void;
+  onForwardAudit?: (message: Message) => void;
 }) {
   return (
     <>
@@ -738,7 +745,7 @@ function SingleView({
         <MessageItem
           key={m.id}
           message={m}
-          character={character}
+          character={m.audit ? (getCharacter(m.audit.characterId) ?? character) : character}
           workspace={workspace}
           userProfile={userProfile}
           onExecute={onExecuteCommand}
@@ -746,9 +753,16 @@ function SingleView({
           onRestore={
             onRestoreCheckpoint && hasCheckpoint(m) ? () => onRestoreCheckpoint(m) : undefined
           }
+          onForwardAudit={m.audit && onForwardAudit ? () => onForwardAudit(m) : undefined}
         />
       ))}
-      {draft && <DraftBubble draft={draft} character={character} />}
+      {drafts.map((d) => (
+        <DraftBubble
+          key={d.slotId}
+          draft={d}
+          character={d.audit ? (getCharacter(d.audit.characterId) ?? character) : character}
+        />
+      ))}
     </>
   );
 }
@@ -769,7 +783,12 @@ interface UserGroup {
   kind: "user";
   message: Message;
 }
-type Group = UserGroup | RoundsGroup;
+/** 相互監査（v0.4.0）: 監査役の応答は参加者の列に入れず、1件ずつ全幅で出す。 */
+interface AuditGroup {
+  kind: "audit";
+  message: Message;
+}
+type Group = UserGroup | RoundsGroup | AuditGroup;
 
 /**
  * N-way対応のラウンド集約。
@@ -805,6 +824,9 @@ function groupMessagesForNway(
     if (m.role === "user") {
       flushPending();
       groups.push({ kind: "user", message: m });
+    } else if (m.audit) {
+      flushPending();
+      groups.push({ kind: "audit", message: m });
     } else {
       const round = m.conferenceRound ?? 0;
       const existing =
@@ -828,6 +850,7 @@ function NwayView({
   userProfile,
   onExecuteCommand,
   onRestoreCheckpoint,
+  onForwardAudit,
 }: {
   messages: Message[];
   slots: ParticipantSlot[];
@@ -838,6 +861,7 @@ function NwayView({
   userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
   onRestoreCheckpoint?: (message: Message) => void;
+  onForwardAudit?: (message: Message) => void;
 }) {
   const groups = groupMessagesForNway(messages, slots);
   const hasDrafts = Object.values(drafts).some((d) => d != null);
@@ -881,6 +905,19 @@ function NwayView({
                   ? () => onRestoreCheckpoint(g.message)
                   : undefined
               }
+            />
+          );
+        }
+        if (g.kind === "audit") {
+          return (
+            <MessageItem
+              key={g.message.id}
+              message={g.message}
+              character={getCharacter(g.message.audit?.characterId ?? "")}
+              workspace={workspace}
+              userProfile={userProfile}
+              onExecute={onExecuteCommand}
+              onForwardAudit={onForwardAudit ? () => onForwardAudit(g.message) : undefined}
             />
           );
         }
@@ -932,6 +969,11 @@ function NwayView({
           moderatorSlotId={moderatorSlotId}
           isStreaming={isStreaming}
         />
+      )}
+      {Object.entries(drafts).flatMap(([k, d]) =>
+        d && isAuditSlotId(k)
+          ? [<DraftBubble key={k} draft={d} character={getCharacter(d.audit?.characterId ?? "")} />]
+          : [],
       )}
     </>
   );

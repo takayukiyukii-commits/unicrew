@@ -5584,6 +5584,61 @@ async fn workspace_file_diff(
     })
 }
 
+#[derive(Debug, Serialize)]
+struct WorkspacePatch {
+    /// unified diff（`git diff` そのままの本文。バイナリは "Binary files differ" の1行）
+    patch: String,
+    /// max_bytes で打ち切ったか
+    truncated: bool,
+    /// 打ち切る前の全体のバイト数
+    bytes: usize,
+    base: String,
+    base_kind: String,
+}
+
+/// 変更の差分本文（相互監査で監査役に渡す）。基準は workspace_changes と同じ。
+/// 利用者の index/HEAD は動かさない。max_bytes（既定 64KB）で打ち切る（文字境界で切る）。
+#[tauri::command]
+async fn workspace_patch(
+    app: AppHandle,
+    workspace: String,
+    since_ref: Option<String>,
+    max_bytes: Option<usize>,
+) -> Result<WorkspacePatch, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "NOT_A_REPO".to_string())?;
+    let (base, base_kind) = resolve_base(&ws, since_ref.as_deref()).await;
+    let (_tree, index) = snapshot_tree(&app, &ws).await?;
+    let index_s = index.to_string_lossy().to_string();
+    let envs = [("GIT_INDEX_FILE", index_s.as_str())];
+    let raw = git_raw_env(
+        &ws,
+        &["diff", "--cached", "-M", "--no-color", "--no-ext-diff", &base, "--"],
+        &envs,
+    )
+    .await;
+    let _ = tokio::fs::remove_file(&index).await;
+    let raw = raw?;
+    let bytes = raw.len();
+    let limit = max_bytes.unwrap_or(64 * 1024).max(1024);
+    let text = String::from_utf8_lossy(&raw).to_string();
+    let truncated = bytes > limit;
+    let patch = if truncated {
+        let mut end = limit;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        // 行の途中で切らない
+        let cut = text[..end].rfind('\n').unwrap_or(end);
+        text[..cut].to_string()
+    } else {
+        text
+    };
+    Ok(WorkspacePatch { patch, truncated, bytes, base, base_kind })
+}
+
 #[cfg(test)]
 mod changes_parse_tests {
     use super::{parse_name_status_z, parse_numstat_z};
@@ -5974,6 +6029,7 @@ pub fn run() {
             workspace_snapshot,
             workspace_changes,
             workspace_file_diff,
+            workspace_patch,
             checkpoint_create,
             checkpoint_restore,
             checkpoint_remove_thread,

@@ -217,7 +217,12 @@ export function SlashCommandPicker({
                                 {cmd.command.trim()}
                               </span>
                               <span className="ml-auto flex items-center gap-1 shrink-0">
-                                {cmd.providers.map((p) => (
+                                {cmd.providers.length > 3 && (
+                                  <span className="text-[9.5px] px-1 py-0.5 rounded font-medium border border-[var(--color-border)] text-[var(--color-muted)]">
+                                    UNICREW
+                                  </span>
+                                )}
+                                {(cmd.providers.length > 3 ? [] : cmd.providers).map((p) => (
                                   <span
                                     key={p}
                                     className="text-[9.5px] px-1 py-0.5 rounded font-medium border"

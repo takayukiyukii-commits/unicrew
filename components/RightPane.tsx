@@ -9,6 +9,7 @@ import {
   Save,
   BookMarked,
   RefreshCw,
+  ShieldCheck,
 } from "lucide-react";
 import type {
   Thread,
@@ -76,6 +77,8 @@ interface Props {
    * 値は string、空文字でクリア。
    */
   onChangePersistentMemory?: (memo: string) => void;
+  /** 相互監査（v0.4.0）「別のAIに監査させる」。対象（作業フォルダ／隔離中スロット）と深さを渡す。 */
+  onAudit?: (targetKey: string, depth: "quick" | "deep") => void;
 }
 
 export function RightPane({
@@ -90,6 +93,7 @@ export function RightPane({
   onExportTeamJson,
   onChangeModel,
   onChangePersistentMemory,
+  onAudit,
 }: Props) {
   const { t } = useTranslation();
   const character = thread ? getCharacter(thread.characterId) : undefined;
@@ -251,7 +255,7 @@ export function RightPane({
           )}
 
           {/* 変更の差分ビュー（v0.4.0）: 単独・並列どちらでも1ブロック */}
-          <WorkspaceChanges thread={thread} />
+          <WorkspaceChanges thread={thread} onAudit={onAudit} />
 
           {showModelSection && (
             <div>
@@ -884,7 +888,7 @@ function WorkspaceIsolation({ thread }: { thread: Thread }) {
  * 基準は「このターン」（送信時に記録した tree）か「コミット後すべて」（HEAD）。
  * worktree 隔離中は対象（作業フォルダ／各参加者）をプルダウン1つで切り替える。
  */
-function WorkspaceChanges({ thread }: { thread: Thread }) {
+function WorkspaceChanges({ thread, onAudit }: { thread: Thread; onAudit?: Props["onAudit"] }) {
   const { t } = useTranslation();
   const targets = changeTargets(thread);
   const [targetKey, setTargetKey] = useState("workspace");
@@ -899,6 +903,8 @@ function WorkspaceChanges({ thread }: { thread: Thread }) {
   const sinceRef = effectiveMode === "turn" ? turnBase : undefined;
   // 手動更新用のカウンタ（押すたびに数え直す）
   const [tick, setTick] = useState(0);
+  // 相互監査の深さ（Quick＝差分だけ／Deep＝関連ファイルも読む）
+  const [auditDepth, setAuditDepth] = useState<"quick" | "deep">("quick");
   // 会話が進む（updatedAt）・対象や基準が変わる・手動更新のたびに、少し遅らせて数え直す（連続更新の間引き）
   useEffect(() => {
     if (!cwd) return;
@@ -1029,6 +1035,35 @@ function WorkspaceChanges({ thread }: { thread: Thread }) {
       )}
       {result?.truncated && (
         <div className="opacity-80">{t("rightPane.changes.truncated", { count: files.length })}</div>
+      )}
+      {onAudit && result && files.length > 0 && (
+        <div className="flex items-center gap-1 pt-1.5 border-t border-[var(--color-border)]">
+          <button
+            type="button"
+            className={`${btn} inline-flex items-center gap-1`}
+            onClick={() => onAudit(target.key, auditDepth)}
+            title={t("audit.runTitle")}
+          >
+            <ShieldCheck size={11} />
+            {t("audit.run")}
+          </button>
+          <button
+            type="button"
+            className={`ml-auto ${pill(auditDepth === "quick")}`}
+            onClick={() => setAuditDepth("quick")}
+            title={t("audit.depthHint")}
+          >
+            {t("audit.quick")}
+          </button>
+          <button
+            type="button"
+            className={pill(auditDepth === "deep")}
+            onClick={() => setAuditDepth("deep")}
+            title={t("audit.depthHint")}
+          >
+            {t("audit.deep")}
+          </button>
+        </div>
       )}
     </div>
   );
