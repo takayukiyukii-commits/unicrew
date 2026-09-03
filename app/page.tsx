@@ -51,7 +51,6 @@ import {
   saveRoutines,
   shouldFire,
 } from "@/lib/routines";
-import { remoteNodeManager } from "@/lib/remote-node";
 import { sendLaunchPing } from "@/lib/telemetry";
 import { FeedbackCard } from "@/components/FeedbackCard";
 import {
@@ -555,12 +554,6 @@ export default function Page() {
   useEffect(() => {
     applyAppearance(settings.appearance);
   }, [settings.appearance]);
-
-  // UNIHUB リモート受付（UNIPILOT P3-M3）: 有効設定が残っていれば起動時に受付を再開。
-  // ポーリング/Realtime購読/実行は lib/remote-node.ts のシングルトンが常駐管理する。
-  useEffect(() => {
-    remoteNodeManager.init();
-  }, []);
 
   // 匿名の起動記録（インストール数を数えるためだけ・設定でオフにできる）。
   // 🚨 送るのは乱数ID・バージョン・OSの3つだけ。PRIVACY.md と必ず一致させること。
