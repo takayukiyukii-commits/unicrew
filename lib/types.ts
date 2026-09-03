@@ -64,6 +64,12 @@ export interface Message {
   conferenceRound?: number;
   /** トークン消費・所要時間のスナップショット。assistant のみ。 */
   stats?: MessageStats;
+  /**
+   * チェックポイント（v0.4.0）。この発言を送る直前の作業ツリーを記録した commit（cwd → oid）。
+   * refs/unicrew/checkpoints/<thread8>/<seq> が指す。user メッセージだけ。
+   * 「ここに戻す」はこの時点にファイルだけ戻す（会話は消さない・HEAD/index も動かさない）。
+   */
+  checkpoint?: Record<string, string>;
 }
 
 export interface MessageAttachment {

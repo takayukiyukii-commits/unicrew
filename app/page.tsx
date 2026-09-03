@@ -15,6 +15,7 @@ import { useAppVersion } from "@/lib/app-version";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { TrustPromptModal } from "@/components/TrustPromptModal";
+import { RestoreCheckpointModal } from "@/components/RestoreCheckpointModal";
 import { isWorkspaceTrusted, trustWorkspace } from "@/lib/trust";
 import { openFileInEditorWindow } from "@/lib/editor-window";
 import { applyAppearance } from "@/lib/appearance";
@@ -88,7 +89,9 @@ import {
   agentStop,
   worktreePrepare,
   worktreeRemove,
-  workspaceSnapshot,
+  checkpointCreate,
+  checkpointRestore,
+  checkpointRemoveThread,
   checkUnicrewUpdate,
   claudeStatus,
   codexStatus,
@@ -121,6 +124,14 @@ import {
 } from "@/lib/participants";
 import { shouldIsolate, withSlotWorktree } from "@/lib/worktree";
 import { snapshotCwds, withTurnBase } from "@/lib/changes";
+import {
+  excerpt,
+  hasCheckpoint,
+  restoreTargets,
+  turnNumberOf,
+  withCheckpoint,
+  type RestoreTarget,
+} from "@/lib/checkpoint";
 import { showToast } from "@/lib/toast";
 import {
   TEMPLATE_TEAMS,
@@ -528,6 +539,14 @@ export default function Page() {
   /** worktree 隔離に失敗したスレッド（警告は1回だけ出す） */
 
   const isolationWarnedRef = useRef<Set<string>>(new Set());
+  /** チェックポイント（v0.4.0）「ここに戻す」の確認モーダル。開く時は対象を入れる */
+  const [restorePrompt, setRestorePrompt] = useState<{
+    threadId: string;
+    turn: number;
+    excerpt: string;
+    targets: RestoreTarget[];
+  } | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   const paneAreaRef = useRef<HTMLDivElement>(null);
   const draftsRef = useRef<Record<string, ActiveDraft>>({});
   draftsRef.current = drafts;
@@ -1843,6 +1862,8 @@ export default function Page() {
           void worktreeRemove(t.workspace, slot.worktreePath).catch(() => {});
         }
       }
+      // チェックポイント（v0.4.0）: このスレッドの記録（参照）も消す
+      void checkpointRemoveThread(t.workspace, id).catch(() => {});
     }
     setThreads((prev) => prev.filter((tt) => tt.id !== id));
     setSplitIds((prev) => prev.filter((x) => x !== id));
@@ -2400,19 +2421,25 @@ ${command}
     const next = appendMessage(thread, userMsg);
     updateThread(thread.id, () => next);
 
-    // 差分ビュー（v0.4.0）: ターン開始時の作業ツリーを git の tree として記録しておく
-    // （利用者の index/HEAD は動かさない）。AI が動く前に取るため await する。
+    // チェックポイント（v0.4.0）: ターン開始時の作業ツリーを refs/unicrew/checkpoints に固定し、
+    // その commit をこのユーザー発言に持たせる（「ここに戻す」の鍵）。同じ tree を差分ビューの
+    // 「このターン」基準にも使う。利用者の index/HEAD は動かさない。AI が動く前に取るため await する。
     // 失敗（git 管理外など）は黙って HEAD 比較に落ちる。今ターンで初めて作られる worktree は
     // HEAD から切られるので、記録が無くても HEAD 比較で正しい。
     if (thread.workspace) {
       const pairs = await Promise.all(
         snapshotCwds(next).map(
-          async (cwd) => [cwd, await workspaceSnapshot(cwd).catch(() => null)] as const,
+          async (cwd) => [cwd, await checkpointCreate(cwd, thread.id).catch(() => null)] as const,
         ),
       );
       const trees: Record<string, string> = {};
-      for (const [cwd, tree] of pairs) if (tree) trees[cwd] = tree;
-      updateThread(thread.id, (t) => withTurnBase(t, trees));
+      const points: Record<string, string> = {};
+      for (const [cwd, cp] of pairs) {
+        if (!cp) continue;
+        trees[cwd] = cp.tree;
+        points[cwd] = cp.oid;
+      }
+      updateThread(thread.id, (t) => withTurnBase(withCheckpoint(t, userMsg.id, points), trees));
     }
 
     // 議論モード（conferenceMode + N-way）は Sequential：A→B→C と順番に喋らせて、
@@ -2775,6 +2802,50 @@ ${command}
 
   const primaryDrafts = buildThreadDrafts(activeThread);
   const primaryStreaming = isThreadStreaming(activeThread);
+
+  // チェックポイント（v0.4.0）: ユーザー発言を送る直前の状態にファイルだけ戻す（会話は消さない）。
+  // 確認はアプリ内モーダル（ネイティブダイアログは他プロセスの入力で幽霊クリックが起きる）。
+  const handleRestoreCheckpoint = (message: Message, thread: Thread) => {
+    if (!hasCheckpoint(message)) return;
+    if (isThreadStreaming(thread)) {
+      showToast(tr("restore.streaming"), "error");
+      return;
+    }
+    const targets = restoreTargets(thread, message);
+    if (targets.length === 0) return;
+    setRestorePrompt({
+      threadId: thread.id,
+      turn: turnNumberOf(thread, message.id),
+      excerpt: excerpt(message.content),
+      targets,
+    });
+  };
+  const confirmRestoreCheckpoint = async () => {
+    if (!restorePrompt) return;
+    const { threadId, turn, targets } = restorePrompt;
+    setRestoreBusy(true);
+    try {
+      let restored = 0;
+      let deleted = 0;
+      for (const x of targets) {
+        const r = await checkpointRestore(x.cwd, threadId, x.oid);
+        restored += r.restored;
+        deleted += r.deleted;
+      }
+      // 差分ビューに数え直させる
+      updateThread(threadId, (t) => ({ ...t, updatedAt: Date.now() }));
+      showToast(
+        restored + deleted === 0
+          ? tr("restore.nothing")
+          : tr("restore.done", { turn, restored, deleted }),
+      );
+      setRestorePrompt(null);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setRestoreBusy(false);
+    }
+  };
   // 並列ペインそれぞれの drafts / streaming
   const splitPaneStates = splitThreads.map((t) => ({
     thread: t,
@@ -3500,6 +3571,11 @@ ${command}
                     ? (err) => handleSosForError(err, activeThread)
                     : undefined
                 }
+                onRestoreCheckpoint={
+                  activeThread
+                    ? (m) => handleRestoreCheckpoint(m, activeThread)
+                    : undefined
+                }
                 peekActive={
                   activeThread ? peekPaneIds.has(activeThread.id) : false
                 }
@@ -3566,6 +3642,7 @@ ${command}
                     handleExecuteCommand(cmd, lang, t)
                   }
                   onSosForError={(err) => handleSosForError(err, t)}
+                  onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, t)}
                   peekActive={peekPaneIds.has(t.id)}
                   onTogglePeek={() => togglePeekForThread(t.id)}
                   onTogglePermissionMode={togglePermissionMode}
@@ -3623,6 +3700,11 @@ ${command}
                 onSosForError={
                   activeThread
                     ? (err) => handleSosForError(err, activeThread)
+                    : undefined
+                }
+                onRestoreCheckpoint={
+                  activeThread
+                    ? (m) => handleRestoreCheckpoint(m, activeThread)
                     : undefined
                 }
                 peekActive={
@@ -3704,6 +3786,7 @@ ${command}
                     onSosForError={(err) =>
                       handleSosForError(err, splitThread)
                     }
+                    onRestoreCheckpoint={(m) => handleRestoreCheckpoint(m, splitThread)}
                     peekActive={peekPaneIds.has(splitThread.id)}
                     onTogglePeek={() => togglePeekForThread(splitThread.id)}
                     onTogglePermissionMode={togglePermissionMode}
@@ -3851,6 +3934,17 @@ ${command}
         }}
       />
       <WhatsNewModal open={whatsNewOpen} onClose={() => setWhatsNewOpen(false)} />
+      <RestoreCheckpointModal
+        open={!!restorePrompt}
+        turn={restorePrompt?.turn ?? 0}
+        excerpt={restorePrompt?.excerpt ?? ""}
+        targets={restorePrompt?.targets ?? []}
+        busy={restoreBusy}
+        onConfirm={() => void confirmRestoreCheckpoint()}
+        onCancel={() => {
+          if (!restoreBusy) setRestorePrompt(null);
+        }}
+      />
       <TrustPromptModal
         open={!!trustPrompt}
         path={trustPrompt?.path ?? null}

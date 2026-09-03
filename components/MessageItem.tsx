@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, FileText, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
+import { Check, Copy, FileText, History, Image as ImageIcon, LifeBuoy, Play } from "lucide-react";
 import type { Character, Message, MessageAttachment, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
@@ -32,6 +32,11 @@ interface Props {
    * エラー本文を渡し、page.tsx 側で対処プロンプトに整形して送り直す。
    */
   onSosForError?: (errorText: string) => void;
+  /**
+   * チェックポイント（v0.4.0）「ここに戻す」。user メッセージにだけ渡される。
+   * 渡されたときだけホバーでボタンを出す（記録が無い発言には出ない）。
+   */
+  onRestore?: () => void;
   /**
    * AI が応答内で言及したファイル名（NOTE_xxx.md など）を Ctrl+Click で
    * 別ウィンドウのエディタに開けるようにするための workspace 基準パス。
@@ -74,6 +79,7 @@ export function MessageItem({
   character,
   onExecute,
   onSosForError,
+  onRestore,
   workspace,
   userProfile,
 }: Props) {
@@ -129,7 +135,7 @@ export function MessageItem({
   return (
     <div
       className={clsx(
-        "flex gap-3 px-6 py-4",
+        "flex gap-3 px-6 py-4 group",
         isUser ? "" : "bg-[var(--color-surface)]/60",
       )}
     >
@@ -156,6 +162,17 @@ export function MessageItem({
             <span className="text-[11px] text-[var(--color-muted)]">
               {character.roleTag}
             </span>
+          )}
+          {isUser && onRestore && (
+            <button
+              type="button"
+              onClick={onRestore}
+              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-transparent text-[11px] text-[var(--color-muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:border-[var(--color-border)] hover:text-[var(--color-text)] transition"
+              title={t("message.restoreTitle")}
+            >
+              <History size={11} />
+              {t("message.restoreHere")}
+            </button>
           )}
         </div>
         <div className="md-body text-[14.5px] leading-relaxed">

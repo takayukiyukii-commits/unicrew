@@ -5618,6 +5618,326 @@ mod changes_parse_tests {
     }
 }
 
+// ---------- チェックポイント／巻き戻し（v0.4.0・ターンごとに作業ツリーを固定し、ファイルだけ戻す） ----------
+//
+// 差分ビューと同じ土台（一時 index → write-tree）で得た tree を commit-tree で包み、
+// refs/unicrew/checkpoints/<thread8>/<seq> に固定する。HEAD・index・作業ツリーは動かさない。
+// - 参照を持つのは git gc に消されないため（無参照のオブジェクトは既定で2週間後に消える）
+// - 復元は「ファイルだけ」。会話は消さない（UI 側の責任）。HEAD とブランチも動かさない
+// - 復元の直前に今の状態も同じ場所に記録する（戻す先を間違えても git から取り出せる）
+// - .gitignore されたもの（node_modules 等）はどちらの tree にも無いので触らない
+// - 上限は1スレッド 50 参照。超えたら古い順に update-ref -d
+// - worktree 隔離中も cwd を差し替えるだけで効く（refs は worktree 間で共有される）
+
+const CHECKPOINT_MAX: usize = 50;
+
+#[derive(Debug, Serialize)]
+struct Checkpoint {
+    /// commit oid（メッセージに持たせ、復元の鍵にする）
+    oid: String,
+    /// tree oid（差分ビューの「このターン」基準にそのまま使える）
+    tree: String,
+    seq: u32,
+    refname: String,
+    /// 直前の記録と中身が同じだったので新しい参照を作らなかった
+    reused: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RestoreResult {
+    /// 記録の内容で書き戻したファイル数（変更・削除されていたもの）
+    restored: usize,
+    /// 記録に無く今あったので消したファイル数
+    deleted: usize,
+    /// 戻す直前の状態を記録した commit oid（安全網）
+    safety_oid: String,
+}
+
+fn checkpoint_prefix(thread_id: &str) -> Result<String, String> {
+    let t8 = sanitize_id(thread_id, 8);
+    if t8.is_empty() {
+        return Err("スレッドIDが不正です".into());
+    }
+    Ok(format!("refs/unicrew/checkpoints/{}/", t8))
+}
+
+/// 既存の参照を (seq, commit oid, tree oid) の昇順で返す。
+async fn list_checkpoints(top: &std::path::Path, prefix: &str) -> Vec<(u32, String, String)> {
+    let out = git_out(
+        top,
+        &["for-each-ref", "--format=%(refname) %(objectname) %(tree)", prefix],
+    )
+    .await
+    .unwrap_or_default();
+    let mut v: Vec<(u32, String, String)> = out
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let r = it.next()?;
+            let o = it.next()?;
+            let t = it.next()?;
+            let seq = r.rsplit('/').next()?.parse::<u32>().ok()?;
+            Some((seq, o.to_string(), t.to_string()))
+        })
+        .collect();
+    v.sort_by_key(|x| x.0);
+    v
+}
+
+/// tree を commit で包んで参照に固定する。直前の記録と同じ tree なら作らずにそれを返す。
+async fn checkpoint_write(
+    top: &std::path::Path,
+    prefix: &str,
+    tree: &str,
+    message: &str,
+) -> Result<Checkpoint, String> {
+    let existing = list_checkpoints(top, prefix).await;
+    if let Some((seq, oid, t)) = existing.last() {
+        if t == tree {
+            return Ok(Checkpoint {
+                oid: oid.clone(),
+                tree: tree.to_string(),
+                seq: *seq,
+                refname: format!("{}{}", prefix, seq),
+                reused: true,
+            });
+        }
+    }
+    let seq = existing.last().map(|x| x.0 + 1).unwrap_or(1);
+    // 親は HEAD（あれば）。無くても commit-tree は作れる（コミット無しリポジトリ）
+    let head = git_out(top, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.ok();
+    let mut args: Vec<&str> = vec![
+        "-c",
+        "user.name=UNICREW",
+        "-c",
+        "user.email=unicrew@localhost",
+        "commit-tree",
+        tree,
+        "-m",
+        message,
+    ];
+    if let Some(h) = head.as_deref() {
+        args.push("-p");
+        args.push(h);
+    }
+    let oid = git_out(top, &args).await?;
+    let refname = format!("{}{}", prefix, seq);
+    git_out(top, &["update-ref", &refname, &oid]).await?;
+    // 上限を超えた分は古い順に消す（参照だけ。オブジェクトは gc に任せる）
+    let total = existing.len() + 1;
+    if total > CHECKPOINT_MAX {
+        for (s, _, _) in existing.iter().take(total - CHECKPOINT_MAX) {
+            let _ = git_out(top, &["update-ref", "-d", &format!("{}{}", prefix, s)]).await;
+        }
+    }
+    Ok(Checkpoint { oid, tree: tree.to_string(), seq, refname, reused: false })
+}
+
+/// 標準入力つきで git を1回実行する（checkout-index --stdin 用）。
+async fn git_stdin_env(
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    input: &[u8],
+) -> Result<Vec<u8>, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut cmd = build_silent_command("git");
+    cmd.current_dir(cwd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("git を起動できませんでした: {}", e))?;
+    if let Some(mut si) = child.stdin.take() {
+        si.write_all(input).await.map_err(|e| e.to_string())?;
+        drop(si);
+    }
+    let out = child
+        .wait_with_output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let so = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Err(if err.is_empty() { so } else { err });
+    }
+    Ok(out.stdout)
+}
+
+/// リポジトリ内の相対パスとして安全か（`..`・絶対・ドライブ文字を弾く）。
+fn safe_rel_path(rel: &str) -> bool {
+    let p = std::path::Path::new(rel);
+    !rel.is_empty()
+        && !p.is_absolute()
+        && !rel.starts_with('/')
+        && !rel.contains(':')
+        && p.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+fn is_hex_oid(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// ターン開始時の作業ツリーを記録する（tree は差分ビューの基準にも使う）。
+#[tauri::command]
+async fn checkpoint_create(
+    app: AppHandle,
+    workspace: String,
+    thread_id: String,
+) -> Result<Checkpoint, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "NOT_A_REPO".to_string())?;
+    let top = std::path::PathBuf::from(&toplevel);
+    let prefix = checkpoint_prefix(&thread_id)?;
+    let (tree, index) = snapshot_tree(&app, &top).await?;
+    let _ = tokio::fs::remove_file(&index).await;
+    let t8 = sanitize_id(&thread_id, 8);
+    checkpoint_write(&top, &prefix, &tree, &format!("UNICREW checkpoint {}", t8)).await
+}
+
+/// 記録した時点にファイルだけ戻す。HEAD・index・ブランチは動かさない。会話は消さない。
+#[tauri::command]
+async fn checkpoint_restore(
+    app: AppHandle,
+    workspace: String,
+    thread_id: String,
+    oid: String,
+) -> Result<RestoreResult, String> {
+    if !is_hex_oid(&oid) {
+        return Err("記録の識別子が不正です".into());
+    }
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"])
+        .await
+        .map_err(|_| "このフォルダは git 管理外です".to_string())?;
+    let top = std::path::PathBuf::from(&toplevel);
+    let prefix = checkpoint_prefix(&thread_id)?;
+    // UNICREW がこのスレッドで記録したもの以外には戻さない（任意の commit に checkout させない）
+    let owners = git_out(&top, &["for-each-ref", "--points-at", &oid, &prefix])
+        .await
+        .unwrap_or_default();
+    if owners.trim().is_empty() {
+        return Err("この時点の記録が見つかりません（上限を超えて消えたか、別のスレッドの記録です）".into());
+    }
+    let target_tree = git_out(&top, &["rev-parse", &format!("{}^{{tree}}", oid)]).await?;
+    // 安全網：戻す直前の状態を同じ場所に記録する
+    let (now_tree, idx) = snapshot_tree(&app, &top).await?;
+    let _ = tokio::fs::remove_file(&idx).await;
+    let safety = checkpoint_write(&top, &prefix, &now_tree, "UNICREW: 巻き戻し前の状態").await?;
+    if now_tree == target_tree {
+        return Ok(RestoreResult { restored: 0, deleted: 0, safety_oid: safety.oid });
+    }
+    // 記録 → 今 の差。A（記録に無く今ある）は消す、それ以外は記録の内容で書き戻す
+    let raw = git_raw(
+        &top,
+        &["diff-tree", "-r", "--name-status", "-z", "--no-renames", &target_tree, &now_tree],
+    )
+    .await?;
+    let statuses = parse_name_status_z(&raw);
+    let mut to_delete: Vec<String> = Vec::new();
+    let mut to_checkout: Vec<String> = Vec::new();
+    for (path, st) in statuses {
+        if !safe_rel_path(&path) {
+            continue;
+        }
+        if st == "A" {
+            to_delete.push(path);
+        } else {
+            to_checkout.push(path);
+        }
+    }
+    to_delete.sort();
+    to_checkout.sort();
+    // 記録の tree を一時 index に読み、そこから該当ファイルだけ作業ツリーへ書き出す
+    let index = temp_index_path(&app)?;
+    let index_s = index.to_string_lossy().to_string();
+    let envs = [("GIT_INDEX_FILE", index_s.as_str())];
+    let result: Result<(), String> = async {
+        git_out_env(&top, &["read-tree", &target_tree], &envs).await?;
+        if !to_checkout.is_empty() {
+            let mut input = Vec::new();
+            for p in &to_checkout {
+                input.extend_from_slice(p.as_bytes());
+                input.push(0);
+            }
+            git_stdin_env(&top, &["checkout-index", "-f", "-z", "--stdin"], &envs, &input).await?;
+        }
+        Ok(())
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&index).await;
+    result?;
+    let mut deleted = 0usize;
+    for p in &to_delete {
+        let full = top.join(p);
+        if tokio::fs::remove_file(&full).await.is_ok() {
+            deleted += 1;
+            // 空になったフォルダは片付ける（toplevel より上には行かない）
+            let mut dir = full.parent().map(|d| d.to_path_buf());
+            while let Some(d) = dir {
+                if d == top || !d.starts_with(&top) {
+                    break;
+                }
+                if std::fs::remove_dir(&d).is_err() {
+                    break;
+                }
+                dir = d.parent().map(|x| x.to_path_buf());
+            }
+        }
+    }
+    Ok(RestoreResult { restored: to_checkout.len(), deleted, safety_oid: safety.oid })
+}
+
+/// スレッド削除時に、そのスレッドの記録（参照）を全部消す。git 管理外なら 0。
+#[tauri::command]
+async fn checkpoint_remove_thread(workspace: String, thread_id: String) -> Result<u32, String> {
+    let ws = std::path::PathBuf::from(&workspace);
+    let toplevel = match git_out(&ws, &["rev-parse", "--show-toplevel"]).await {
+        Ok(t) => t,
+        Err(_) => return Ok(0),
+    };
+    let top = std::path::PathBuf::from(&toplevel);
+    let prefix = checkpoint_prefix(&thread_id)?;
+    let mut n = 0u32;
+    for (seq, _, _) in list_checkpoints(&top, &prefix).await {
+        if git_out(&top, &["update-ref", "-d", &format!("{}{}", prefix, seq)]).await.is_ok() {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::{is_hex_oid, safe_rel_path};
+
+    #[test]
+    fn rel_path_guard_rejects_escapes() {
+        assert!(safe_rel_path("src/a.txt"));
+        assert!(safe_rel_path("a"));
+        assert!(!safe_rel_path(""));
+        assert!(!safe_rel_path("../x"));
+        assert!(!safe_rel_path("a/../../x"));
+        assert!(!safe_rel_path("/etc/passwd"));
+        assert!(!safe_rel_path("C:/x"));
+    }
+
+    #[test]
+    fn oid_guard() {
+        assert!(is_hex_oid("4b825dc642cb6eb9a060e54bf8d69288fbee4904"));
+        assert!(!is_hex_oid(""));
+        assert!(!is_hex_oid("HEAD"));
+        assert!(!is_hex_oid("refs/heads/main"));
+    }
+}
+
 // ---------- App setup ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -5654,6 +5974,9 @@ pub fn run() {
             workspace_snapshot,
             workspace_changes,
             workspace_file_diff,
+            checkpoint_create,
+            checkpoint_restore,
+            checkpoint_remove_thread,
             save_avatar_image,
             save_avatar_bytes,
             delete_avatar_image,

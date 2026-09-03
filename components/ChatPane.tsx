@@ -39,6 +39,7 @@ import { getCharacter } from "@/lib/characters";
 import { getPersonality } from "@/lib/personalities";
 import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
+import { hasCheckpoint } from "@/lib/checkpoint";
 import { ToolUseBubble } from "./ToolUseBubble";
 import { CharacterAvatar } from "./CharacterAvatar";
 import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
@@ -97,6 +98,8 @@ interface Props {
   onExecuteCommand?: (command: string, lang: string) => void;
   /** アイデア10: エラーメッセージ用の「AIに助けてもらう」ボタン押下時のハンドラ。 */
   onSosForError?: (errorText: string) => void;
+  /** チェックポイント（v0.4.0）「ここに戻す」。記録があるユーザー発言にだけボタンが出る。 */
+  onRestoreCheckpoint?: (message: Message) => void;
   /**
    * メッセージ末尾に差し込むカード。フィードバックアンケート等の単発UIをここから注入する。
    * 主ペインだけに渡し、split側には出さない（重複表示防止）。
@@ -142,6 +145,7 @@ export function ChatPane({
   onContinueConference,
   onExecuteCommand,
   onSosForError,
+  onRestoreCheckpoint,
   feedbackSlot,
   peekActive = false,
   onTogglePeek,
@@ -465,6 +469,7 @@ export function ChatPane({
             workspace={thread.workspace ?? null}
             userProfile={userProfile}
             onExecuteCommand={onExecuteCommand}
+            onRestoreCheckpoint={onRestoreCheckpoint}
           />
         ) : (
           <SingleView
@@ -478,6 +483,7 @@ export function ChatPane({
             }
             onExecuteCommand={onExecuteCommand}
             onSosForError={onSosForError}
+            onRestoreCheckpoint={onRestoreCheckpoint}
           />
         )}
         {feedbackSlot}
@@ -715,6 +721,7 @@ function SingleView({
   userProfile,
   onExecuteCommand,
   onSosForError,
+  onRestoreCheckpoint,
 }: {
   messages: Message[];
   character: ReturnType<typeof getCharacter>;
@@ -723,6 +730,7 @@ function SingleView({
   userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
   onSosForError?: (errorText: string) => void;
+  onRestoreCheckpoint?: (message: Message) => void;
 }) {
   return (
     <>
@@ -735,6 +743,9 @@ function SingleView({
           userProfile={userProfile}
           onExecute={onExecuteCommand}
           onSosForError={onSosForError}
+          onRestore={
+            onRestoreCheckpoint && hasCheckpoint(m) ? () => onRestoreCheckpoint(m) : undefined
+          }
         />
       ))}
       {draft && <DraftBubble draft={draft} character={character} />}
@@ -816,6 +827,7 @@ function NwayView({
   workspace,
   userProfile,
   onExecuteCommand,
+  onRestoreCheckpoint,
 }: {
   messages: Message[];
   slots: ParticipantSlot[];
@@ -825,6 +837,7 @@ function NwayView({
   workspace?: string | null;
   userProfile?: Props["userProfile"];
   onExecuteCommand?: (command: string, lang: string) => void;
+  onRestoreCheckpoint?: (message: Message) => void;
 }) {
   const groups = groupMessagesForNway(messages, slots);
   const hasDrafts = Object.values(drafts).some((d) => d != null);
@@ -863,6 +876,11 @@ function NwayView({
               workspace={workspace}
               userProfile={userProfile}
               onExecute={onExecuteCommand}
+              onRestore={
+                onRestoreCheckpoint && hasCheckpoint(g.message)
+                  ? () => onRestoreCheckpoint(g.message)
+                  : undefined
+              }
             />
           );
         }

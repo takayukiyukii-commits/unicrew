@@ -424,6 +424,53 @@ export async function workspaceFileDiff(
   return invoke<FileDiff>("workspace_file_diff", { workspace, file, sinceRef: sinceRef ?? null });
 }
 
+// ---------- チェックポイント／巻き戻し（v0.4.0） ----------
+
+export interface Checkpoint {
+  /** commit oid（メッセージに持たせ、復元の鍵にする） */
+  oid: string;
+  /** tree oid（差分ビューの「このターン」基準にそのまま使う） */
+  tree: string;
+  seq: number;
+  refname: string;
+  /** 直前の記録と同じ中身だったので新しい参照を作らなかった */
+  reused: boolean;
+}
+
+export interface RestoreResult {
+  /** 記録の内容で書き戻したファイル数 */
+  restored: number;
+  /** 記録に無く今あったので消したファイル数 */
+  deleted: number;
+  /** 戻す直前の状態を記録した commit oid（安全網） */
+  safety_oid: string;
+}
+
+/** ターン開始時の作業ツリーを refs/unicrew/checkpoints に固定する。git 管理外は Error("NOT_A_REPO")。非 Tauri では null。 */
+export async function checkpointCreate(workspace: string, threadId: string): Promise<Checkpoint | null> {
+  if (!isTauri()) return null;
+  const invoke = await loadInvoke();
+  return invoke<Checkpoint>("checkpoint_create", { workspace, threadId });
+}
+
+/** 記録した時点にファイルだけ戻す（HEAD・index・ブランチは動かさない）。 */
+export async function checkpointRestore(
+  workspace: string,
+  threadId: string,
+  oid: string,
+): Promise<RestoreResult> {
+  if (!isTauri()) throw new Error("巻き戻しは Tauri アプリ起動時のみ利用できます");
+  const invoke = await loadInvoke();
+  return invoke<RestoreResult>("checkpoint_restore", { workspace, threadId, oid });
+}
+
+/** スレッド削除時に、そのスレッドの記録（参照）を全部消す。 */
+export async function checkpointRemoveThread(workspace: string, threadId: string): Promise<void> {
+  if (!isTauri()) return;
+  const invoke = await loadInvoke();
+  await invoke("checkpoint_remove_thread", { workspace, threadId });
+}
+
 // ---------- Avatar image ----------
 
 /** ユーザーに画像を選ばせて、AppData/avatars/ にコピーし、保存先絶対パスを返す。 */

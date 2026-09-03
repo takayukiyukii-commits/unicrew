@@ -88,6 +88,20 @@ npm run tauri:dev
 
 > 🚨 git の手順自体は `D:\company\tmp\uc_changes_probe.sh` で毒味済み（2026-09-03：M/D/R/A の検出・ターン基準で絞れる・利用者の index/HEAD 不変・worktree でも同手順）。ここで見るのは「アプリが正しい cwd と基準で呼んでいるか」。
 
+### チェックポイント／巻き戻し（v0.4.0・ユーザー発言の直前の状態にファイルだけ戻す）
+- [ ] git 管理下のフォルダを workspace にして単独スレッドで3ターン頼む（①`a.txt` を作る ②`README.md` の1行目を変える ③`a.txt` を消して `b/c.txt` を作る）→ 各ユーザー発言にマウスを乗せると右上に「ここに戻す」が出る（AI の発言には出ない）
+- [ ] ②の発言の「ここに戻す」→ アプリ内モーダル（ターン 2 の直前・発言の冒頭・対象フォルダ）が出る。**OS のダイアログではない**
+- [ ] 「ファイルを戻す」→ トースト「ターン 2 の直前に戻しました（書き戻し n・削除 m）」。`a.txt` が①の内容で復活し、`README.md` は元に戻り、`b/c.txt` と空になった `b/` が消える。**会話は3ターンとも残っている**
+- [ ] 復元の前後で `git rev-parse HEAD` / `git branch --show-current` / `git diff --cached` が変わらない（HEAD・ブランチ・ステージは動かない）
+- [ ] `git for-each-ref refs/unicrew/checkpoints/` に、このスレッドの記録＋「巻き戻し前の状態」の1本が増えている（戻す直前の状態も残る）
+- [ ] AI が応答中に「ここに戻す」→ トースト「AI が作業中は戻せません」で止まる（モーダルは出ない）
+- [ ] 並列（3社議論）で worktree 隔離中に「ここに戻す」→ モーダルに作業フォルダ＋各参加者の worktree が並び、確認後それぞれが戻る
+- [ ] スレッドを削除 → `git for-each-ref refs/unicrew/checkpoints/<thread8>/` が空になる
+- [ ] 右ペイン「変更」が復元直後に数え直され、「このターン」の件数が減る
+
+> 🚨 git の手順自体は `D:\company\tmp\uc_checkpoint_probe.sh` で毒味済み（2026-09-03：追加・変更・削除の3種が戻る／HEAD・index・ブランチ不変／.gitignore 対象は触らない／別スレッドの記録は拒否／50本で打ち切り）。
+> 🚨 Windows（`core.autocrlf=true`）で元ファイルが LF だった場合、復元後の `git status` に ` M` が出ることがある（checkout-index が CRLF で書くため）。`git diff` が空なら中身は同じ＝表示だけ。実機でこの表示が出るかを1回見る。
+
 ### 停止
 - [ ] `Esc` で停止 → subprocess が即座に kill
 - [ ] `Ctrl+Shift+C` で全スレッド一斉停止
