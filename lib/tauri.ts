@@ -197,6 +197,20 @@ export async function listDirectory(path: string): Promise<DirEntry[]> {
   return invoke<DirEntry[]>("list_directory", { path });
 }
 
+/**
+ * パスが実在するか。失敗（未起動・権限）は false に倒す。
+ * 「無いかもしれない場所」を使う前の確認用（例: 前回のターミナルの作業場）。
+ */
+export async function pathExists(path: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const invoke = await loadInvoke();
+    return await invoke<boolean>("path_exists", { path });
+  } catch {
+    return false;
+  }
+}
+
 export async function readTextFile(path: string): Promise<string> {
   if (!isTauri()) throw new Error("readTextFile は Tauri 環境のみ対応");
   const invoke = await loadInvoke();

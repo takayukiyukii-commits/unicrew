@@ -501,6 +501,12 @@ export default function Page() {
   /** フィードバック・サーベイ表示フラグ。たまに会話末尾に差し込む。 */
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [mainView, setMainView] = useState<MainView>("chat");
+  /**
+   * document に張りっぱなしのキーハンドラ（[] 依存）から最新のビューを見るための ref。
+   * ターミナル表示中は Ctrl+F / Ctrl+K をターミナル側に譲るために使う。
+   */
+  const mainViewRef = useRef<MainView>("chat");
+  mainViewRef.current = mainView;
   const [addonsTab, setAddonsTab] = useState<string>("claude-plugin");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSplitMode, setPickerSplitMode] = useState(false);
@@ -869,12 +875,20 @@ export default function Page() {
           e.shiftKey &&
           (e.key === "p" || e.key === "P"));
       if (isPalette) {
+        // 🚨 ターミナル表示中の Ctrl+K は「シェルの行削除」が正。素通しすると
+        // 行が消えるのとパレットが開くのが同時に起きる（Ctrl+Shift+P は従来どおり）。
+        if (mainViewRef.current === "terminal" && !e.shiftKey) return;
         e.preventDefault();
         setPaletteOpen((v) => !v);
         return;
       }
       // 会話検索（v0.4.0）: Ctrl+Shift+F＝全スレッド検索 / Ctrl+F＝主ペインのスレッド内検索
       if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        // 🚨 ターミナル表示中は Ctrl+F をターミナル内検索へ譲る。
+        // 従来はここで隠れているチャットの検索が動いており、ターミナルからは
+        // 「Ctrl+F を押しても何も起きない」ように見えていた（検索手段が無かった）。
+        // Ctrl+Shift+F（全スレッド検索）は画面をまたぐ機能なので譲らない。
+        if (mainViewRef.current === "terminal" && !e.shiftKey) return;
         e.preventDefault();
         if (e.shiftKey) setSearchOpen(true);
         else setFindRequest((r) => ({ nonce: (r?.nonce ?? 0) + 1 }));
@@ -2480,6 +2494,35 @@ ${errorText}
 3. **今すぐ実行できる修復手順**を、コマンドや設定変更まで含めて step-by-step で
 4. 自動修復が可能なものは Bash ツールで実行してから報告（破壊的なものは確認してから）`;
     await handleSendForThread(text, thread);
+  };
+
+  /**
+   * ターミナルで選択したテキストを AI へ渡す。
+   * これまでターミナル → チャットの橋が 1 本も無く、
+   * 「コピー → ビュー切替 → 貼付」の 3 手が必要だった。
+   */
+  const handleTerminalTextToAi = (
+    text: string,
+    meta: { cwd: string | null; label: string },
+  ) => {
+    const thread = activeThread;
+    if (!thread) {
+      showToast(tr("terminal.sendNeedsThread"), "error");
+      return;
+    }
+    const where = meta.cwd ? `\n作業ディレクトリ: ${meta.cwd}` : "";
+    const body = `ターミナル（${meta.label}）の出力を貼ります。${where}
+
+\`\`\`\`
+${text}
+\`\`\`\`
+
+以下を順に答えてください：
+1. **ここで何が起きているか**（エラーなら根本原因）を、技術用語を最低限にして説明
+2. **いま実行すべき手順**を step-by-step で（コマンドはそのまま実行できる形で）
+3. この出力だけでは判断できない場合は、**何を追加で見れば分かるか**を書く（推測で断定しない）`;
+    setMainView("chat");
+    void handleSendForThread(body, thread);
   };
 
   const handleExecuteCommand = (
@@ -4254,7 +4297,22 @@ ${command}
               : "hidden"
           }
         >
-          <TerminalPanes workspace={activeThread?.workspace ?? null} />
+          <TerminalPanes
+            workspace={activeThread?.workspace ?? null}
+            onSendToAi={handleTerminalTextToAi}
+            worktrees={
+              activeThread
+                ? effectiveParticipants(activeThread)
+                    .filter((s) => !!s.worktreePath)
+                    .map((s) => ({
+                      label:
+                        getCharacter(s.characterId)?.name ?? s.id,
+                      path: s.worktreePath as string,
+                      branch: s.worktreeBranch,
+                    }))
+                : []
+            }
+          />
         </div>
         {mainView === "chat" && (
           <RightPane

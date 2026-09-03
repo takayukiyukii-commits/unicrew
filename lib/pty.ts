@@ -25,6 +25,15 @@ function b64decode(b64: string): Uint8Array {
   return u;
 }
 
+/**
+ * ペインのキーから PTY の id を作る（正本はここ 1 か所）。
+ * ターミナル本体と一斉送信の両方から同じ id を指す必要があるため、
+ * 文字列の組み立てを 2 か所に書かない。
+ */
+export function ptyIdForPane(paneKey: string): string {
+  return `term-${paneKey}`;
+}
+
 export interface PtyOpenParams {
   id: string;
   program: string;
@@ -82,14 +91,31 @@ export async function onPtyData(
   });
 }
 
+/**
+ * PTY プロセスの終了情報。
+ * code / success は Rust 側が try_wait で取れたときだけ入る。
+ * 取れなかった場合は null（＝「分からない」）。0 で埋めない。
+ */
+export interface PtyExitInfo {
+  code: number | null;
+  success: boolean | null;
+}
+
 export async function onPtyExit(
   id: string,
-  cb: () => void,
+  cb: (info: PtyExitInfo) => void,
 ): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event");
-  return listen<{ id: string }>("pty://exit", (e) => {
-    if (e.payload.id === id) cb();
-  });
+  return listen<{ id: string; code?: number | null; success?: boolean | null }>(
+    "pty://exit",
+    (e) => {
+      if (e.payload.id !== id) return;
+      cb({
+        code: e.payload.code ?? null,
+        success: e.payload.success ?? null,
+      });
+    },
+  );
 }
 
 export { isTauri };

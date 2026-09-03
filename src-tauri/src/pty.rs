@@ -43,6 +43,11 @@ struct PtyData {
 #[derive(serde::Serialize, Clone)]
 struct PtyExit {
     id: String,
+    /// 子プロセスの終了コード。取得できなかった場合は None。
+    /// 旧実装は id しか運んでおらず、フロントは「なぜ落ちたか」を示せなかった。
+    code: Option<u32>,
+    /// 正常終了か（signal 終了は false）。取得できなかった場合は None。
+    success: Option<bool>,
 }
 
 /// 対話 PTY セッションを開始する。program は "claude" 等。
@@ -150,13 +155,55 @@ pub fn pty_open(
         // ここへ到達すると、無条件 remove では「動いている新しい PTY」を
         // registry から消してしまい、以後 write/resize/kill が全部効かなくなる。
         // exit イベントも同様に、現世代のときだけ通知する。
-        let is_current = registry()
-            .lock()
-            .ok()
-            .map(|reg| reg.get(&id_r).map(|e| e.generation) == Some(generation_r))
-            .unwrap_or(false);
+        //
+        // 終了コードの取得（2026-09-04 追加）:
+        // EOF は「出力が閉じた」だけで終了コードは分からないため try_wait で拾う。
+        // wait（ブロッキング）を registry のロックを持ったまま呼ぶと、その間
+        // pty_write / pty_resize / pty_kill が全部止まるので使わない。
+        // ロックは 1 回の try_wait ごとに取って即離し、最大 ~500ms だけ待つ。
+        // 取れなければ None（＝「分からない」）を返す。0 で埋めない。
+        let mut status: Option<(u32, bool)> = None;
+        let mut is_current = false;
+        for _ in 0..20 {
+            let mut gone = false;
+            {
+                match registry().lock() {
+                    Ok(mut reg) => match reg.get_mut(&id_r) {
+                        // 現世代のエントリだけ触る。世代違い＝開き直された後なので
+                        // 触らずに黙って降りる（通知もしない）。
+                        Some(e) if e.generation == generation_r => {
+                            is_current = true;
+                            if let Ok(Some(st)) = e.child.try_wait() {
+                                status = Some((st.exit_code(), st.success()));
+                            }
+                        }
+                        // 自分で pty_kill した後（entry が既に無い）／世代違いは
+                        // 通知しない（旧実装と同じ＝閉じた瞬間に終了通知を出さない）。
+                        _ => {
+                            is_current = false;
+                            gone = true;
+                        }
+                    },
+                    Err(_) => {
+                        is_current = false;
+                        gone = true;
+                    }
+                }
+            }
+            if gone || status.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
         if is_current {
-            let _ = app_r.emit("pty://exit", PtyExit { id: id_r.clone() });
+            let _ = app_r.emit(
+                "pty://exit",
+                PtyExit {
+                    id: id_r.clone(),
+                    code: status.map(|(c, _)| c),
+                    success: status.map(|(_, ok)| ok),
+                },
+            );
             if let Ok(mut reg) = registry().lock() {
                 if reg.get(&id_r).map(|e| e.generation) == Some(generation_r) {
                     reg.remove(&id_r);
@@ -166,7 +213,7 @@ pub fn pty_open(
     });
 
     registry().lock().map_err(|_| "registry lock".to_string())?.insert(
-        id,
+        id.clone(),
         PtyEntry {
             writer,
             master: pair.master,
@@ -174,6 +221,60 @@ pub fn pty_open(
             generation,
         },
     );
+
+    // 🚨 子プロセスの見張り（2026-09-04 実機で発覚した不具合の根治）。
+    //
+    // Windows の ConPTY では、**子が終了しても master 側の read が返らない**。
+    // master のハンドルを保持している限りブロックしたままなので、
+    // 「reader が EOF を見たら終了を通知する」という作りでは
+    // *終了が一度も通知されない*（実機で `exit 3` を打っても
+    // 「プロセスが終了しました」が 12 秒待っても出なかった）。
+    //
+    // そこで子プロセスを別スレッドで見張り、終了したら
+    //   ① 終了コードつきで通知し
+    //   ② registry から外す（＝ master が drop され reader も解放される）
+    // 二重通知は起きない。reader 側は「現世代のエントリが有るときだけ通知する」
+    // ので、先にここで外れていれば黙って降りる（逆順でも同じ）。
+    let app_w = app.clone();
+    let id_w = id.clone();
+    let generation_w = generation;
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let mut done: Option<(u32, bool)> = None;
+            {
+                let mut reg = match registry().lock() {
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                match reg.get_mut(&id_w) {
+                    Some(e) if e.generation == generation_w => match e.child.try_wait() {
+                        Ok(Some(st)) => done = Some((st.exit_code(), st.success())),
+                        Ok(None) => {}
+                        Err(_) => return,
+                    },
+                    // 自分で kill した／開き直された＝見張る対象がもう無い
+                    _ => return,
+                }
+                if done.is_some()
+                    && reg.get(&id_w).map(|e| e.generation) == Some(generation_w)
+                {
+                    reg.remove(&id_w);
+                }
+            }
+            if let Some((code, success)) = done {
+                let _ = app_w.emit(
+                    "pty://exit",
+                    PtyExit {
+                        id: id_w.clone(),
+                        code: Some(code),
+                        success: Some(success),
+                    },
+                );
+                return;
+            }
+        }
+    });
     Ok(())
 }
 

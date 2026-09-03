@@ -7,9 +7,24 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  CaseSensitive,
+  ChevronDown,
+  ChevronUp,
+  RotateCw,
+  Search,
+  Send,
+  X,
+  Pin,
+  PinOff,
+  Cpu,
+  Gauge,
+  AlertTriangle,
+} from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import {
   isTauri,
+  pathExists,
   defaultWorkspacePath,
   readClipboardText,
   writeClipboardText,
@@ -22,13 +37,52 @@ import {
   ptyKill,
   onPtyData,
   onPtyExit,
+  ptyIdForPane,
+  type PtyExitInfo,
 } from "@/lib/pty";
 import { findPathMatches, findUrlMatches } from "@/lib/file-link";
 import { readLogicalLine, matchToBufferRange } from "@/lib/terminal-links";
 import { findCompositionOverride } from "@/lib/terminal-ime";
 import { joinHardWrappedLines } from "@/lib/terminal-copy";
+import {
+  searchBuffer,
+  pickHitIndex,
+  type SearchHit,
+} from "@/lib/terminal-search";
+import { useTranslation } from "@/lib/i18n";
+import {
+  detectModel,
+  detectEffortRejected,
+  appendTail,
+} from "@/lib/terminal-status";
+import { feedInput, EMPTY_ECHO, type EchoState } from "@/lib/terminal-input-echo";
+import {
+  parseShellEvents,
+  splitPendingOsc,
+} from "@/lib/terminal-shell-integration";
+import { useTerminalTheme } from "@/lib/terminal-theme";
+import {
+  loadTerminalFontSize,
+  setTerminalFontSize,
+  subscribeTerminalFontSize,
+  clampFontSize,
+} from "@/lib/terminal-prefs";
 import { openFileSmart } from "@/lib/open-file";
 import { openExternal } from "@/lib/preview-window";
+
+/** 検索で使う xterm バッファ行の最小インターフェース（lib/terminal-search と接続する）。 */
+interface TermBufferLine {
+  isWrapped: boolean;
+  length: number;
+  getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
+  translateToString(trimRight?: boolean): string;
+}
+
+/** 検索の実行間隔（打鍵ごとに 50,000 行を走査しないためのデバウンス・ms）。 */
+const SEARCH_DEBOUNCE_MS = 180;
+
+/** AI へ渡す選択テキストの上限（文字）。これを超えたら末尾側を残す。 */
+const MAX_SEND_TO_AI_CHARS = 20000;
 
 /** TUI モード疑似つまみの高さ（%）。 */
 const TUI_THUMB_HEIGHT_PCT = 20;
@@ -53,6 +107,13 @@ export function InteractiveTerminal({
   onOutput,
   onExited,
   onCwd,
+  visible = true,
+  onActivity,
+  onSendToAi,
+  initialCwd = null,
+  initialInput,
+  cliId,
+  effort,
 }: {
   workspace?: string | null;
   /**
@@ -85,7 +146,55 @@ export function InteractiveTerminal({
    * 1 CLI の想定。同一ペインでの差し替えは想定しない＝PTY は再起動しない）。
    */
   command?: { program: string; args?: string[] };
+  /**
+   * このペインが今“見えている”か（＝所属ページがアクティブか）。
+   * 見えていない間に出力や異常終了があったことを onActivity で親へ伝えるためだけに使う。
+   * 表示/非表示の切替は親が display:none で行うので、この値で PTY は開き直さない。
+   */
+  visible?: boolean;
+  /**
+   * 見えていない間に起きたことを親へ 1 回だけ通知する（タブのバッジ用）。
+   * 出力のたびに呼ぶと再描画が走るので、非表示期間ごとに最大 1 回に絞っている。
+   */
+  onActivity?: (kind: "output" | "exit", info?: PtyExitInfo) => void;
+  /**
+   * ターミナルで選択したテキストを AI へ渡す（未指定ならボタンを出さない）。
+   * 折り返し改行は取り除いた本文を渡す（コピーと同じ整形）。
+   */
+  onSendToAi?: (text: string) => void;
+  /**
+   * 復元されたペインが「前回開いていた作業ディレクトリ」。
+   * **マウント時の値で固定**（command と同じ扱い）。実在しなければ従来どおり
+   * workspace → 既定ワークスペースの順に倒す。
+   */
+  initialCwd?: string | null;
+  /**
+   * 開いた直後に 1 回だけ流す入力（タスクランナー用）。末尾に Enter を付けて送る。
+   * 🚨 1 回きり。再起動ボタンでは流し直さない（破壊的なコマンドを勝手に
+   * 2 度実行しないため）。保存もしない（次回起動で勝手に走らないため）。
+   */
+  initialInput?: string;
+  /** どの CLI で開いているか（モデル名の読み取りパターンを選ぶのに使う）。 */
+  cliId?: string;
+  /** 起動時に渡したエフォート（下のステータス行に出す）。 */
+  effort?: string;
 }) {
+  const { t } = useTranslation();
+  // effect 内（PTY イベント）から使う t。依存に入れると locale 変更で
+  // PTY が張り直されてしまうので ref で持つ。
+  const tRef = useRef(t);
+  tRef.current = t;
+  /**
+   * 画面の外観プリセットに追従する配色（明るいテーマでは従来値と完全に同じ）。
+   * effect の依存には入れない（配色変更で PTY を張り直さない）。
+   */
+  const theme = useTerminalTheme();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  /** ターミナルの文字サイズ（Ctrl+ホイールで変更・端末ごとに永続化）。 */
+  const [fontSize, setFontSize] = useState<number>(() => loadTerminalFontSize());
+  const fontSizeRef = useRef(fontSize);
+  fontSizeRef.current = fontSize;
   const ref = useRef<HTMLDivElement>(null);
   // onOutput/onExited は毎レンダーで参照が変わりうるので ref で持つ
   // （effect の依存に入れると PTY が再起動してしまう）。
@@ -107,13 +216,30 @@ export function InteractiveTerminal({
   workspaceRef.current = workspace;
   // command はマウント時の値で固定（参照変化で PTY を再起動させない）
   const commandRef = useRef(command);
+  // 復元 cwd も同様にマウント時固定（開き直しのたびに前回値へ戻す）
+  const initialCwdRef = useRef(initialCwd);
+  /** 開いた直後に流す入力（使ったら消す＝1 回きり）。 */
+  const pendingInputRef = useRef(initialInput);
   // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────────
   // term インスタンスは effect 内ローカルだったが、ドラッグ操作（React イベント）
   // から scrollToLine を呼ぶために ref 化する。
   const termRef = useRef<{
     rows: number;
-    buffer?: { active?: { length: number; viewportY: number } };
+    cols: number;
+    buffer?: {
+      active?: {
+        length: number;
+        viewportY: number;
+        getLine(row: number): TermBufferLine | undefined;
+      };
+    };
+    options: { theme?: unknown; fontSize?: number };
     scrollToLine(line: number): void;
+    select(column: number, row: number, length: number): void;
+    clearSelection(): void;
+    hasSelection(): boolean;
+    getSelection(): string;
+    focus(): void;
   } | null>(null);
   /** スクロールバック量と表示位置（つまみ描画用）。 */
   const [scroll, setScroll] = useState({ top: 0, max: 0, rows: 0 });
@@ -132,6 +258,8 @@ export function InteractiveTerminal({
    *  - キー入力すると claude 側が最下部へ飛ぶので、つまみも最下部へ戻す
    */
   const [tuiThumbTop, setTuiThumbTop] = useState(TUI_THUMB_MAX_TOP);
+  /** 文字サイズ変更後の再フィット（effect 内で生成・cleanup で null）。 */
+  const refitRef = useRef<(() => void) | null>(null);
   /** TUI へのホイール注入関数（effect 内で生成・cleanup で null）。 */
   const tuiInjectRef = useRef<((down: boolean, lines: number) => void) | null>(
     null,
@@ -139,6 +267,247 @@ export function InteractiveTerminal({
   const trackRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const dragLastYRef = useRef(0);
+
+  // ── ターミナル内検索（Ctrl+F）────────────────────────────────
+  // 一致位置の算出は lib/terminal-search.ts（純関数・単体テスト済み）に置き、
+  // ここは「xterm から行を渡す」「見つかった位置を選択して見せる」だけを持つ。
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findCase, setFindCase] = useState(false);
+  const [findHits, setFindHits] = useState<SearchHit[]>([]);
+  const [findIndex, setFindIndex] = useState(-1);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  /** 直近に選んだヒット位置（「次／前」の基準）。 */
+  const lastHitRef = useRef<{ row: number; col: number } | null>(null);
+  const findTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── プロセス終了と再起動 ────────────────────────────────────
+  /** null = 動作中。値が入っていれば終了済み（code は取れなければ null）。 */
+  const [exitInfo, setExitInfo] = useState<PtyExitInfo | null>(null);
+  /** 再起動のたびに増やす。PTY 起動 effect の依存に入っているので張り直しが走る。 */
+  const [restartNonce, setRestartNonce] = useState(0);
+
+  /** 選択中のテキストがあるか（「AIに送る」ボタンの表示条件）。 */
+  const [hasSelection, setHasSelection] = useState(false);
+
+  // ── ステータス行（モデル名・エフォート）────────────────────────
+  /** 画面表示から読み取れたモデル名（読めないうちは null＝何も出さない）。 */
+  const [model, setModel] = useState<string | null>(null);
+  /**
+   * 🚨 claude は不正な --effort を渡しても落ちず、警告して既定で走る。
+   * その警告を見つけたらエフォート表示を「効いていない」に切り替える
+   * （送った値をそのまま信じてバッジを出すと、画面が嘘をつく）。
+   */
+  const [effortRejected, setEffortRejected] = useState(false);
+  const cliIdRef = useRef(cliId);
+  cliIdRef.current = cliId;
+
+  /**
+   * シェル統合（OSC 133/7）が入っているシェルでだけ分かる「直前のコマンド」。
+   * 入っていなければ null のまま＝ステータス行には何も出ない。
+   */
+  const [lastCmd, setLastCmd] = useState<{
+    command: string | null;
+    exitCode: number | null;
+    durationMs: number;
+  } | null>(null);
+  /** 直前のコマンドの出力（AI へ渡す用。再描画を起こさないよう ref で持つ）。 */
+  const lastCmdOutputRef = useRef<string>("");
+
+  // ── 直近に送った指示のピン留め ─────────────────────────────
+  const [echo, setEcho] = useState<EchoState>(EMPTY_ECHO);
+  const [pinOpen, setPinOpen] = useState(true);
+  const [pinExpanded, setPinExpanded] = useState(false);
+
+  // ── 見えていない間の出来事を親へ通知（タブのバッジ用）────────
+  const visibleRef = useRef(visible);
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
+  /** 非表示期間ごとに 1 回だけ通知するためのフラグ。 */
+  const activityFiredRef = useRef(false);
+  useEffect(() => {
+    visibleRef.current = visible;
+    // 見えた＝ユーザーが確認した。次に隠れたときまた 1 回通知できるよう戻す。
+    if (visible) activityFiredRef.current = false;
+  }, [visible]);
+
+  // 外観プリセットが変わったら、開いているターミナルの配色だけ差し替える。
+  // PTY もスクロールバッファも触らないので、セッションは維持される。
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      term.options.theme = theme;
+    } catch {
+      /* 非対応版では次に開いたときから反映される */
+    }
+  }, [theme]);
+
+  // 文字サイズの変更を購読して自分にも反映する（どのペインで拡大しても全部に効く）。
+  useEffect(() => subscribeTerminalFontSize(setFontSize), []);
+
+  // 文字サイズを反映し、行数・桁数を測り直す。
+  // 🚨 fit は PTY へ resize を伝える（onResize → pty_resize）。ここを省くと
+  // 表示は大きくなるのに CLI 側は古い桁数のままで、折り返しがズレる。
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      term.options.fontSize = fontSize;
+    } catch {
+      return;
+    }
+    refitRef.current?.();
+  }, [fontSize]);
+
+  /** いまのバッファ全体から一致位置を集める。 */
+  const collectHits = useCallback(
+    (query: string, caseSensitive: boolean): SearchHit[] => {
+      const term = termRef.current;
+      const buf = term?.buffer?.active;
+      if (!term || !buf || !query) return [];
+      try {
+        return searchBuffer({
+          rowCount: buf.length,
+          cols: term.cols,
+          getLine: (row) => buf.getLine(row),
+          getLineText: (row) => buf.getLine(row)?.translateToString(true),
+          query,
+          caseSensitive,
+        });
+      } catch {
+        return [];
+      }
+    },
+    [],
+  );
+
+  /** ヒットを選択して画面中央付近へスクロールする。 */
+  const gotoHit = useCallback((hits: SearchHit[], index: number) => {
+    const term = termRef.current;
+    if (!term || index < 0 || index >= hits.length) return;
+    const h = hits[index];
+    try {
+      term.select(h.col, h.row, h.length);
+      term.scrollToLine(Math.max(0, h.row - Math.floor(term.rows / 2)));
+    } catch {
+      /* 選択できなくても検索自体は壊さない */
+    }
+    lastHitRef.current = { row: h.row, col: h.col };
+    setFindIndex(index);
+  }, []);
+
+  /**
+   * 検索を実行する。
+   * fromCurrent=false（打鍵中）は「いま見ている位置」から、
+   * true（次／前）は「直近のヒット」から探す。端まで行ったら回り込む。
+   */
+  const runSearch = useCallback(
+    (
+      query: string,
+      caseSensitive: boolean,
+      direction: 1 | -1 = 1,
+      fromCurrent = false,
+    ) => {
+      const term = termRef.current;
+      const hits = collectHits(query, caseSensitive);
+      setFindHits(hits);
+      if (hits.length === 0) {
+        setFindIndex(-1);
+        lastHitRef.current = null;
+        try {
+          term?.clearSelection();
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      const viewportTop = term?.buffer?.active?.viewportY ?? 0;
+      const idx = pickHitIndex(
+        hits,
+        fromCurrent ? lastHitRef.current : null,
+        direction,
+        viewportTop,
+      );
+      gotoHit(hits, idx);
+    },
+    [collectHits, gotoHit],
+  );
+
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    // 選択中の文字列があれば検索語として引き継ぐ（VS Code と同じ作法）
+    try {
+      const sel = termRef.current?.getSelection() ?? "";
+      const oneLine = sel.split("\n")[0]?.trim() ?? "";
+      if (oneLine && oneLine.length <= 200) setFindQuery(oneLine);
+    } catch {
+      /* noop */
+    }
+    // 描画後にフォーカス（開いた直後に打てるように）
+    setTimeout(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    }, 0);
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindHits([]);
+    setFindIndex(-1);
+    lastHitRef.current = null;
+    try {
+      termRef.current?.clearSelection();
+      termRef.current?.focus();
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  // 打鍵ごとに 50,000 行を走査しないようデバウンスしてから検索する。
+  useEffect(() => {
+    if (!findOpen) return;
+    if (findTimerRef.current) clearTimeout(findTimerRef.current);
+    findTimerRef.current = setTimeout(() => {
+      findTimerRef.current = null;
+      runSearch(findQuery, findCase, 1, false);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (findTimerRef.current) {
+        clearTimeout(findTimerRef.current);
+        findTimerRef.current = null;
+      }
+    };
+  }, [findOpen, findQuery, findCase, runSearch]);
+
+  /** 選択テキストを AI へ渡す（折り返し改行は除去。長すぎる場合は末尾側を残す）。 */
+  const sendSelectionToAi = useCallback(() => {
+    const term = termRef.current;
+    if (!term || !onSendToAi) return;
+    let text = "";
+    try {
+      text = joinHardWrappedLines(term.getSelection(), term.cols).trim();
+    } catch {
+      text = "";
+    }
+    if (!text) return;
+    // 末尾側（新しい出力＝エラー本体があることが多い）を残す
+    if (text.length > MAX_SEND_TO_AI_CHARS) {
+      text = "…（省略）\n" + text.slice(text.length - MAX_SEND_TO_AI_CHARS);
+    }
+    onSendToAi(text);
+  }, [onSendToAi]);
+
+  /** 終了した PTY を同じペインで開き直す（閉じて開き直すとレイアウトが崩れるため）。 */
+  const handleRestart = useCallback(() => {
+    setExitInfo(null);
+    setFindOpen(false);
+    setFindHits([]);
+    setFindIndex(-1);
+    lastHitRef.current = null;
+    setHasSelection(false);
+    setRestartNonce((n) => n + 1);
+  }, []);
 
   /** TUI つまみの推定位置を注入行数ぶん動かす（ホイール／トラッククリック共用）。 */
   const nudgeTuiThumb = useCallback((down: boolean, lines: number) => {
@@ -252,8 +621,8 @@ export function InteractiveTerminal({
     if (!isTauri() || !ref.current) return;
     let disposed = false;
     const id = paneKey
-      ? `term-${paneKey}`
-      : `term-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      ? ptyIdForPane(paneKey)
+      : ptyIdForPane(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
     let term: any;
     let fit: any;
     let unData: (() => void) | undefined;
@@ -262,11 +631,32 @@ export function InteractiveTerminal({
     let io: IntersectionObserver | undefined;
     let linkProvider: { dispose(): void } | undefined;
     let fitTimer: ReturnType<typeof setTimeout> | undefined;
+    const inputTimerRef: { current: ReturnType<typeof setTimeout> | undefined } =
+      { current: undefined };
+    /** シェル統合の読み取り用（effect ローカル）。 */
+    const oscCarry = { value: "" };
+    const shellCwd: { value: string | null } = { value: null };
+    const cmdLine: { value: string | null } = { value: null };
+    const cmdRunning = { value: false };
+    const cmdStartedAt = { value: 0 };
+    const cmdOutput = { value: "" };
+    /** モデル名読み取り用の末尾バッファと間引きタイマー。 */
+    const statusTail = { value: "" };
+    const statusTimer: { current: ReturnType<typeof setTimeout> | undefined } = {
+      current: undefined,
+    };
     let compCleanup: (() => void) | undefined;
     const scrollDisposables: Array<{ dispose(): void }> = [];
     // ペイン再マウントで PTY を開き直す際、前セッションのバー状態を持ち越さない
     setScroll({ top: 0, max: 0, rows: 0 });
     setTuiMouse(false);
+    setExitInfo(null);
+    setHasSelection(false);
+    setModel(null);
+    setEffortRejected(false);
+    setEcho(EMPTY_ECHO);
+    setLastCmd(null);
+    lastCmdOutputRef.current = "";
 
     /**
      * 要素が実際に表示されている（サイズ > 0）ときだけ fit する。
@@ -382,36 +772,21 @@ export function InteractiveTerminal({
         windowsPty,
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
-        fontSize: 13,
-        theme: {
-          // オフホワイト基調（UNI 共通ライトテーマと馴染ませる）
-          background: "#faf9f6",
-          foreground: "#1f2328",
-          cursor: "#1f2328",
-          cursorAccent: "#faf9f6",
-          selectionBackground: "#d0d7de",
-          selectionForeground: "#1f2328",
-          // ANSI 8色（明るい背景でも視認できるよう調整）
-          black: "#1f2328",
-          red: "#cf222e",
-          green: "#116329",
-          yellow: "#9a6700",
-          blue: "#0969da",
-          magenta: "#8250df",
-          cyan: "#1b7c83",
-          white: "#6e7781",
-          brightBlack: "#57606a",
-          brightRed: "#a40e26",
-          brightGreen: "#1a7f37",
-          brightYellow: "#7d4e00",
-          brightBlue: "#0550ae",
-          brightMagenta: "#6639ba",
-          brightCyan: "#3192aa",
-          brightWhite: "#1f2328",
-        },
+        // 文字サイズは Ctrl+ホイールで変えられる（既定 13 = 従来値）。
+        fontSize: fontSizeRef.current,
+        // 配色は画面の外観プリセットに追従する。明るいテーマでは従来と同じ値。
+        theme: themeRef.current,
       });
       fit = new FitAddon();
       term.loadAddon(fit);
+      // 文字サイズ変更後に「行数・桁数を測り直す」ため、effect の外からも呼べるようにする。
+      refitRef.current = () => {
+        try {
+          fit?.fit();
+        } catch {
+          /* noop */
+        }
+      };
       // 全角(CJK)文字幅を Unicode 11 準拠にする。xterm 既定は Unicode 6 のため、
       // claude(Ink) 側の文字幅(string-width=Unicode 11系)と食い違い、日本語入力時に
       // カーソル桁数がズレて入力中の文字が別の行へ描かれていた（IME のときだけ起きる）。
@@ -452,6 +827,23 @@ export function InteractiveTerminal({
         scrollDisposables.push(term.onResize(updateScroll));
       } catch {
         /* onScroll/onRender 非対応版ではバー非表示のまま（他機能は維持） */
+      }
+      // 選択の有無だけを React state に写す（本文は取りに行かない＝毎回の
+      // getSelection は重いので、押されたときだけ読む）。
+      try {
+        scrollDisposables.push(
+          term.onSelectionChange(() => {
+            let has = false;
+            try {
+              has = term.hasSelection();
+            } catch {
+              has = false;
+            }
+            setHasSelection((prev) => (prev === has ? prev : has));
+          }),
+        );
+      } catch {
+        /* 非対応版では「AIに送る」ボタンが出ないだけ */
       }
       // ────────────────────────────────────────────────────────────────
 
@@ -524,6 +916,21 @@ export function InteractiveTerminal({
         // ホイール: アプリがマウス要求中なら PTY にホイールイベントを注入して
         // TUI をスクロールさせる（xterm 自身のバッファスクロールは抑止）。
         term.attachCustomWheelEventHandler((e: WheelEvent) => {
+          // Ctrl+ホイール = 文字サイズの拡大縮小（VS Code と同じ）。
+          // 🚨 TUI へのホイール注入より **先に** 判定する。後ろに置くと
+          // claude 等がマウス要求中のときにスクロールとして食われて効かない。
+          // preventDefault を入れないと WebView 全体のズームが同時に走る。
+          if (e.ctrlKey || e.metaKey) {
+            try {
+              e.preventDefault();
+            } catch {
+              /* noop */
+            }
+            const dir = e.deltaY > 0 ? -1 : 1;
+            // 保存＋全ペインへ配布（購読側で各ターミナルの state が更新される）
+            setTerminalFontSize(clampFontSize(fontSizeRef.current + dir));
+            return false;
+          }
           if (!appMouseRequested) return true; // 通常時は xterm がバッファをスクロール
           try {
             const rect = ref.current?.getBoundingClientRect();
@@ -702,6 +1109,23 @@ export function InteractiveTerminal({
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== "keydown") return true;
         const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
+        // Ctrl/⌘+F: ターミナル内検索を開く。
+        // 🚨 stopPropagation が要る理由: document 側（app/page.tsx）にチャット検索の
+        // Ctrl+F ハンドラがあり、素通しすると「ターミナルを見ているのに、隠れている
+        // チャットの検索が動く」＝ターミナルでは何も起きないように見えていた。
+        if (mod && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+          e.preventDefault();
+          e.stopPropagation();
+          openFind();
+          return false;
+        }
+        // Ctrl/⌘+K: シェルの行削除（readline の kill-line）を優先する。
+        // 素通しするとコマンドパレットが同時に開き、「行が消える」と
+        // 「パレットが出る」が一度に起きていた。^K は PTY へ送る（return true）。
+        if (mod && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+          e.stopPropagation();
+          return true;
+        }
         if (mod && (e.key === "c" || e.key === "C")) {
           if (term.hasSelection()) {
             // claude(Ink) は本文を端末幅で折り返す際に実改行を挿入して描画するため、
@@ -752,6 +1176,8 @@ export function InteractiveTerminal({
                 }
               })();
               if (!bracketed && kind === "claude" && normalized.includes("\r")) {
+                // onData を経由しない経路なので、ここでも写し取る
+                setEcho((prev) => feedInput(prev, normalized));
                 void ptyWriteText(id, "\x1b[200~" + normalized + "\x1b[201~");
               } else {
                 term.paste(text);
@@ -768,19 +1194,115 @@ export function InteractiveTerminal({
       const outputDecoder = new TextDecoder();
       unData = await onPtyData(id, (bytes) => {
         term?.write(bytes);
-        if (onOutputRef.current) {
+        // 🚨 起動直後に書き込むと、シェルが端末を初期化する前で入力が捨てられる
+        //    ことがある。最初の出力（＝プロンプトが出た合図）を見てから少し待って流す。
+        if (pendingInputRef.current && inputTimerRef.current === undefined) {
+          inputTimerRef.current = setTimeout(() => {
+            inputTimerRef.current = undefined;
+            const text = pendingInputRef.current;
+            pendingInputRef.current = undefined; // 1 回きり
+            if (text) void ptyWriteText(id, text + "\r");
+          }, 250);
+        }
+        // 見えていない間に出力が来たことだけを 1 回通知する（タブのバッジ用）。
+        // 出力のたびに親へ setState させると 24 ペイン分の再描画が走るので絞る。
+        if (!visibleRef.current && !activityFiredRef.current) {
+          activityFiredRef.current = true;
           try {
-            onOutputRef.current(outputDecoder.decode(bytes, { stream: true }));
+            onActivityRef.current?.("output");
+          } catch {
+            /* 通知の失敗でターミナルを壊さない */
+          }
+        }
+        // 出力は 1 回だけデコードして、観測フック・シェル統合・モデル名読み取りで共有する。
+        let text = "";
+        try {
+          text = outputDecoder.decode(bytes, { stream: true });
+        } catch {
+          text = "";
+        }
+        if (onOutputRef.current && text) {
+          try {
+            onOutputRef.current(text);
           } catch {
             /* observer hook must never break the terminal */
           }
         }
+        // シェル統合（OSC 133/7）。入れていないシェルでは 1 件も拾えず何も起きない。
+        if (text) {
+          const [ready, pending] = splitPendingOsc(oscCarry.value + text);
+          oscCarry.value = pending;
+          if (ready.indexOf("]") >= 0) {
+            for (const ev of parseShellEvents(ready)) {
+              if (ev.kind === "cwd") {
+                // cd に追随する（ヘッダーが「開いた瞬間の場所」で止まって嘘になるのを防ぐ）
+                if (shellCwd.value !== ev.cwd) {
+                  shellCwd.value = ev.cwd;
+                  try {
+                    onCwdRef.current?.(ev.cwd);
+                  } catch {
+                    /* 表示用フックの失敗でターミナルを壊さない */
+                  }
+                }
+              } else if (ev.kind === "command-line") {
+                cmdLine.value = ev.command;
+              } else if (ev.kind === "command-start") {
+                cmdRunning.value = true;
+                cmdStartedAt.value = Date.now();
+                cmdOutput.value = "";
+              } else if (ev.kind === "command-end") {
+                const started = cmdStartedAt.value;
+                lastCmdOutputRef.current = cmdOutput.value;
+                setLastCmd({
+                  command: cmdLine.value,
+                  exitCode: ev.exitCode,
+                  durationMs: started ? Date.now() - started : 0,
+                });
+                cmdRunning.value = false;
+                cmdStartedAt.value = 0;
+                cmdLine.value = null;
+              }
+            }
+          }
+          // 実行中のコマンドの出力だけを貯める（AI へ渡す用・上限つき）
+          if (cmdRunning.value) {
+            cmdOutput.value = appendTail(cmdOutput.value, text, 100000);
+          }
+          // モデル名の読み取りは重いので、末尾だけ貯めて 500ms に 1 回だけ見る。
+          statusTail.value = appendTail(statusTail.value, text);
+          if (statusTimer.current === undefined) {
+            statusTimer.current = setTimeout(() => {
+              statusTimer.current = undefined;
+              const tail = statusTail.value;
+              const found = detectModel(tail, cliIdRef.current);
+              if (found) setModel((prev) => (prev === found ? prev : found));
+              // 🚨「効かなかった」を見つけたら表示を取り消す（嘘を出さない）
+              if (detectEffortRejected(tail)) setEffortRejected(true);
+            }, 500);
+          }
+        }
       });
-      unExit = await onPtyExit(id, () => {
+      unExit = await onPtyExit(id, (info) => {
         onExitedRef.current?.();
-        term?.write(
-          "\r\n\x1b[33m[プロセスが終了しました。再度開くと新しいセッションが始まります]\x1b[0m\r\n",
-        );
+        setExitInfo(info);
+        // 終了コードは「取れたときだけ」出す。取れなければ 0 で埋めずに黙る
+        //（分からないことを、分かったように書かない）。
+        const msg =
+          info.code === null
+            ? tRef.current("terminal.exitedUnknown")
+            : tRef.current("terminal.exitedWithCode", { code: info.code });
+        // 異常終了は赤、正常終了は黄（従来色）。
+        const color = info.success === false ? "\x1b[31m" : "\x1b[33m";
+        term?.write("\r\n" + color + "[" + msg + "]\x1b[0m" + "\r\n");
+        // 見えていないページで落ちたことは必ず知らせる（出力通知より優先）。
+        if (!visibleRef.current) {
+          activityFiredRef.current = true;
+          try {
+            onActivityRef.current?.("exit", info);
+          } catch {
+            /* 通知の失敗でターミナルを壊さない */
+          }
+        }
       });
 
       // フォント＆レイアウト確定後に確定 fit してから PTY を開く。
@@ -794,8 +1316,17 @@ export function InteractiveTerminal({
       // この PTY は開き直さない（セッション維持・2026-08-28 修正）。
       // workspace が無いと PTY が親プロセス(unicrew.exe)の cwd を継承してしまい
       // C: 基点で開いてしまう。明示的にデフォルト workspace へフォールバックする。
+      // 復元されたペインは「前回開いていた場所」を優先する。
+      // 🚨 実在を確かめてから使う。消えたフォルダを渡すと spawn が失敗して
+      // 「開いた瞬間に何も出ないペイン」になる（原因が画面から分からない）。
+      let cwd: string | null = null;
+      const savedCwd = initialCwdRef.current;
+      if (savedCwd && savedCwd.trim()) {
+        cwd = (await pathExists(savedCwd)) ? savedCwd : null;
+      }
+      if (disposed) return;
       const wsAtOpen = workspaceRef.current;
-      let cwd = wsAtOpen && wsAtOpen.trim() ? wsAtOpen : null;
+      if (!cwd) cwd = wsAtOpen && wsAtOpen.trim() ? wsAtOpen : null;
       if (!cwd) {
         try {
           cwd = await defaultWorkspacePath();
@@ -856,6 +1387,8 @@ export function InteractiveTerminal({
 
       term.onData((d: string) => {
         void ptyWriteText(id, d);
+        // 送った指示を写し取る（画面を読むのではなく、送った文字を正本にする）
+        setEcho((prev) => feedInput(prev, d));
         // 文字入力・Enter で claude(TUI) は自動的に最下部へ戻るため、
         // 推定つまみも最下部へ同期する（ESC始まりの制御列は除外）。
         if (d && !d.startsWith("\x1b")) setTuiThumbTop(TUI_THUMB_MAX_TOP);
@@ -1021,6 +1554,14 @@ export function InteractiveTerminal({
     return () => {
       disposed = true;
       if (fitTimer !== undefined) clearTimeout(fitTimer);
+      if (inputTimerRef.current !== undefined) {
+        clearTimeout(inputTimerRef.current);
+        inputTimerRef.current = undefined;
+      }
+      if (statusTimer.current !== undefined) {
+        clearTimeout(statusTimer.current);
+        statusTimer.current = undefined;
+      }
       try {
         ro?.disconnect();
       } catch {
@@ -1060,6 +1601,7 @@ export function InteractiveTerminal({
       }
       termRef.current = null;
       tuiInjectRef.current = null;
+      refitRef.current = null;
       void ptyKill(id);
       try {
         term?.dispose();
@@ -1070,7 +1612,9 @@ export function InteractiveTerminal({
     // workspace は意図的に依存へ入れない（ref 参照）。入れると workspace 変化の
     // たびに ptyKill → 開き直しが走り、ターミナルが勝手に閉じる（2026-08-28 根治）。
     // nudgeTuiThumb は useCallback([]) の恒等安定な関数（入れても再実行されない）。
-  }, [paneKey, kind, nudgeTuiThumb]);
+    // restartNonce: 「再起動」ボタンで増やすと cleanup（ptyKill＋dispose）→
+    // 再初期化が走る。開き直しの手順を 2 か所に書かないための仕掛け。
+  }, [paneKey, kind, nudgeTuiThumb, restartNonce, openFind]);
 
   if (!isTauri()) {
     return (
@@ -1092,7 +1636,56 @@ export function InteractiveTerminal({
     // unicrew-term: globals.css で xterm 標準スクロールバーを隠すためのスコープ。
     // 標準バーとカスタムバーが二重に出ると、標準バーの右半分がオーバーレイに
     // 覆われて「押しても動かないバー」に見えるため、カスタムバーへ一本化する。
-    <div className="unicrew-term relative h-full w-full bg-[#faf9f6] p-2">
+    <div
+      className="unicrew-term flex h-full w-full flex-col"
+      style={{ backgroundColor: theme.background }}
+    >
+      {/* いま出した指示のピン留め。流れていっても上に残る。 */}
+      {echo.last && pinOpen && (
+        <div
+          className="shrink-0 flex items-start gap-1.5 border-b border-[var(--color-border)] px-2 py-1 text-[11.5px]"
+          style={{ backgroundColor: theme.background }}
+        >
+          <Pin
+            size={11}
+            className="mt-0.5 shrink-0 text-[var(--color-accent)]"
+          />
+          <button
+            type="button"
+            onClick={() => setPinExpanded((v) => !v)}
+            title={t("terminal.pinExpand")}
+            className={`min-w-0 flex-1 text-left font-mono ${
+              pinExpanded ? "whitespace-pre-wrap break-words" : "truncate"
+            }`}
+            style={{ color: theme.foreground, opacity: 0.85 }}
+          >
+            {echo.last}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPinOpen(false)}
+            title={t("terminal.pinHide")}
+            aria-label={t("terminal.pinHide")}
+            className="shrink-0 rounded p-0.5 text-[var(--color-muted)] transition hover:bg-[var(--color-surface)]"
+          >
+            <PinOff size={11} />
+          </button>
+        </div>
+      )}
+      {/* 隠したあとに戻すための細い帯（指示があるときだけ） */}
+      {echo.last && !pinOpen && (
+        <button
+          type="button"
+          onClick={() => setPinOpen(true)}
+          title={t("terminal.pinShow")}
+          className="shrink-0 flex items-center gap-1 border-b border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+        >
+          <Pin size={10} />
+          {t("terminal.pinShow")}
+        </button>
+      )}
+
+      <div className="relative min-h-0 min-w-0 flex-1 p-2">
       <div ref={ref} className="h-full w-full" />
       {(scroll.max > 0 || tuiMouse) && (
         <div
@@ -1105,19 +1698,237 @@ export function InteractiveTerminal({
         >
           {scroll.max > 0 ? (
             <div
-              className="absolute right-0.5 w-2 rounded bg-black/20 hover:bg-black/35 transition-colors"
-              style={{ height: `${thumbPct}%`, top: `${thumbTopPct}%` }}
+              className="absolute right-0.5 w-2 rounded transition-colors"
+              style={{
+                height: `${thumbPct}%`,
+                top: `${thumbTopPct}%`,
+                // 黒固定だと暗いテーマで見えない。文字色を薄めて使う。
+                backgroundColor: theme.foreground,
+                opacity: 0.28,
+              }}
             />
           ) : (
             // TUI（claude等）モード: 推定位置つまみ。ドラッグ／ホイール注入に
             // 追従し、離してもその場に留まる（入力時に最下部へ戻る）。
             <div
-              className="absolute right-0.5 w-2 rounded bg-black/15 hover:bg-black/30 transition-colors"
+              className="absolute right-0.5 w-2 rounded transition-colors"
               style={{
                 height: `${TUI_THUMB_HEIGHT_PCT}%`,
                 top: `${tuiThumbTop}%`,
+                backgroundColor: theme.foreground,
+                opacity: 0.22,
               }}
             />
+          )}
+        </div>
+      )}
+
+      {/* 検索バー（Ctrl+F）。スクロールバックは 50,000 行あるので、
+          「出た文字を探せない」を無くすための最小 UI。 */}
+      {findOpen && (
+        <div className="absolute top-1 right-4 z-20 flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 shadow-md">
+          <Search size={12} className="shrink-0 text-[var(--color-muted)]" />
+          <input
+            ref={findInputRef}
+            value={findQuery}
+            onChange={(e) => setFindQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Esc / Enter はターミナル側にも document 側にも渡さない
+              //（Esc は「実行中AIの停止」に、Ctrl+F はチャット検索に繋がっている）。
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                closeFind();
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                runSearch(findQuery, findCase, e.shiftKey ? -1 : 1, true);
+                return;
+              }
+              if (
+                (e.ctrlKey || e.metaKey) &&
+                (e.key === "f" || e.key === "F")
+              ) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+            placeholder={t("terminal.findPlaceholder")}
+            aria-label={t("terminal.findPlaceholder")}
+            spellCheck={false}
+            className="w-44 bg-transparent text-[12px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-muted)]"
+          />
+          <span
+            className={`shrink-0 font-mono text-[10.5px] ${
+              findQuery && findHits.length === 0
+                ? "text-red-500"
+                : "text-[var(--color-muted)]"
+            }`}
+          >
+            {findQuery === ""
+              ? ""
+              : findHits.length === 0
+                ? t("terminal.findNoMatch")
+                : `${findIndex + 1}/${findHits.length}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFindCase((v) => !v)}
+            title={t("terminal.findCaseTitle")}
+            aria-label={t("terminal.findCaseTitle")}
+            aria-pressed={findCase}
+            className={`rounded p-0.5 transition ${
+              findCase
+                ? "bg-[var(--color-accent)] text-white"
+                : "text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+            }`}
+          >
+            <CaseSensitive size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => runSearch(findQuery, findCase, -1, true)}
+            title={t("terminal.findPrev")}
+            aria-label={t("terminal.findPrev")}
+            className="rounded p-0.5 text-[var(--color-muted)] transition hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+          >
+            <ChevronUp size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => runSearch(findQuery, findCase, 1, true)}
+            title={t("terminal.findNext")}
+            aria-label={t("terminal.findNext")}
+            className="rounded p-0.5 text-[var(--color-muted)] transition hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+          >
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={closeFind}
+            title={t("terminal.findClose")}
+            aria-label={t("terminal.findClose")}
+            className="rounded p-0.5 text-[var(--color-muted)] transition hover:bg-red-50 hover:text-red-500"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* 右下の操作: 落ちたら「再起動」、選択したら「AIに送る」。
+          どちらも出ていない間は何も描かない（ターミナルの邪魔をしない）。 */}
+      {(exitInfo !== null || (hasSelection && !!onSendToAi)) && (
+        <div className="absolute bottom-3 right-4 z-20 flex flex-col items-end gap-1.5">
+          {exitInfo !== null && (
+            <button
+              type="button"
+              onClick={handleRestart}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-text)] shadow-md transition hover:opacity-90"
+            >
+              <RotateCw size={12} />
+              {exitInfo.code === null
+                ? t("terminal.restart")
+                : t("terminal.restartWithCode", { code: exitInfo.code })}
+            </button>
+          )}
+          {hasSelection && !!onSendToAi && (
+            <button
+              type="button"
+              onClick={sendSelectionToAi}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--color-accent)] bg-[var(--color-accent)] px-2 py-1 text-[11.5px] text-white shadow-md transition hover:opacity-90"
+            >
+              <Send size={12} />
+              {t("terminal.sendSelectionToAi")}
+            </button>
+          )}
+        </div>
+      )}
+      </div>
+
+      {/* ステータス行（分かっていることだけ出す。分からないものは出さない） */}
+      {(effort || model || lastCmd) && (
+        <div
+          className="shrink-0 flex items-center gap-3 border-t border-[var(--color-border)] px-2 py-0.5 text-[10.5px]"
+          style={{ backgroundColor: theme.background }}
+        >
+          {effort && (
+            <span
+              className={`inline-flex items-center gap-1 font-mono ${
+                effortRejected ? "text-red-500" : "text-[var(--color-accent)]"
+              }`}
+              title={
+                effortRejected
+                  ? t("terminal.effortRejectedTitle")
+                  : t("terminal.effortBadgeTitle", { level: effort })
+              }
+            >
+              {effortRejected ? (
+                <AlertTriangle size={10} />
+              ) : (
+                <Gauge size={10} />
+              )}
+              <span className={effortRejected ? "line-through" : ""}>
+                {effort}
+              </span>
+              {effortRejected && (
+                <span className="not-italic">
+                  {t("terminal.effortRejectedShort")}
+                </span>
+              )}
+            </span>
+          )}
+          {model && (
+            <span
+              className="inline-flex min-w-0 items-center gap-1 font-mono text-[var(--color-muted)]"
+              title={t("terminal.modelReadFromScreen")}
+            >
+              <Cpu size={10} />
+              <span className="truncate">{model}</span>
+            </span>
+          )}
+          {lastCmd && (
+            <span
+              className={`inline-flex min-w-0 items-center gap-1 font-mono ${
+                lastCmd.exitCode === 0 || lastCmd.exitCode === null
+                  ? "text-[var(--color-muted)]"
+                  : "text-red-500"
+              }`}
+              title={t("terminal.lastCommandTitle")}
+            >
+              <span className="truncate">
+                {lastCmd.command ?? t("terminal.lastCommandUnknown")}
+              </span>
+              {lastCmd.exitCode !== null && (
+                <span>
+                  {lastCmd.exitCode === 0
+                    ? "✓"
+                    : `✗ ${lastCmd.exitCode}`}
+                </span>
+              )}
+              <span className="opacity-70">
+                {(lastCmd.durationMs / 1000).toFixed(1)}s
+              </span>
+            </span>
+          )}
+          {lastCmd && !!onSendToAi && (
+            <button
+              type="button"
+              onClick={() => {
+                const out = lastCmdOutputRef.current.trim();
+                if (!out) return;
+                const head = lastCmd.command
+                  ? "$ " + lastCmd.command + "\n"
+                  : "";
+                onSendToAi(head + out.slice(-MAX_SEND_TO_AI_CHARS));
+              }}
+              className="ml-auto shrink-0 inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)] transition hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+              title={t("terminal.sendLastOutputTitle")}
+            >
+              <Send size={9} />
+              {t("terminal.sendLastOutput")}
+            </button>
           )}
         </div>
       )}
