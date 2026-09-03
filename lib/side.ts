@@ -59,13 +59,27 @@ export function withPendingConclusion(parent: Thread, conclusion: string): Threa
   };
 }
 
-/** 送信本文に前置きする（結論があれば）。結論を消した Thread と本文を返す。 */
-export function prependConclusions(thread: Thread, text: string): { thread: Thread; text: string } {
+/**
+ * 送信本文に前置きする。結論を消した Thread と本文を返す。
+ *
+ * `only` を渡すと **その結論だけ**を前置きし、残りは pending に残す。
+ * 🚨 2026-09-04 監査: 応答中にキューへ積んだ送信は、実行時に「そのとき pending にある全部」を
+ * 拾っていた。積んだ後に戻ってきた別のサイドの結論まで、無関係な古い指示に混ざる。
+ * キューは積んだ時点の結論を控えて `only` で渡す。
+ */
+export function prependConclusions(
+  thread: Thread,
+  text: string,
+  only?: string[],
+): { thread: Thread; text: string } {
   const pending = thread.pendingSideConclusions ?? [];
   if (pending.length === 0) return { thread, text };
-  const block = pending.map((c) => c.trim()).join("\n\n---\n\n");
+  const use = only ? pending.filter((c) => only.includes(c)) : pending;
+  if (use.length === 0) return { thread, text };
+  const rest = pending.filter((c) => !use.includes(c));
+  const block = use.map((c) => c.trim()).join("\n\n---\n\n");
   return {
-    thread: { ...thread, pendingSideConclusions: undefined },
+    thread: { ...thread, pendingSideConclusions: rest.length > 0 ? rest : undefined },
     text: `## サイドチャットの結論\n\n${block}\n\n---\n\n[ユーザーからのメッセージ]\n${text}`,
   };
 }

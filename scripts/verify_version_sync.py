@@ -19,6 +19,7 @@ package.json と Cargo.toml が 0.3.7 なのに whatsnew は 0.3.2 で止まっ�
 | 4 | public/whatsnew/<version>.md | 存在し、200バイト以上（空の告知を出荷しない） |
 | 5 | components/SettingsModal.tsx | `currentVersion="0.x.y"` のベタ書きが無い |
 | 6 | package-lock.json の先頭の version | package.json と同じ（`npm install` で同期される。2026-09-04 実測＝0.2.36 のまま止まっていた） |
+| 7 | next.config.ts の NEXT_PUBLIC_UNICREW_VERSION | package.json を読んでいる（固定値なら package.json と同じ）。ここが焼き込まれて画面に出る |
 
 ERROR が 1 つでもあれば終了コード 1（タグを打たない）。
 
@@ -82,6 +83,27 @@ def version_of_whatsnew_fallback(root: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def next_config_version(root: Path) -> tuple[str, str | None]:
+    """next.config.ts の NEXT_PUBLIC_UNICREW_VERSION がどこから来ているかを返す。
+
+    戻り値は ("dynamic"|"literal"|"missing"|"nofile", 値)。
+    2026-09-04 のダブル監査で、この1か所だけが検査の外にあった。ここは静的書き出し時に
+    画面へ焼き込まれる値なので、固定値に書き換わると What's New と表示版数が丸ごと嘘になる。
+    """
+    p = root / "next.config.ts"
+    if not p.exists():
+        return ("nofile", None)
+    text = read(p)
+    m = re.search(r"NEXT_PUBLIC_UNICREW_VERSION\s*:\s*([^,}\n]+)", text)
+    if not m:
+        return ("missing", None)
+    expr = m.group(1).strip()
+    lit = re.fullmatch(r'"([^"]+)"|\'([^\']+)\'', expr)
+    if lit:
+        return ("literal", lit.group(1) or lit.group(2))
+    return ("dynamic", expr)
+
+
 def version_of_package_lock(root: Path) -> str | None:
     p = root / "package-lock.json"
     if not p.exists():
@@ -119,6 +141,13 @@ def check(root: Path) -> list[str]:
         errors.append(f"public/whatsnew/{pkg}.md がありません（この版の告知が出ない）")
     elif wn.stat().st_size < 200:
         errors.append(f"public/whatsnew/{pkg}.md が {wn.stat().st_size} バイトしかありません（空の告知）")
+    kind, expr = next_config_version(root)
+    if kind == "nofile":
+        errors.append("next.config.ts がありません（表示版数の焼き込み元が確認できない）")
+    elif kind == "missing":
+        errors.append("next.config.ts に NEXT_PUBLIC_UNICREW_VERSION がありません（表示版数が空になる）")
+    elif kind == "literal" and expr != pkg:
+        errors.append(f"next.config.ts の NEXT_PUBLIC_UNICREW_VERSION: {expr} ≠ package.json {pkg}")
     hc = hardcoded_current_version(root)
     if hc:
         errors.append(f"components/SettingsModal.tsx に currentVersion=\"{hc}\" のベタ書きがあります（UNICREW_VERSION を使う）")
@@ -137,7 +166,8 @@ def report(root: Path) -> int:
 
 def make_fixture(dst: Path, *, version: str, cargo: str | None = None, lock: str | None = None,
                  conf: str | None = None, fallback: str | None = None, whatsnew: bool = True,
-                 hardcode: bool = False, pkglock: str | None = None) -> None:
+                 hardcode: bool = False, pkglock: str | None = None,
+                 nextconf: str | None = None) -> None:
     (dst / "src-tauri").mkdir(parents=True)
     (dst / "lib").mkdir()
     (dst / "components").mkdir()
@@ -154,6 +184,13 @@ def make_fixture(dst: Path, *, version: str, cargo: str | None = None, lock: str
     body = "# x\n" + ("- 変更\n" * 60) if whatsnew else ""
     if whatsnew:
         (dst / "public" / "whatsnew" / f"{version}.md").write_text(body, encoding="utf-8")
+    nc = (
+        f'const nextConfig = {{ env: {{ NEXT_PUBLIC_UNICREW_VERSION: "{nextconf}" }} }};\n'
+        if nextconf
+        else "const pkgVersion = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8')).version;\n"
+        "const nextConfig = { env: { NEXT_PUBLIC_UNICREW_VERSION: pkgVersion } };\n"
+    )
+    (dst / "next.config.ts").write_text(nc, encoding="utf-8")
     sm = '<UnicrewSelfUpdateSection currentVersion="0.2.1" />' if hardcode else "<UnicrewSelfUpdateSection currentVersion={UNICREW_VERSION} />"
     (dst / "components" / "SettingsModal.tsx").write_text(sm, encoding="utf-8")
 
@@ -168,6 +205,7 @@ def selftest() -> int:
         ("この版の whatsnew が無い", dict(version="0.4.0", whatsnew=False), 1),
         ("SettingsModal にベタ書き", dict(version="0.4.0", hardcode=True), 1),
         ("package-lock.json が古い（2026-09-04 実測の形）", dict(version="0.4.0", pkglock="0.2.36"), 1),
+        ("next.config.ts が固定値で古い（2026-09-04 ダブル監査で見つけた検査漏れ）", dict(version="0.4.0", nextconf="0.3.7"), 1),
     ]
     failed = 0
     for name, kw, expect in cases:

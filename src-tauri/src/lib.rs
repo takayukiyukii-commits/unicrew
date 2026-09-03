@@ -5012,6 +5012,20 @@ struct IntegrateResult {
     patch_path: Option<String>,
 }
 
+/// スレッドID を、パス・ブランチ名・ref 名に使う短縮キーにする。
+///
+/// 🚨 2026-09-04 監査（横断の回）で 8 → THREAD_KEY_LEN に伸ばした。
+/// worktree のパス・ブランチ名・checkpoint の参照 prefix はすべてこの値で決まるので、
+/// ここが衝突した2スレッドは作業場と記録置き場を丸ごと共有し、
+/// `checkpoint_restore` の所有確認（prefix 一致）もすり抜ける＝別スレッドの記録に戻せる。
+/// スレッドID は nanoid(10)。8文字だと 64^8、10文字なら 64^10 で約4,000分の1になる。
+/// Windows の MAX_PATH があるので長くしすぎない（この値だけがパスの深さに効く）。
+const THREAD_KEY_LEN: usize = 24;
+
+fn thread_key(thread_id: &str) -> String {
+    sanitize_id(thread_id, THREAD_KEY_LEN)
+}
+
 /// スレッド/スロットIDをパス・ブランチ名に使える文字だけに絞る。
 fn sanitize_id(s: &str, max: usize) -> String {
     s.chars()
@@ -5095,7 +5109,7 @@ async fn worktree_prepare(
         .await
         .map_err(|_| "まだコミットが1つもありません（最初のコミットを作ると作業場を分けられます）".to_string())?;
     let top = std::path::PathBuf::from(&toplevel);
-    let t8 = sanitize_id(&thread_id, 8);
+    let t8 = thread_key(&thread_id);
     let slot = sanitize_id(&slot_id, 16);
     if t8.is_empty() || slot.is_empty() {
         return Err("スレッド/スロットIDが不正です".into());
@@ -5325,6 +5339,17 @@ const CHANGES_MAX_FILES: usize = 500;
 const DIFF_MAX_BYTES: usize = 2 * 1024 * 1024;
 const EMPTY_TREE_OID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+/// `rev-parse --show-toplevel` の失敗を「git 管理外（NOT_A_REPO）」と
+/// 「git が使えない」に分ける。前者は UI が黙って隠してよいが、後者は知らせないと
+/// 「AI が変えたのに変更が出ない」が静かに起きる（2026-09-04 監査）。
+fn classify_git_error(e: String) -> String {
+    if e.starts_with("git を起動できませんでした") {
+        format!("git が見つかりません（変更の表示・巻き戻し・監査には git が要ります）: {}", e)
+    } else {
+        "NOT_A_REPO".to_string()
+    }
+}
+
 /// 環境変数付きで git を1回実行し stdout を生のまま返す。
 async fn git_raw_env(
     cwd: &std::path::Path,
@@ -5385,13 +5410,42 @@ async fn snapshot_tree(
     let index = temp_index_path(app)?;
     let index_s = index.to_string_lossy().to_string();
     let envs = [("GIT_INDEX_FILE", index_s.as_str())];
-    // HEAD があれば追跡状態を引き継ぐ（無ければ空 index から全部を add）
-    if git_out(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.is_ok() {
-        git_out_env(cwd, &["read-tree", "HEAD"], &envs).await?;
+    // 🚨 失敗しても一時 index を必ず消す（2026-09-04 監査: `?` の早期 return で
+    //    AppData/tmp に index-<pid>-<nanos> が溜まり続ける経路があった）。
+    let built: Result<String, String> = async {
+        // HEAD があれば追跡状態を引き継ぐ（無ければ空 index から全部を add）
+        if git_out(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.is_ok() {
+            git_out_env(cwd, &["read-tree", "HEAD"], &envs).await?;
+        }
+        git_out_env(cwd, &["add", "-A", "--", "."], &envs).await?;
+        git_out_env(cwd, &["write-tree"], &envs).await
     }
-    git_out_env(cwd, &["add", "-A", "--", "."], &envs).await?;
-    let tree = git_out_env(cwd, &["write-tree"], &envs).await?;
-    Ok((tree, index))
+    .await;
+    match built {
+        Ok(tree) => Ok((tree, index)),
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&index).await;
+            Err(e)
+        }
+    }
+}
+
+/// 作業フォルダがリポジトリのどこにあるか（`docs/` のような末尾スラッシュ付き。直下なら空）。
+///
+/// 🚨 2026-09-04 監査（自分の修正の監査の回）で足した。tree のスコープだけに頼ると、
+/// 記録と復元の間に **作業フォルダの外で HEAD が動いた**とき、外のファイルまで差分に出て
+/// 書き戻しの対象になる（実測で「利用者がコミット済みの変更が巻き戻る」を再現）。
+/// 復元と差分は、この prefix でパスを明示的に絞る。
+async fn repo_prefix(ws: &std::path::Path) -> String {
+    let p = git_out(ws, &["rev-parse", "--show-prefix"])
+        .await
+        .unwrap_or_default();
+    let p = p.trim().replace('\\', "/");
+    if p.is_empty() || p.ends_with('/') {
+        p
+    } else {
+        format!("{}/", p)
+    }
 }
 
 /// 基準を決める：since_ref が実在する tree/commit ならそれ（turn）、無ければ HEAD、それも無ければ空 tree。
@@ -5502,22 +5556,28 @@ async fn workspace_changes(
     if !ws.is_dir() {
         return Err("フォルダが見つかりません".into());
     }
+    // 🚨 「git 管理外」と「git が動かない」を混ぜない（2026-09-04 監査）。
+    //    NOT_A_REPO は UI が変更ブロックごと消す合図なので、git 未導入・起動失敗を
+    //    ここに畳むと「AI が変えたのに何も出ない」が黙って起きる。
     git_out(&ws, &["rev-parse", "--show-toplevel"])
         .await
-        .map_err(|_| "NOT_A_REPO".to_string())?;
+        .map_err(classify_git_error)?;
     let (base, base_kind) = resolve_base(&ws, since_ref.as_deref()).await;
     let (_tree, index) = snapshot_tree(&app, &ws).await?;
     let index_s = index.to_string_lossy().to_string();
     let envs = [("GIT_INDEX_FILE", index_s.as_str())];
+    // 🚨 `--` の後ろの `.` で作業フォルダ配下に絞る（2026-09-04 監査）。
+    //    絞らないと、記録と今の間に作業フォルダの外で HEAD が動いたとき、
+    //    AI が触っていないファイルが「変更」として並ぶ。
     let numstat = git_raw_env(
         &ws,
-        &["diff", "--cached", "--numstat", "-M", "-z", "--no-color", &base, "--"],
+        &["diff", "--cached", "--numstat", "-M", "-z", "--no-color", &base, "--", "."],
         &envs,
     )
     .await;
     let names = git_raw_env(
         &ws,
-        &["diff", "--cached", "--name-status", "-M", "-z", "--no-color", &base, "--"],
+        &["diff", "--cached", "--name-status", "-M", "-z", "--no-color", &base, "--", "."],
         &envs,
     )
     .await;
@@ -5568,8 +5628,23 @@ async fn workspace_file_diff(
     let spec = format!("{}:{}", base, rel);
     // 基準側：無ければ「追加されたファイル」として空
     let original = git_raw(&top, &["show", &spec]).await.unwrap_or_default();
+    // 🚨 symlink はたどらない（2026-09-04 監査）。`fs::read` はリンク先を読むので、
+    //    リポジトリ内に外部ファイルへの symlink があると、その中身がエディタに出てしまう。
+    let now_path = top.join(&rel);
+    let is_symlink = tokio::fs::symlink_metadata(&now_path)
+        .await
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_symlink {
+        return Ok(FileDiff {
+            original: String::new(),
+            modified: String::new(),
+            binary: true,
+            too_large: false,
+        });
+    }
     // 今側：無ければ「削除されたファイル」として空
-    let modified = tokio::fs::read(top.join(&rel)).await.unwrap_or_default();
+    let modified = tokio::fs::read(&now_path).await.unwrap_or_default();
     let too_large = original.len() > DIFF_MAX_BYTES || modified.len() > DIFF_MAX_BYTES;
     let is_bin = |b: &[u8]| b.iter().take(8192).any(|c| *c == 0);
     let binary = is_bin(&original) || is_bin(&modified);
@@ -5608,14 +5683,14 @@ async fn workspace_patch(
     let ws = std::path::PathBuf::from(&workspace);
     git_out(&ws, &["rev-parse", "--show-toplevel"])
         .await
-        .map_err(|_| "NOT_A_REPO".to_string())?;
+        .map_err(classify_git_error)?;
     let (base, base_kind) = resolve_base(&ws, since_ref.as_deref()).await;
     let (_tree, index) = snapshot_tree(&app, &ws).await?;
     let index_s = index.to_string_lossy().to_string();
     let envs = [("GIT_INDEX_FILE", index_s.as_str())];
     let raw = git_raw_env(
         &ws,
-        &["diff", "--cached", "-M", "--no-color", "--no-ext-diff", &base, "--"],
+        &["diff", "--cached", "-M", "--no-color", "--no-ext-diff", &base, "--", "."],
         &envs,
     )
     .await;
@@ -5709,7 +5784,7 @@ struct RestoreResult {
 }
 
 fn checkpoint_prefix(thread_id: &str) -> Result<String, String> {
-    let t8 = sanitize_id(thread_id, 8);
+    let t8 = thread_key(thread_id);
     if t8.is_empty() {
         return Err("スレッドIDが不正です".into());
     }
@@ -5758,7 +5833,6 @@ async fn checkpoint_write(
             });
         }
     }
-    let seq = existing.last().map(|x| x.0 + 1).unwrap_or(1);
     // 親は HEAD（あれば）。無くても commit-tree は作れる（コミット無しリポジトリ）
     let head = git_out(top, &["rev-parse", "--verify", "--quiet", "HEAD"]).await.ok();
     let mut args: Vec<&str> = vec![
@@ -5776,12 +5850,35 @@ async fn checkpoint_write(
         args.push(h);
     }
     let oid = git_out(top, &args).await?;
-    let refname = format!("{}{}", prefix, seq);
-    git_out(top, &["update-ref", &refname, &oid]).await?;
+    // 🚨 採番は compare-and-swap（2026-09-04 監査の実測）。
+    //    並列/議論モードの送信は cwd ごとに checkpoint_create を同時に呼ぶ。worktree は refs を
+    //    共有するので、「最大 seq を読む→+1→update-ref」だと同じ参照名に後勝ちで書き込み、
+    //    負けた作業場の記録は参照を失って「ここに戻す」が所有確認に落ちる（実測: 4本中3本が消失・3/3回再現）。
+    //    update-ref に旧値（新規なら 40 個の 0）を渡し、取られていたら採番からやり直す。
+    const ZERO_OID: &str = "0000000000000000000000000000000000000000";
+    let mut seq = existing.last().map(|x| x.0 + 1).unwrap_or(1);
+    let mut refname = format!("{}{}", prefix, seq);
+    let mut attempt = 0;
+    loop {
+        match git_out(top, &["update-ref", &refname, &oid, ZERO_OID]).await {
+            Ok(_) => break,
+            Err(e) => {
+                attempt += 1;
+                if attempt > 25 {
+                    return Err(format!("チェックポイントの記録に失敗しました: {}", e));
+                }
+                // 取られていた分を読み直して次の空き番号へ（他の作業場が先に書いた）
+                let now = list_checkpoints(top, prefix).await;
+                let next = now.last().map(|x| x.0 + 1).unwrap_or(seq + 1);
+                seq = if next > seq { next } else { seq + 1 };
+                refname = format!("{}{}", prefix, seq);
+            }
+        }
+    }
     // 上限を超えた分は古い順に消す（参照だけ。オブジェクトは gc に任せる）
-    let total = existing.len() + 1;
-    if total > CHECKPOINT_MAX {
-        for (s, _, _) in existing.iter().take(total - CHECKPOINT_MAX) {
+    let all = list_checkpoints(top, prefix).await;
+    if all.len() > CHECKPOINT_MAX {
+        for (s, _, _) in all.iter().take(all.len() - CHECKPOINT_MAX) {
             let _ = git_out(top, &["update-ref", "-d", &format!("{}{}", prefix, s)]).await;
         }
     }
@@ -5848,12 +5945,16 @@ async fn checkpoint_create(
     let ws = std::path::PathBuf::from(&workspace);
     let toplevel = git_out(&ws, &["rev-parse", "--show-toplevel"])
         .await
-        .map_err(|_| "NOT_A_REPO".to_string())?;
+        .map_err(classify_git_error)?;
     let top = std::path::PathBuf::from(&toplevel);
     let prefix = checkpoint_prefix(&thread_id)?;
-    let (tree, index) = snapshot_tree(&app, &top).await?;
+    // 🚨 記録の範囲は「作業フォルダ」であって「リポジトリ全体」ではない（2026-09-04 監査の実測）。
+    //    top で snapshot すると、workspace がサブフォルダのとき、AI に渡していない場所の
+    //    利用者の手作業まで記録・復元の対象になり、差分ビュー（ws 基準）とも基準がズレる。
+    //    ws を cwd にすると `add -A -- .` が作業フォルダ配下だけを写し、外は HEAD のまま残る。
+    let (tree, index) = snapshot_tree(&app, &ws).await?;
     let _ = tokio::fs::remove_file(&index).await;
-    let t8 = sanitize_id(&thread_id, 8);
+    let t8 = thread_key(&thread_id);
     checkpoint_write(&top, &prefix, &tree, &format!("UNICREW checkpoint {}", t8)).await
 }
 
@@ -5882,8 +5983,8 @@ async fn checkpoint_restore(
         return Err("この時点の記録が見つかりません（上限を超えて消えたか、別のスレッドの記録です）".into());
     }
     let target_tree = git_out(&top, &["rev-parse", &format!("{}^{{tree}}", oid)]).await?;
-    // 安全網：戻す直前の状態を同じ場所に記録する
-    let (now_tree, idx) = snapshot_tree(&app, &top).await?;
+    // 安全網：戻す直前の状態を同じ場所に記録する（範囲は checkpoint_create と同じ ws スコープ）
+    let (now_tree, idx) = snapshot_tree(&app, &ws).await?;
     let _ = tokio::fs::remove_file(&idx).await;
     let safety = checkpoint_write(&top, &prefix, &now_tree, "UNICREW: 巻き戻し前の状態").await?;
     if now_tree == target_tree {
@@ -5896,10 +5997,16 @@ async fn checkpoint_restore(
     )
     .await?;
     let statuses = parse_name_status_z(&raw);
+    // 🚨 作業フォルダの外は絶対に触らない（2026-09-04 監査・実測で巻き戻り事故を再現）。
+    //    tree のスコープに頼らず、パスで絞る。古い形式（リポジトリ全体）の記録が混ざっても安全。
+    let prefix = repo_prefix(&ws).await;
     let mut to_delete: Vec<String> = Vec::new();
     let mut to_checkout: Vec<String> = Vec::new();
     for (path, st) in statuses {
         if !safe_rel_path(&path) {
+            continue;
+        }
+        if !prefix.is_empty() && !path.starts_with(&prefix) {
             continue;
         }
         if st == "A" {
@@ -5969,9 +6076,15 @@ async fn checkpoint_remove_thread(workspace: String, thread_id: String) -> Resul
     Ok(n)
 }
 
+/// 復元の対象パスを「作業フォルダ配下」に絞る判定（`checkpoint_restore` と同じ規則）。
+/// テストから直接叩けるように切り出してある。
+fn restore_path_allowed(path: &str, prefix: &str) -> bool {
+    safe_rel_path(path) && (prefix.is_empty() || path.starts_with(prefix))
+}
+
 #[cfg(test)]
 mod checkpoint_tests {
-    use super::{is_hex_oid, safe_rel_path};
+    use super::{is_hex_oid, restore_path_allowed, safe_rel_path};
 
     #[test]
     fn rel_path_guard_rejects_escapes() {
@@ -5990,6 +6103,38 @@ mod checkpoint_tests {
         assert!(!is_hex_oid(""));
         assert!(!is_hex_oid("HEAD"));
         assert!(!is_hex_oid("refs/heads/main"));
+    }
+
+    #[test]
+    fn スレッドキーは先頭8文字で潰さない() {
+        // 2026-09-04 監査（横断の回）: 先頭8文字だけだと、9〜10文字目が違う別スレッドが
+        // 同じ worktree と同じ checkpoint 置き場を共有してしまう。
+        let a = super::thread_key("abcdefghXY");
+        let b = super::thread_key("abcdefghZW");
+        assert_ne!(a, b, "先頭8文字が同じ別スレッドは別のキーにならなければならない");
+        assert_eq!(a, "abcdefghXY");
+        // パス・ブランチ名に使えない文字は落とす
+        assert_eq!(super::thread_key("ab/cd..ef"), "abcdef");
+        // 上限は効く
+        assert_eq!(super::thread_key(&"z".repeat(40)).len(), 24);
+    }
+
+    #[test]
+    fn 復元は作業フォルダの外に出ない() {
+        // 2026-09-04 監査（自分の修正の監査の回）の実測で再現した事故の毒味。
+        // 作業フォルダが repo/docs のとき、repo/src は記録側にも今側にも出てくるが触ってはいけない。
+        assert!(restore_path_allowed("docs/a.md", "docs/"));
+        assert!(restore_path_allowed("docs/sub/b.md", "docs/"));
+        assert!(!restore_path_allowed("src/main.rs", "docs/"));
+        assert!(!restore_path_allowed("README.md", "docs/"));
+        // 似た名前のフォルダに滑り込ませない
+        assert!(!restore_path_allowed("docs2/x.md", "docs/"));
+        // 作業フォルダ＝リポジトリ直下（prefix 空）なら全部が対象
+        assert!(restore_path_allowed("src/main.rs", ""));
+        assert!(restore_path_allowed("a.txt", ""));
+        // パス検査は prefix の有無にかかわらず効く
+        assert!(!restore_path_allowed("../outside", ""));
+        assert!(!restore_path_allowed("C:/x", ""));
     }
 }
 

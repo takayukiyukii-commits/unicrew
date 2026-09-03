@@ -74,6 +74,10 @@ export function RestoreCheckpointModal({ open, turn, excerpt, targets, busy, onC
             <strong className="text-[var(--color-text)]"> {t("restore.bodyB")} </strong>
             {t("restore.bodyC")}
           </p>
+          {/* 2026-09-04 監査: 「記録に無いファイルは消える」ことを押す前に伝える（完了後の件数表示だけでは遅い） */}
+          <p className="text-[12px] text-amber-600 dark:text-amber-500 leading-relaxed">
+            {t("restore.bodyD")}
+          </p>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col gap-2">
           <button

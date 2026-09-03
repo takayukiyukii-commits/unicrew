@@ -44,9 +44,28 @@ export function loadThreads(): Thread[] {
   }
 }
 
+/** 保存に失敗したときの通知先（app 側が1回だけ差し込む）。 */
+let onSaveError: ((message: string) => void) | null = null;
+export function setThreadsSaveErrorHandler(fn: ((message: string) => void) | null) {
+  onSaveError = fn;
+}
+let lastSaveErrorAt = 0;
+
 export function saveThreads(threads: Thread[]) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(THREADS_KEY, JSON.stringify(threads));
+  try {
+    localStorage.setItem(THREADS_KEY, JSON.stringify(threads));
+  } catch (e) {
+    // 🚨 2026-09-04 監査（横断の回）: v0.4.0 で送信のたびに Message.checkpoint と
+    //    Thread.turnBase が増える。quota を超えると setItem が投げ、保存効果から例外が漏れて
+    //    「次に起動したら会話も復元点も巻き戻っていた」に見える。握りつぶさず知らせる。
+    const msg = e instanceof Error ? e.message : String(e);
+    const now = Date.now();
+    if (onSaveError && now - lastSaveErrorAt > 30_000) {
+      lastSaveErrorAt = now;
+      onSaveError(msg);
+    }
+  }
 }
 
 export function createThread(opts: {

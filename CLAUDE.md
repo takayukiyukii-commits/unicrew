@@ -10,7 +10,7 @@
 - 新しいウィンドウを追加したら capabilities/default.json の windows 配列に必ず登録（漏れると該当ウィンドウ内のfs/event全拒否）
 - claude CLIのログインは非TTYでprintモード化→portable-ptyで実行（v0.2.32で根治済み）
 - IMEカーソルは実カーソル信頼（VS Code方式）。スクレイピング補正はclaude UI刷新で壊れる
-- リリース手順: 版数は package.json を正本に4ファイル（package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json / lib/whatsnew.ts の fallback）＋ `public/whatsnew/<version>.md` を用意→ **`python scripts/verify_version_sync.py` が ERROR 0**（`--selftest` で毒味可・check.yml でも走る）→タグpush→CI 3OS success確認→Draft/Publish はメンテナが判断
+- リリース手順: 版数は package.json を正本に**7か所**（package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json / src-tauri/Cargo.lock / package-lock.json / lib/whatsnew.ts の fallback / next.config.ts は package.json を読む実装のまま）＋ `public/whatsnew/<version>.md` を用意（ロック2本は `cargo check` と `npm install --ignore-scripts --no-audit --no-fund` で同期する。`npm version` は使わない＝勝手にタグを切る）→ **`python scripts/verify_version_sync.py` が ERROR 0**（`--selftest` で毒味可・check.yml でも走る）→タグpush→CI 3OS success確認→Draft/Publish はメンテナが判断
 - 🚨 版数の告知は「更新したか」ではなく「機械が止めるか」で守る。2026-09-03 実測＝`lib/whatsnew.ts` が 0.3.2 のまま 0.3.7 まで5版出荷され、利用者に What's New が一度も出ていなかった（人が守る「版数3ファイル更新」は守られなかった）
 - 🚨 出荷前ゲート: タグを打つ前に、公開READMEの記述が実物と合っているかを機械照合する（署名の記述・対応OS・プロバイダ数）。**ERROR 0 を確認してからタグを打つ**。2026-08-28に「未署名」「9プロバイダ」の古い記述が、前日に更新したREADMEに残っていた（実際は Windows 署名済み・11プロバイダ）
 - 🚨 添付画像を触ったら `python scripts/verify_image_attachment.py` を必ず通す（`--legacy` で毒味＝落ちるべきときに落ちるかも見る）。**画面にサムネイルが出ることは「AI に見えている」の証拠にならない**。2026-05-18 に「直した」と報告したときの検証は `npx tsc --noEmit` の1行だけで、実際は106日間ずっと壊れていた（画像はワークスペース外にあり、Claude Code がその読み取りに許可を要求して毎回拒否されていた）。いまは画像を base64 の image ブロックとしてメッセージに添えて渡すので、ファイルを開く必要が無い
@@ -29,6 +29,3 @@
 - 🚨 クラウドに出すのは **Next 側のロジックとテストまで**。Tauri の Rust ビルド・署名・公証・実機確認はクラウド不可（CI とローカル）
 - 運用ルール: `docs/cloud-agent.md`
 
-<!-- HONJIN:vault-rule -->
-@HONJIN.md
-<!-- /HONJIN:vault-rule -->

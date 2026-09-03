@@ -90,6 +90,7 @@ import {
   saveLastWorkspace,
   saveSettings,
   saveThreads,
+  setThreadsSaveErrorHandler,
 } from "@/lib/storage";
 import {
   acpCliStatus,
@@ -151,6 +152,7 @@ import {
   parseAuditCommand,
   pickAuditor,
   type AuditCommand,
+  type AuditLayer,
 } from "@/lib/audit";
 import { PROVIDER_LABELS, type AuditMeta } from "@/lib/types";
 import {
@@ -192,6 +194,12 @@ import { PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/types";
 interface PendingSend {
   text: string;
   attachments?: MessageAttachment[];
+  /**
+   * 積んだ時点でのサイドの結論（2026-09-04 監査）。
+   * 空配列なら「この送信に結論は付けない」。後から戻ってきた結論を古い指示に混ぜないため、
+   * 真偽値ではなく**そのときの中身**を控える（キューに2件以上あると真偽値では足りなかった）。
+   */
+  sideConclusions?: string[];
 }
 
 interface ActiveDraft {
@@ -250,6 +258,10 @@ const FRESH_DRAFT = (
  * （入れると並列モードに化け、送信・議論・表示の全部が巻き込まれる）。sid → slot。
  */
 const AUDIT_SLOTS = new Map<string, ParticipantSlot>();
+// 🚨 2026-09-04 監査（横断の回・D×D）: 層は「最後の監査**結果**」から決めていたので、
+//    1本目の結果が返る前に2本目を始めると両方とも同じ層で走った（輪番のつもりで重複監査）。
+//    起動した時点で層を予約しておく。
+const AUDIT_LAYER_RESERVED = new Map<string, AuditLayer>();
 
 function lookupSlot(
   sid: string,
@@ -933,6 +945,13 @@ export default function Page() {
     (focusedThreadId
       ? threads.find((t) => t.id === focusedThreadId)
       : null) ?? activeThread;
+
+  // 20. 保存（localStorage）の失敗を利用者に見せる（2026-09-04 監査）
+  useEffect(() => {
+    setThreadsSaveErrorHandler((message) => showToast(tr("storage.saveFailed", { message }), "error"));
+    return () => setThreadsSaveErrorHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateThread = (id: string, mut: (t: Thread) => Thread) => {
     setThreads((prev) => prev.map((t) => (t.id === id ? mut(t) : t)));
@@ -1913,25 +1932,62 @@ export default function Page() {
         sessionsStartedRef.current.delete(id);
       }
     }
-    // worktree 隔離（v0.4.0）: スレッドと一緒に作業場を片付ける（ブランチは残る）
-    if (t?.workspace) {
-      for (const slot of effectiveParticipants(t)) {
-        if (slot.worktreePath) {
-          void worktreeRemove(t.workspace, slot.worktreePath).catch(() => {});
-        }
-      }
-      // チェックポイント（v0.4.0）: このスレッドの記録（参照）も消す
-      void checkpointRemoveThread(t.workspace, id).catch(() => {});
-    }
-    // 相互監査（v0.4.0）: 走っている監査役も畳む
+    // 🚨 2026-09-04 監査（横断の回・D×A）: 監査役は対象 worktree を cwd として起動している。
+    //    先に worktree を消しにいくと、Windows では cwd を掴んだプロセスが居るせいで
+    //    `worktree remove --force` も `remove_dir_all` も失敗し、会話だけ消えて残骸が残る。
+    //    作業場を片付ける前に、走っている監査を止める。
+    // 🚨 待ちすぎない（2026-09-04 監査・2周目）。止まらない監査があると削除自体が進まなくなる。
+    //    中断処理は同じ理由で fire-and-forget にしてあるので、ここも時間で区切る。
+    //    3秒で諦めても、後片付けの失敗は下で利用者に知らせる。
+    const auditStops: Promise<unknown>[] = [];
     for (const sid of [...AUDIT_SLOTS.keys()]) {
       if (sid.startsWith(`${id}::`)) {
         AUDIT_SLOTS.delete(sid);
         sessionsStartedRef.current.delete(sid);
-        void agentStop(sid).catch(() => {});
+        auditStops.push(agentStop(sid).catch(() => {}));
       }
     }
-    setThreads((prev) => prev.filter((tt) => tt.id !== id));
+    if (auditStops.length > 0) {
+      await Promise.race([
+        Promise.all(auditStops),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    }
+    AUDIT_LAYER_RESERVED.delete(id);
+    // worktree 隔離（v0.4.0）: スレッドと一緒に作業場を片付ける（ブランチは残る）
+    if (t?.workspace) {
+      // 🚨 2026-09-04 監査: 後片付けの失敗を握りつぶすと、会話だけ消えて
+      //    AppData/worktrees・unicrew/<t8>/<slot> ブランチ・refs/unicrew/checkpoints/* が
+      //    利用者のリポジトリに残り、誰も気づけない（再試行する画面も消えている）。
+      //    削除自体は止めないが、失敗したことは1回だけ知らせる。
+      const cleanup: Promise<string | null>[] = [];
+      for (const slot of effectiveParticipants(t)) {
+        if (slot.worktreePath) {
+          cleanup.push(
+            worktreeRemove(t.workspace, slot.worktreePath)
+              .then(() => null)
+              .catch((e) => (e instanceof Error ? e.message : String(e))),
+          );
+        }
+      }
+      // チェックポイント（v0.4.0）: このスレッドの記録（参照）も消す
+      cleanup.push(
+        checkpointRemoveThread(t.workspace, id)
+          .then(() => null)
+          .catch((e) => (e instanceof Error ? e.message : String(e))),
+      );
+      void Promise.all(cleanup).then((rs) => {
+        const failed = rs.filter((x): x is string => typeof x === "string");
+        if (failed.length > 0) showToast(tr("restore.cleanupFailed", { message: failed[0] }), "error");
+      });
+    }
+    // 19. 🚨 2026-09-04 監査（横断の回・E×C）: 親を消してもサイドは残る仕様なので、
+    //     消えた親を指したままの parentId を外して本線に戻す（記録は本人のものなので消さない）。
+    setThreads((prev) =>
+      prev
+        .filter((tt) => tt.id !== id)
+        .map((tt) => (tt.parentId === id ? { ...tt, kind: undefined, parentId: undefined } : tt)),
+    );
     setSplitIds((prev) => prev.filter((x) => x !== id));
     if (activeId === id) {
       const remaining = threads.filter((tt) => tt.id !== id);
@@ -2445,6 +2501,8 @@ ${command}
     text: string,
     thread: Thread,
     attachments?: MessageAttachment[],
+    /** キューから流すときだけ渡す：積んだ時点の結論（空配列なら付けない） */
+    queuedSideConclusions?: string[],
   ) => {
     // 添付画像は「パスの文字列」ではなく本物の画像として CLI に渡す。
     // 従来はワークスペース外のパスを AI に開かせていたため、Claude Code の
@@ -2489,7 +2547,8 @@ ${command}
     }
 
     // サイドチャット（v0.4.0）: 「親に戻す」で受け取った結論があれば、この送信に前置きして消す
-    const withConclusion = prependConclusions(thread, textWithPeek);
+    // キューから流す送信には、積んだ時点にあった結論だけを前置きする（2026-09-04 監査）
+    const withConclusion = prependConclusions(thread, textWithPeek, queuedSideConclusions);
     const userMsg = {
       id: nanoid(8),
       role: "user" as const,
@@ -2508,15 +2567,25 @@ ${command}
     if (thread.workspace) {
       const pairs = await Promise.all(
         snapshotCwds(next).map(
-          async (cwd) => [cwd, await checkpointCreate(cwd, thread.id).catch(() => null)] as const,
+          async (cwd) =>
+            [cwd, await checkpointCreate(cwd, thread.id).catch((e) => (e instanceof Error ? e.message : String(e)))] as const,
         ),
       );
       const trees: Record<string, string> = {};
       const points: Record<string, string> = {};
+      // 🚨 2026-09-04 監査: 失敗を丸ごと握りつぶすと「戻せると思っていたのに戻せない」が黙って起きる。
+      //    git 管理外（NOT_A_REPO）は仕様どおり黙って HEAD 比較へ落とし、それ以外だけ知らせる。
+      const snapshotErrors: string[] = [];
       for (const [cwd, cp] of pairs) {
-        if (!cp) continue;
+        if (cp === null || typeof cp === "string") {
+          if (typeof cp === "string" && cp !== "NOT_A_REPO") snapshotErrors.push(cp);
+          continue;
+        }
         trees[cwd] = cp.tree;
         points[cwd] = cp.oid;
+      }
+      if (snapshotErrors.length > 0) {
+        showToast(tr("restore.snapshotFailed", { message: snapshotErrors[0] }), "error");
       }
       updateThread(thread.id, (t) => withTurnBase(withCheckpoint(t, userMsg.id, points), trees));
     }
@@ -2720,7 +2789,10 @@ ${command}
     }
     // ワークスペース直下の AUDIT.md（この作業場の監査ルール）があれば注入
     const auditMd = await readTextFile(`${thread.workspace}/AUDIT.md`).catch(() => "");
-    const layer = cmd.layer ?? nextAuditLayer(thread);
+    const reserved = AUDIT_LAYER_RESERVED.get(thread.id);
+    const layer =
+      cmd.layer ?? (reserved ? (((reserved % 3) + 1) as AuditLayer) : nextAuditLayer(thread));
+    AUDIT_LAYER_RESERVED.set(thread.id, layer);
     const auditor = picked.auditor;
     const meta: AuditMeta = {
       auditor,
@@ -2781,6 +2853,9 @@ ${command}
         }),
       );
     } catch (e) {
+      // 🚨 2026-09-04 監査: agentStart が成功した後に agentSend が失敗すると、
+      //    表示だけ消えて読み取り専用の子プロセスが残る。必ず止める。
+      if (sessionsStartedRef.current.has(sid)) void agentStop(sid).catch(() => {});
       AUDIT_SLOTS.delete(sid);
       sessionsStartedRef.current.delete(sid);
       const cleared = { ...draftsRef.current };
@@ -2865,7 +2940,14 @@ ${command}
     // 相互監査（v0.4.0）: `/監査` `/audit` は CLI に送らず、別のAIを監査役として起動する
     const auditCmd = parseAuditCommand(value);
     if (auditCmd) {
-      void startAudit(thread, auditCmd);
+      // 🚨 2026-09-04 監査（横断の回・D×E）: サイドチャットは plan 固定で何も実装していない。
+      //    そのまま監査すると「脇の相談に答えたAI」を実装者として扱い、指摘も plan の
+      //    サイドへ戻ってしまう。サイドから打たれたら本線（親）を対象にする。
+      const auditTarget =
+        isSideThread(thread) && thread.parentId
+          ? (threadsRef.current.find((x) => x.id === thread.parentId) ?? thread)
+          : thread;
+      void startAudit(auditTarget, auditCmd);
       return;
     }
     // サイドチャット（v0.4.0）: `/side 質問` は本線から脇のスレッドを開く
@@ -2876,7 +2958,10 @@ ${command}
     }
     if (isThreadBusy(thread)) {
       const q = enqueuedSendsRef.current[thread.id] ?? [];
-      q.push({ text: value, attachments });
+      // 🚨 2026-09-04 監査（横断の回・E×送信キュー）: 積んだ後に「親に戻す」を押すと、
+      //    その結論が **積んであった古い指示** に前置きされてしまう（利用者は無関係な文を混ぜて渡す）。
+      //    積んだ時点で結論が無かった送信には、後から来た結論を付けない。
+      q.push({ text: value, attachments, sideConclusions: [...(thread.pendingSideConclusions ?? [])] });
       enqueuedSendsRef.current[thread.id] = q;
       setEnqueuedCounts((prev) => ({ ...prev, [thread.id]: q.length }));
       return;
@@ -2921,7 +3006,7 @@ ${command}
       const next = q.shift();
       if (next === undefined) continue;
       setEnqueuedCounts((prev) => ({ ...prev, [tid]: q.length }));
-      void handleSendForThread(next.text, thread, next.attachments);
+      void handleSendForThread(next.text, thread, next.attachments, next.sideConclusions);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamingSids]);
@@ -3132,18 +3217,38 @@ ${command}
     try {
       let restored = 0;
       let deleted = 0;
+      // 🚨 2026-09-04 監査: 対象が複数（並列モードの作業場ごと）のとき、途中で throw すると
+      //    残りが実行されないまま try を抜け、直った分と直っていない分が混ざる（部分適用）。
+      //    しかもモーダルが閉じないので、押し直すたびに同じ場所で落ち続ける。
+      //    最後まで回して、成功と失敗の両方を報告する。
+      const failures: string[] = [];
       for (const x of targets) {
-        const r = await checkpointRestore(x.cwd, threadId, x.oid);
-        restored += r.restored;
-        deleted += r.deleted;
+        try {
+          const r = await checkpointRestore(x.cwd, threadId, x.oid);
+          restored += r.restored;
+          deleted += r.deleted;
+        } catch (e) {
+          failures.push(e instanceof Error ? e.message : String(e));
+        }
       }
       // 差分ビューに数え直させる
       updateThread(threadId, (t) => ({ ...t, updatedAt: Date.now() }));
-      showToast(
-        restored + deleted === 0
-          ? tr("restore.nothing")
-          : tr("restore.done", { turn, restored, deleted }),
-      );
+      if (failures.length > 0) {
+        showToast(
+          tr("restore.partial", {
+            ok: targets.length - failures.length,
+            ng: failures.length,
+            message: failures[0],
+          }),
+          "error",
+        );
+      } else {
+        showToast(
+          restored + deleted === 0
+            ? tr("restore.nothing")
+            : tr("restore.done", { turn, restored, deleted }),
+        );
+      }
       setRestorePrompt(null);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), "error");

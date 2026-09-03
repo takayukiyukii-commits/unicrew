@@ -103,3 +103,29 @@ describe("orderThreadsForSidebar / archivedCount", () => {
     expect(archivedCount([p1, s1, s2])).toBe(1);
   });
 });
+
+describe("prependConclusions の only（2026-09-04 監査・キューに積んだ時点の結論だけを付ける）", () => {
+  const base = (pending: string[]): Thread =>
+    thread({ pendingSideConclusions: pending });
+
+  it("only を渡さなければ全部を前置きして pending を空にする", () => {
+    const r = prependConclusions(base(["A", "B"]), "本文");
+    expect(r.text).toContain("A");
+    expect(r.text).toContain("B");
+    expect(r.thread.pendingSideConclusions).toBeUndefined();
+  });
+
+  it("only に含まれるものだけを前置きし、後から来た結論は残す", () => {
+    // 積んだ時点は A だけ。実行時には B も来ている。
+    const r = prependConclusions(base(["A", "B"]), "指示1", ["A"]);
+    expect(r.text).toContain("A");
+    expect(r.text).not.toContain("B");
+    expect(r.thread.pendingSideConclusions).toEqual(["B"]);
+  });
+
+  it("積んだ時点で結論が無ければ何も前置きしない", () => {
+    const r = prependConclusions(base(["B"]), "指示1", []);
+    expect(r.text).toBe("指示1");
+    expect(r.thread.pendingSideConclusions).toEqual(["B"]);
+  });
+});

@@ -132,6 +132,3 @@ N人から3人選ぶUIは作らない。プリセット5〜6種を並べ、カ�
 - ../unipilot/ — 旧実装（参考用、コピー元）
 - Anthropic ToS の最新版（CLI exempt の文言確認）
 
-<!-- HONJIN:vault-rule -->
-このフォルダの HONJIN.md（原液ルール）を読み、作業中に該当が出たらその場で従うこと。
-<!-- /HONJIN:vault-rule -->

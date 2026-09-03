@@ -31,4 +31,8 @@ jobs:
       # public/whatsnew/<version>.md の一致。5版ぶん告知が止まっていた事故（2026-09-03）の再発防止
       - name: version sync (必須)
         run: python3 scripts/verify_version_sync.py --selftest && python3 scripts/verify_version_sync.py
+      # 配布境界（2026-09-04 ダブル監査・観点13）: 公開リポジトリに社内の絶対パス・個人名・
+      # 社内限定の符丁・鍵が混ざっていないか。過去に2回、同じ型の混入事故がある
+      - name: public repo boundary (必須)
+        run: python3 scripts/verify_public_repo.py --selftest && python3 scripts/verify_public_repo.py
 
