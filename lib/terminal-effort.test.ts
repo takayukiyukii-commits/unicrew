@@ -7,6 +7,7 @@ import {
   isValidEffort,
   effortLabel,
   EFFORT_SUPPORT,
+  showsDefaultEffortBadge,
 } from "./terminal-effort";
 import { TERMINAL_CLIS } from "./terminal-clis";
 
@@ -148,5 +149,52 @@ describe("paneLaunchCommand（起動経路を静かに変えないための固�
 
   it("カタログに無い CLI は undefined（存在しないプログラムを起動しない）", () => {
     expect(paneLaunchCommand("shell", "ghost", undefined, lookup)).toBeUndefined();
+  });
+});
+
+describe("showsDefaultEffortBadge（おまかせの薄い表示）", () => {
+  it("既定のまま開いた claude ペインでは出す（cliId が無くても kind で補う）", () => {
+    expect(showsDefaultEffortBadge({ kind: "claude" })).toBe(true);
+    expect(showsDefaultEffortBadge({ kind: "claude", cliId: "claude" })).toBe(
+      true,
+    );
+  });
+
+  it("深さを指定して開いたペインでは出さない（本物のバッジが出るため）", () => {
+    expect(
+      showsDefaultEffortBadge({ kind: "claude", cliId: "claude", effort: "high" }),
+    ).toBe(false);
+  });
+
+  it("素のシェルには出さない（エフォートという概念が無い）", () => {
+    expect(showsDefaultEffortBadge({ kind: "shell" })).toBe(false);
+    expect(showsDefaultEffortBadge({ kind: "shell", cliId: undefined })).toBe(
+      false,
+    );
+  });
+
+  it("エフォート非対応の CLI には出さない（無い機能の話をしない）", () => {
+    for (const id of ["gemini", "qwen", "goose"]) {
+      expect(showsDefaultEffortBadge({ kind: "shell", cliId: id })).toBe(false);
+    }
+  });
+
+  it("claude 以外の AI CLI は kind:\"shell\" で開かれるが、それでも出す", () => {
+    // 🚨 実装の実体（TerminalPanes.handleSplitCli）: claude だけ kind:"claude"、
+    // codex / grok / kimi は kind:"shell" + cliId で開く。
+    // kind で弾く実装にすると、この 3 つだけバッジが消える。
+    for (const id of ["codex", "grok", "kimi"]) {
+      expect(showsDefaultEffortBadge({ kind: "shell", cliId: id })).toBe(true);
+    }
+  });
+
+  it("remote-control（Claude リモートコントロール）には出さない", () => {
+    expect(showsDefaultEffortBadge({ kind: "remote-control" })).toBe(false);
+  });
+
+  it("空文字の effort は「指定なし」として扱う", () => {
+    expect(
+      showsDefaultEffortBadge({ kind: "claude", cliId: "claude", effort: "" }),
+    ).toBe(true);
   });
 });

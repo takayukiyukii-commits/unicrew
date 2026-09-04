@@ -1006,6 +1006,9 @@ const ja: Dict = {
   "terminal.effortDefault": "おまかせ（指定しない）",
   "terminal.effortBack": "← CLI 一覧へ戻る",
   "terminal.effortBadgeTitle": "この AI は思考の深さ「{level}」で起動しています",
+  "terminal.effortDefaultBadge": "おまかせ",
+  "terminal.effortDefaultBadgeTitle":
+    "思考の深さを指定せずに開いています（CLI の既定のまま）。深さを決めて開きたいときは、右上の ＋ から CLI と深さを選びます",
   "terminal.effortHint.low": "速い・浅い",
   "terminal.effortHint.medium": "標準",
   "terminal.effortHint.high": "深い",
@@ -2269,6 +2272,9 @@ const en: Dict = {
   "terminal.effortDefault": "Leave it to the CLI (no flag)",
   "terminal.effortBack": "← Back to CLI list",
   "terminal.effortBadgeTitle": "Started with effort level \"{level}\"",
+  "terminal.effortDefaultBadge": "auto",
+  "terminal.effortDefaultBadgeTitle":
+    "Opened without specifying an effort level (the CLI's own default). To pick one, use the + button at the top right and choose a CLI and a level",
   "terminal.effortHint.low": "fast, shallow",
   "terminal.effortHint.medium": "balanced",
   "terminal.effortHint.high": "deep",

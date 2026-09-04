@@ -56,6 +56,7 @@ import {
   appendTail,
 } from "@/lib/terminal-status";
 import { feedInput, EMPTY_ECHO, type EchoState } from "@/lib/terminal-input-echo";
+import { showsDefaultEffortBadge } from "@/lib/terminal-effort";
 import {
   parseShellEvents,
   splitPendingOsc,
@@ -301,6 +302,12 @@ export function InteractiveTerminal({
   const [effortRejected, setEffortRejected] = useState(false);
   const cliIdRef = useRef(cliId);
   cliIdRef.current = cliId;
+  /**
+   * エフォートを指定せずに開いた AI ペインで「おまかせ」と薄く出すか。
+   * 判定は純関数（lib/terminal-effort）に置いて単体テストで固定してある。
+   * 🚨 表示だけの話で、起動引数は 1 バイトも変わらない。
+   */
+  const effortDefaultShown = showsDefaultEffortBadge({ kind, cliId, effort });
 
   /**
    * シェル統合（OSC 133/7）が入っているシェルでだけ分かる「直前のコマンド」。
@@ -1848,7 +1855,7 @@ export function InteractiveTerminal({
       </div>
 
       {/* ステータス行（分かっていることだけ出す。分からないものは出さない） */}
-      {(effort || model || lastCmd) && (
+      {(effort || effortDefaultShown || model || lastCmd) && (
         <div
           className="shrink-0 flex items-center gap-3 border-t border-[var(--color-border)] px-2 py-0.5 text-[10.5px]"
           style={{ backgroundColor: theme.background }}
@@ -1877,6 +1884,15 @@ export function InteractiveTerminal({
                   {t("terminal.effortRejectedShort")}
                 </span>
               )}
+            </span>
+          )}
+          {effortDefaultShown && (
+            <span
+              className="inline-flex items-center gap-1 font-mono text-[var(--color-muted)] opacity-70"
+              title={t("terminal.effortDefaultBadgeTitle")}
+            >
+              <Gauge size={10} />
+              {t("terminal.effortDefaultBadge")}
             </span>
           )}
           {model && (

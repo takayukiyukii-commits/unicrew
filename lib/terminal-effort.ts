@@ -165,3 +165,32 @@ export function paneLaunchCommand(
   if (id === "claude" && args.length === 0) return undefined;
   return { program: def.program, args };
 }
+
+/**
+ * ステータス行に「おまかせ」（＝深さを指定せずに開いた）と薄く出すか。
+ *
+ * 【なぜ要るか】実測（2026-09-04・release ビルドの実機）で、既定のまま開いた
+ * claude ペインのステータス行は **モデル名 1 個だけ**になっていた。
+ * エフォートは未指定だから出ず、直前コマンドはシェル統合が無いので出ない。
+ * 3 つとも実装は正しく動いていたのに、使う人からは「何も出ない」に見える。
+ * そこで「指定していない」という**事実**だけを薄く出す。
+ *
+ * 【嘘をつかないための線引き】
+ * - 出すのはエフォートに対応している CLI のペインだけ。素のシェル・非対応 CLI・
+ *   remote-control には出さない（無い機能の話をしない）
+ * - 文言は「おまかせ」。**既定値を推測して "medium" などと書かない**
+ *   （CLI 側の内部の既定はこちらからは分からない）
+ * - 🚨 これは表示だけの判定。起動引数はここでは一切変わらない
+ */
+export function showsDefaultEffortBadge(input: {
+  kind?: string;
+  cliId?: string;
+  effort?: string | null;
+}): boolean {
+  if (input.effort) return false; // 指定済みなら本物のバッジが出る
+  // 🚨 kind では判定しない。claude 以外の AI CLI は kind:"shell" + cliId で開く
+  //（TerminalPanes の handleSplitCli）。kind で弾くと codex / grok / kimi の
+  // ペインだけバッジが消える。素のシェルは cliId が無いので下の判定で落ちる。
+  const id = input.cliId ?? (input.kind === "claude" ? "claude" : undefined);
+  return supportsEffort(id);
+}
