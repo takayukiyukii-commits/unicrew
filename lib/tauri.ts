@@ -1220,7 +1220,9 @@ export async function agentPermissionResponse(
 }
 
 export type AgentEvent =
-  | { kind: "ready" }
+  // Rust 側（NormalizedEvent::Ready）は session_id を付けて送っている。
+  // 「CLI が生きている合図」として使うので型にも出す。
+  | { kind: "ready"; session_id?: string }
   | {
       /**
        * CLI（Claude / Codex）が割り当てた本物のセッションID。

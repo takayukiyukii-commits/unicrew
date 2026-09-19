@@ -175,6 +175,7 @@ import {
   teamToParticipants,
 } from "@/lib/teams";
 import { buildEffectiveSystemPrompt } from "@/lib/personalities";
+import { shouldRecoverStuckResume } from "@/lib/resume-watchdog";
 import type {
   AppSettings,
   Block,
@@ -223,6 +224,12 @@ interface ActiveDraft {
    * lastEventAt から一定時間 (INACTIVITY_STUCK_MS) 経過したら finalize を促すバナーを出す。
    */
   lastEventAt: number;
+  /**
+   * この送信のあと、CLI から最初に何かが届いた時刻。null なら、まだ 1 行も届いていない。
+   * 「再開で黙り込んだ」かどうかの判定材料（lib/resume-watchdog.ts）。本文やツール実行が
+   * 出る前でも、`ready` / `cli_session_id`（= CLI の system 行）が届けば埋まる。
+   */
+  firstEventAt: number | null;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -242,6 +249,7 @@ const FRESH_DRAFT = (
   startedAt: Date.now(),
   firstTextAt: null,
   lastEventAt: Date.now(),
+  firstEventAt: null,
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
@@ -984,6 +992,18 @@ export default function Page() {
   };
 
   function handleAgentEvent(event: AgentEvent) {
+    // 生きている合図の記録。`ready` / `cli_session_id` / `permission_request` は下で早期 return
+    // するため、以前はここを通らず「何も届いていない」扱いになっていた。その結果、考え中や
+    // 起動待ちの健康なセッションを自動回復ウォッチドッグが殺していた（2026-09-20 修正）。
+    // 下書きが無い sid（停止後の遅延イベント等）では updateDraft が何もしない。
+    if ("session_id" in event && event.session_id) {
+      const at = Date.now();
+      updateDraft(event.session_id, (d) => ({
+        ...d,
+        lastEventAt: at,
+        firstEventAt: d.firstEventAt ?? at,
+      }));
+    }
     if (event.kind === "ready") return;
 
     // CLI セッション ID を thread に保存（再起動後の `--resume` / `exec resume` 用の土台）。
@@ -1036,7 +1056,7 @@ export default function Page() {
       // （= 停止ボタンで白画面）する。開始済みセッション（ensureSlotSession で
       // add 済み）でなければ、これは終了後の遅延ゴーストなので無視する。
       if (!sessionsStartedRef.current.has(sid)) return;
-      const fresh = FRESH_DRAFT(thread.id, slot);
+      const fresh = { ...FRESH_DRAFT(thread.id, slot), firstEventAt: Date.now() };
       draftsRef.current = { ...draftsRef.current, [sid]: fresh };
       setDrafts(draftsRef.current);
       setStreamingSids((prev) => new Set([...prev, sid]));
@@ -3093,24 +3113,26 @@ ${command}
   /**
    * 「resume failed: claude --resume <死んだsid> でハング」自動回復ウォッチドッグ。
    *
-   * - 30秒以上ブロックが0でかつ claude/codex session id が保存されてる draft を検出
+   * - 送信後 RESUME_STUCK_MS のあいだ CLI から **1 行も届かず**、かつ claude/codex session id が
+   *   保存されてる draft を検出（判定の正本＝lib/resume-watchdog.ts）
    * - 1度だけ自動で sid を破棄して新規セッションで再起動を試みる（無限ループ防止に Set 管理）
    * - 失敗を会話末尾に明示し、未送信ユーザーメッセージを再送する
    *
-   * 既に session が応答してれば（少なくとも cli_session_id イベントは即届く）firstTextAt
-   * か blocks.length > 0 になるので、ここには引っかからない。
+   * 生きている CLI は毎ターン 1 秒以内に system 行（= `ready` / `cli_session_id`）を出すので
+   * firstEventAt が埋まり、ここには引っかからない。
+   * 🚨 以前は「30 秒以内に blocks が出たか」で見ており、考え中・起動待ちの健康な
+   *    セッションを殺していた（合図は届いていたが handleAgentEvent が記録前に return していた）。
    */
   const resumeRecoveredRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      const RESUME_STUCK_MS = 30_000;
       const drafts = draftsRef.current;
       for (const [sid, d] of Object.entries(drafts)) {
         if (!d) continue;
+        // 安い条件で先に落とす（判定の正本は下の shouldRecoverStuckResume）
         if (resumeRecoveredRef.current.has(sid)) continue;
-        if (d.blocks.length > 0) continue;
-        if (now - d.startedAt < RESUME_STUCK_MS) continue;
+        if (d.blocks.length > 0 || d.firstEventAt !== null) continue;
         const thread = threadsRef.current.find((t) => t.id === d.threadId);
         if (!thread) continue;
         const slot = effectiveParticipants(thread).find(
@@ -3125,7 +3147,17 @@ ${command}
             : slot.provider === "claude"
               ? thread.claudeSessionId
               : null;
-        if (!cliSid) continue;
+        if (
+          !shouldRecoverStuckResume({
+            now,
+            startedAt: d.startedAt,
+            firstEventAt: d.firstEventAt,
+            blockCount: d.blocks.length,
+            hasCliSessionId: !!cliSid,
+            alreadyRecovered: resumeRecoveredRef.current.has(sid),
+          })
+        )
+          continue;
         resumeRecoveredRef.current.add(sid);
         // 直近のユーザーメッセージ（直前の send）を回収して再送する。
         const lastUserMsg = [...thread.messages]
