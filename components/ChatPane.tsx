@@ -53,6 +53,7 @@ import { CharacterAvatar } from "./CharacterAvatar";
 import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-commands";
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
+import { isVoiceSendArmed, armVoiceSend, stripVoiceSend } from "@/lib/voice-send";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -232,8 +233,8 @@ export function ChatPane({
     }
   }, [threadDrafts]);
 
-  const send = () => {
-    const value = input.trim();
+  const send = (override?: string) => {
+    const value = (override ?? input).trim();
     // 応答中でも送信可（onSend = 親の submitOrQueue が「キューに積む」判断をする）。
     // ターミナルのように指示を連投できる。
     if ((!value && attachments.length === 0) || !thread) return;
@@ -707,7 +708,20 @@ export function ChatPane({
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              // 音声入力中に「送信」と言ったら、その言葉を消して送る（lib/voice-send.ts）
+              if (isVoiceSendArmed()) {
+                const body = stripVoiceSend(v);
+                if (body !== null) {
+                  armVoiceSend(); // 続けて話せるように延長
+                  setInput(body);
+                  send(body);
+                  return;
+                }
+              }
+              setInput(v);
+            }}
             onPaste={(e) => {
               void handlePaste(e);
             }}
@@ -749,7 +763,7 @@ export function ChatPane({
             <>
               {input.trim() && (
                 <button
-                  onClick={send}
+                  onClick={() => send()}
                   title={t("chat.queueAddTitle")}
                   className="shrink-0 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5"
                 >
@@ -779,7 +793,7 @@ export function ChatPane({
             </>
           ) : (
             <button
-              onClick={send}
+              onClick={() => send()}
               disabled={!input.trim() && attachments.length === 0}
               className="shrink-0 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1.5"
             >

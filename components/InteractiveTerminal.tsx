@@ -70,6 +70,7 @@ import {
 } from "@/lib/terminal-prefs";
 import { openFileSmart } from "@/lib/open-file";
 import { openExternal } from "@/lib/preview-window";
+import { armVoiceSend, cutVoiceSend, isVoiceSendArmed, VOICE_TAIL_MAX } from "@/lib/voice-send";
 
 /** 検索で使う xterm バッファ行の最小インターフェース（lib/terminal-search と接続する）。 */
 interface TermBufferLine {
@@ -1411,7 +1412,30 @@ export function InteractiveTerminal({
         rows: term.rows,
       });
 
+      // 音声入力で「送信」と言ったら Enter を送る（lib/voice-send.ts）。
+      // 直前に流した文字の末尾を覚えておく（「送」「信」が別々に届くことがあるため）
+      let voiceTail = "";
       term.onData((d: string) => {
+        if (isVoiceSendArmed() && d && !d.startsWith("\x1b") && !/[\r\n]/.test(d)) {
+          const cut = cutVoiceSend(voiceTail, d);
+          if (cut.send) {
+            voiceTail = "";
+            armVoiceSend(); // 続けて話せるように延長
+            const out = "\x7f".repeat(cut.backspaces) + cut.forward + "\r";
+            void ptyWriteText(id, out);
+            setEcho((prev) => feedInput(prev, out));
+            setTuiThumbTop(TUI_THUMB_MAX_TOP);
+            try {
+              onWorkInputRef.current?.();
+            } catch {
+              /* noop */
+            }
+            return;
+          }
+          voiceTail = (voiceTail + d).slice(-VOICE_TAIL_MAX);
+        } else {
+          voiceTail = "";
+        }
         void ptyWriteText(id, d);
         try {
           onWorkInputRef.current?.();

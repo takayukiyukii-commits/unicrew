@@ -506,7 +506,7 @@ const ja: Dict = {
   "voice.recPrefix": "REC",
   "voice.noTarget": "入力する場所が見つかりません。入力欄かターミナルを一度クリックしてから押してください",
   "voice.appOnly": "音声入力は UNICREW アプリでのみ使えます",
-  "voice.started": "音声入力を始めました。話した言葉がカーソルの位置に入ります（止めるときはもう一度押すか Esc）",
+  "voice.started": "音声入力を始めました。話した言葉がカーソルの位置に入ります。最後に「送信」と言うと送ります（止めるときはもう一度押すか Esc）",
 
   // ----- Page errors / alerts -----
   "page.error.generic": "**エラー**: {message}\n\n認証状態とネットワーク接続を確認してください。",
@@ -1800,7 +1800,7 @@ const en: Dict = {
   "voice.recPrefix": "REC",
   "voice.noTarget": "Nowhere to type. Click the input box or a terminal once, then press again",
   "voice.appOnly": "Voice input works only in the UNICREW app",
-  "voice.started": "Voice typing started. Your words go where the cursor is (press again or Esc to stop)",
+  "voice.started": "Voice typing started. Your words go where the cursor is. Say \"送信\" at the end to send (press again or Esc to stop)",
 
   // ----- Page errors / alerts -----
   "page.error.generic": "**Error**: {message}\n\nPlease check your authentication and network connection.",

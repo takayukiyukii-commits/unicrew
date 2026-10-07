@@ -13,6 +13,7 @@ import { Mic } from "lucide-react";
 import { isTauri } from "@/lib/tauri";
 import { showToast } from "@/lib/toast";
 import { useTranslation } from "@/lib/i18n";
+import { armVoiceSend } from "@/lib/voice-send";
 
 interface Props {
   /** 入力先にフォーカスを当てる。当てられなかったら false を返す */
@@ -36,6 +37,8 @@ export function VoiceInputButton({ focusTarget, disabled, size = 16, className }
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("start_voice_typing");
+      // ここから一定時間、「送信」と言ったら送る（キーボードの「送信」では送らない）
+      armVoiceSend();
       showToast(t("voice.started"));
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), "error");
