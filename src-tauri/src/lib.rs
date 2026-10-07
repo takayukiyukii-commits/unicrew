@@ -13,6 +13,7 @@ pub mod providers;
 pub mod trust;
 pub mod observability;
 mod attention;
+mod voice;
 pub mod pty;
 
 use providers::types::{AuthMode, NormalizedEvent, PermissionMode, SpawnOpts};
@@ -6267,6 +6268,7 @@ pub fn run() {
             attention::set_tray_resident,
             attention::set_unread_badge,
             attention::notify_work_done,
+            voice::start_voice_typing,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

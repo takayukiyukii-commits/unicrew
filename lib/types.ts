@@ -11,9 +11,10 @@
 export type ModelId = "opus" | "sonnet" | "haiku";
 
 export const MODEL_LABELS: Record<ModelId, string> = {
-  opus: "Opus（最強・じっくり）",
-  sonnet: "Sonnet（バランス）",
-  haiku: "Haiku（高速・節約）",
+  // 版数は書かない（書くと必ず古くなる。CLI が常に最新版を選ぶ）
+  opus: "Opus — 常に最新版・いちばん賢い（使用量が多い）",
+  sonnet: "Sonnet — 常に最新版・バランス（おすすめ）",
+  haiku: "Haiku — 常に最新版・速い・節約",
 };
 
 /**

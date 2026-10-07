@@ -43,6 +43,8 @@ import { getCharacter } from "@/lib/characters";
 import { getPersonality } from "@/lib/personalities";
 import { effectiveParticipants } from "@/lib/participants";
 import { MessageItem } from "./MessageItem";
+import { VoiceInputButton } from "./VoiceInputButton";
+import { WorkProgress, progressLine } from "./WorkProgress";
 import { hasCheckpoint } from "@/lib/checkpoint";
 import { isAuditSlotId } from "@/lib/audit";
 import { matchingMessageIds } from "@/lib/search";
@@ -733,6 +735,16 @@ export function ChatPane({
           >
             <Paperclip size={16} />
           </button>
+          <VoiceInputButton
+            focusTarget={() => {
+              const ta = textareaRef.current;
+              if (!ta) return false;
+              ta.focus();
+              // 話した言葉は末尾に足す（途中に割り込ませない）
+              ta.setSelectionRange(ta.value.length, ta.value.length);
+              return true;
+            }}
+          />
           {isStreaming ? (
             <>
               {input.trim() && (
@@ -1247,7 +1259,12 @@ function SlotColumn({
         {message ? (
           <ColumnContent blocks={message.blocks ?? []} fallback={message.content} />
         ) : draft ? (
-          <ColumnContent blocks={draft.blocks} fallback={`${currentActivityLabel(draft, t)}…`} />
+          <>
+            {draft.blocks.some((b) => b.kind === "text") && (
+              <ColumnContent blocks={draft.blocks} fallback="" />
+            )}
+            <WorkProgress blocks={draft.blocks} idleLabel={idleLabel(draft, t)} compact />
+          </>
         ) : isPending ? (
           <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
             <Loader2
@@ -1550,67 +1567,14 @@ interface ModeratorMinutes {
   parking?: string[];
 }
 
-/**
- * draft の blocks 末尾を見て「今まさに何をしているか」を人間可読の i18n キーで返す。
- * - 末尾の tool_use が実行中（pending/approved）ならツール種別に応じたラベル
- * - 末尾の tool が完了済み（= 今はテキスト生成中）なら null（呼び出し側で考え中/応答中にフォールバック）
- * コード断片やコマンド文字列は出さず、行為の種類だけを日本語/英語で示すのが狙い。
- */
-function currentActivityKey(blocks: Block[]): string | null {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b.kind !== "tool_use") continue;
-    if (
-      b.status === "completed" ||
-      b.status === "errored" ||
-      b.status === "denied"
-    ) {
-      return null;
-    }
-    const n = b.toolName;
-    const normalized = n.toLowerCase();
-    if (
-      n === "Bash" ||
-      normalized.includes("bash") ||
-      normalized.includes("shell") ||
-      normalized.includes("command") ||
-      normalized.includes("exec")
-    ) return "chat.activityBash";
-    if (n === "Read" || n === "NotebookRead" || normalized.includes("read"))
-      return "chat.activityRead";
-    if (
-      n === "Edit" ||
-      n === "Write" ||
-      n === "MultiEdit" ||
-      n === "NotebookEdit" ||
-      normalized.includes("edit") ||
-      normalized.includes("write")
-    )
-      return "chat.activityEdit";
-    if (
-      n === "Grep" ||
-      n === "Glob" ||
-      n === "LS" ||
-      normalized.includes("search") ||
-      normalized.includes("grep") ||
-      normalized.includes("glob") ||
-      normalized === "ls"
-    ) return "chat.activitySearch";
-    if (n === "TodoWrite" || normalized.includes("todo")) return "chat.activityTodo";
-    if (n === "WebFetch" || n === "WebSearch" || normalized.includes("web"))
-      return "chat.activityWeb";
-    return "chat.activityTool";
-  }
-  return null;
-}
 
-function currentActivityLabel(draft: ActiveDraftLite, t: (key: string) => string): string {
-  const actKey = currentActivityKey(draft.blocks);
-  if (actKey) return t(actKey);
+/** 道具を使っていない間の言葉（考えている／返事を書いている）。 */
+function idleLabel(draft: ActiveDraftLite, t: (key: string) => string): string {
   return draft.firstTextAt !== null
     ? t("chat.streamingResponding")
     : t("chat.streamingThinking");
 }
+
 
 /**
  * メッセージ領域の下・入力欄の上に常時固定で出すアクティビティバー。
@@ -1639,7 +1603,7 @@ function LiveActivityBar({
     const actorName = character?.name ?? PROVIDER_LABELS[d.provider] ?? t("chat.defaultAssistant");
     const label = stuck
       ? t("chat.streamingStuck")
-      : currentActivityLabel(d, t);
+      : progressLine(d.blocks, idleLabel(d, t));
     return (
       <div key={key} className="flex items-center gap-2 min-w-0">
         <Loader2
@@ -1814,11 +1778,6 @@ function DraftBubble({
           <StreamingStatus draft={draft} />
         </div>
         <div className="md-body text-[14.5px] leading-relaxed">
-          {blocks.length === 0 && (
-            <span className="text-[var(--color-muted)]">
-              {currentActivityLabel(draft, t)}…
-            </span>
-          )}
           {blocks.map((b, i) =>
             b.kind === "text" ? (
               <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
@@ -1828,6 +1787,7 @@ function DraftBubble({
               <ToolUseBubble key={i} block={b} />
             ),
           )}
+          <WorkProgress blocks={blocks} idleLabel={idleLabel(draft, t)} />
         </div>
       </div>
     </div>

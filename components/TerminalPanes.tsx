@@ -36,6 +36,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { ptyWriteText, ptyIdForPane } from "@/lib/pty";
 import { WorkDetector } from "@/lib/work-detector";
+import { VoiceInputButton } from "./VoiceInputButton";
 import {
   TERMINAL_MODEL_CHOICES,
   appendTail,
@@ -461,6 +462,22 @@ export function TerminalPanes({
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // ── 音声入力の入力先＝最後に触ったペイン ──────────────────────────────
+  const lastPaneRef = useRef<string | null>(null);
+  /** 最後に触ったペイン（無ければ表示中ページの先頭）の端末へフォーカスを当てる。 */
+  const focusPaneForVoice = (): boolean => {
+    const panes = pages.find((pg) => pg.id === resolvedActiveId)?.panes ?? [];
+    const key =
+      panes.find((p) => p.key === lastPaneRef.current)?.key ?? panes[0]?.key;
+    if (!key) return false;
+    const ta = document.querySelector<HTMLTextAreaElement>(
+      `[data-pane-key="${CSS.escape(key)}"] textarea.xterm-helper-textarea`,
+    );
+    if (!ta) return false;
+    ta.focus();
+    return true;
+  };
 
   // ── モデル一括切替（並べた Claude Code へ同じ /model を流す）──────────
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -1148,6 +1165,13 @@ export function TerminalPanes({
           )}
         </span>
 
+        {/* 音声入力（最後に触ったターミナルへ・Windows 標準の音声入力） */}
+        <VoiceInputButton
+          focusTarget={focusPaneForVoice}
+          size={13}
+          className="p-1 rounded transition text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+        />
+
         {/* モデル一括切替（このページに Claude Code が1つでもあれば出す） */}
         {modelSplit.targets.length > 0 && (
           <span className="relative" ref={modelMenuRef}>
@@ -1303,6 +1327,10 @@ export function TerminalPanes({
               return (
                 <div
                   key={pane.key}
+                  data-pane-key={pane.key}
+                  onFocusCapture={() => {
+                    lastPaneRef.current = pane.key;
+                  }}
                   style={cellStyle}
                   className={`min-w-0 min-h-0 flex flex-col ${
                     !isMax && col > 1
