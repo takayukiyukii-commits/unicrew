@@ -25,57 +25,79 @@ static TOLD_RESIDENT: AtomicBool = AtomicBool::new(false);
 static UNREAD: AtomicU32 = AtomicU32::new(0);
 
 /// 赤い印の色（RGBA）。
-const DOT: [u8; 4] = [0xE5, 0x39, 0x35, 0xFF];
+const DOT: [u8; 4] = [0xF0, 0x3E, 0x3E, 0xFF];
 const RIM: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 
-/// アイコンの右上に赤い丸を重ねた RGBA を返す（元の画像は変えない）。
+/// タスクバーに重ねる印の一辺（px）。16px だと高 DPI で拡大されて粗く見えるので 32px で作る。
+pub const DOT_ICON_SIZE: u32 = 32;
+
+/// 1 画素のうち円（半径 r）に入る割合（4x4 の点で数える＝縁をなめらかにする）。
+fn coverage(px: u32, py: u32, cx: f32, cy: f32, r: f32) -> f32 {
+    let mut hit = 0u32;
+    for sy in 0..4 {
+        for sx in 0..4 {
+            let dx = px as f32 + (sx as f32 + 0.5) / 4.0 - cx;
+            let dy = py as f32 + (sy as f32 + 0.5) / 4.0 - cy;
+            if dx * dx + dy * dy <= r * r {
+                hit += 1;
+            }
+        }
+    }
+    hit as f32 / 16.0
+}
+
+/// `color` を割合 `a` で重ねる（下の画素の透明度も保つ）。
+fn blend(dst: &mut [u8], color: [u8; 4], a: f32) {
+    if a <= 0.0 {
+        return;
+    }
+    let da = dst[3] as f32 / 255.0;
+    let oa = a + da * (1.0 - a);
+    for k in 0..3 {
+        let c = (color[k] as f32 * a + dst[k] as f32 * da * (1.0 - a)) / oa;
+        dst[k] = c.round().clamp(0.0, 255.0) as u8;
+    }
+    dst[3] = (oa * 255.0).round().clamp(0.0, 255.0) as u8;
+}
+
+/// 白い細い縁つきの赤い丸を、中心 (cx, cy)・半径 r で描く。
+fn paint_dot(out: &mut [u8], w: u32, h: u32, cx: f32, cy: f32, r: f32, rim: f32) {
+    for y in 0..h {
+        for x in 0..w {
+            let outer = coverage(x, y, cx, cy, r + rim);
+            if outer <= 0.0 {
+                continue;
+            }
+            let inner = coverage(x, y, cx, cy, r);
+            let i = ((y * w + x) * 4) as usize;
+            blend(&mut out[i..i + 4], RIM, outer);
+            blend(&mut out[i..i + 4], DOT, inner);
+        }
+    }
+}
+
+/// アイコンの右上に小さな赤い丸を重ねた RGBA を返す（元の画像は変えない）。
 pub fn with_badge(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
     let mut out = rgba.to_vec();
     let size = w.min(h) as f32;
-    let r = size * 0.27;
-    let rim = (size * 0.05).max(1.0);
-    let cx = w as f32 - r - rim;
-    let cy = r + rim;
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            let d = (dx * dx + dy * dy).sqrt();
-            let px = if d <= r {
-                DOT
-            } else if d <= r + rim {
-                RIM
-            } else {
-                continue;
-            };
-            let i = ((y * w + x) * 4) as usize;
-            out[i..i + 4].copy_from_slice(&px);
-        }
-    }
+    let r = size * 0.17;
+    let rim = size * 0.035;
+    let cx = w as f32 - r - rim - size * 0.03;
+    let cy = r + rim + size * 0.03;
+    paint_dot(&mut out, w, h, cx, cy, r, rim);
     out
 }
 
-/// タスクバーのボタンに重ねる小さな赤丸（Windows の overlay icon 用・16x16）。
+/// タスクバーのボタンに重ねる小さな赤丸（Windows の overlay icon 用）。
+/// Windows は印をボタンの右下に置くので、丸も画像の右下寄りに描いてアイコンの角に添わせる。
 pub fn dot_icon() -> Vec<u8> {
-    let transparent = vec![0u8; 16 * 16 * 4];
-    // 16px 全体を丸にしたいので、with_badge と同じ描き方で中央に置く
-    let mut out = transparent;
-    for y in 0..16u32 {
-        for x in 0..16u32 {
-            let dx = x as f32 + 0.5 - 8.0;
-            let dy = y as f32 + 0.5 - 8.0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let px = if d <= 6.0 {
-                DOT
-            } else if d <= 7.5 {
-                RIM
-            } else {
-                continue;
-            };
-            let i = ((y * 16 + x) * 4) as usize;
-            out[i..i + 4].copy_from_slice(&px);
-        }
-    }
+    let n = DOT_ICON_SIZE;
+    let mut out = vec![0u8; (n * n * 4) as usize];
+    let s = n as f32;
+    let r = s * 0.21;
+    let rim = s * 0.055;
+    let c = s - r - rim - s * 0.04;
+    paint_dot(&mut out, n, n, c, c, r, rim);
     out
 }
 
@@ -146,7 +168,7 @@ pub fn apply_unread<R: Runtime>(app: &AppHandle<R>, count: u32) {
         #[cfg(target_os = "windows")]
         {
             let icon = if count > 0 {
-                Some(Image::new_owned(dot_icon(), 16, 16))
+                Some(Image::new_owned(dot_icon(), DOT_ICON_SIZE, DOT_ICON_SIZE))
             } else {
                 None
             };
@@ -216,9 +238,11 @@ mod tests {
         let src = vec![10u8; (w * h * 4) as usize];
         let out = with_badge(&src, w, h);
         assert_eq!(out.len(), src.len());
-        // 右上の丸の中心付近は赤
-        let cx = (w as f32 - 32.0 * 0.27 - 1.6) as u32;
-        let i = ((9 * w + cx) * 4) as usize;
+        // 右上の丸の中心は赤
+        let r = 32.0 * 0.17;
+        let cx = (32.0 - r - 32.0 * 0.035 - 32.0 * 0.03) as u32;
+        let cy = (r + 32.0 * 0.035 + 32.0 * 0.03) as u32;
+        let i = ((cy * w + cx) * 4) as usize;
         assert_eq!(&out[i..i + 4], &DOT);
         // 左下は元のまま
         let j = (((h - 1) * w) * 4) as usize;
@@ -226,12 +250,30 @@ mod tests {
     }
 
     #[test]
-    fn dot_icon_is_16px_with_transparent_corners() {
+    fn dot_icon_is_small_round_and_smooth() {
+        let n = DOT_ICON_SIZE;
         let d = dot_icon();
-        assert_eq!(d.len(), 16 * 16 * 4);
+        assert_eq!(d.len(), (n * n * 4) as usize);
+        // 左上の角は透明（丸が小さい）
         assert_eq!(&d[0..4], &[0, 0, 0, 0]);
-        let center = ((8 * 16 + 8) * 4) as usize;
+        // 丸の中心は赤
+        let s = n as f32;
+        let c = (s - s * 0.21 - s * 0.055 - s * 0.04) as u32;
+        let center = ((c * n + c) * 4) as usize;
         assert_eq!(&d[center..center + 4], &DOT);
+        // 縁は中間の透明度を持つ画素がある（ギザギザでない）
+        let partial = d.chunks(4).filter(|p| p[3] > 0 && p[3] < 255).count();
+        assert!(partial >= 8, "なめらかな縁の画素が少ない: {partial}");
+    }
+
+    /// 目視確認用に PNG の元データを書き出す（通常のテストでは走らない）。
+    #[test]
+    #[ignore]
+    fn dump_preview() {
+        let dir = std::env::var("UNICREW_BADGE_DUMP").expect("UNICREW_BADGE_DUMP");
+        std::fs::write(format!("{dir}/dot.rgba"), dot_icon()).unwrap();
+        let src = vec![0x40u8; 64 * 64 * 4];
+        std::fs::write(format!("{dir}/badge64.rgba"), with_badge(&src, 64, 64)).unwrap();
     }
 
     #[test]
