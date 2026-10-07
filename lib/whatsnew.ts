@@ -13,7 +13,7 @@
 import { compare as compareVersions } from "./semver-mini";
 
 /** ビルド時に NEXT_PUBLIC_UNICREW_VERSION が無いときの fallback。package.json と同じ値にする（機械検査あり）。 */
-const UNICREW_VERSION_FALLBACK = "0.5.2";
+const UNICREW_VERSION_FALLBACK = "0.6.0";
 
 /**
  * 表示中バージョン。正本は package.json（next.config.ts が NEXT_PUBLIC_UNICREW_VERSION に埋める）。
