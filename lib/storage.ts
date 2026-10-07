@@ -2,6 +2,7 @@
 
 import { nanoid } from "nanoid";
 import type { AppSettings, Message, Thread } from "./types";
+import { normalizeModelId } from "./types";
 import { DEFAULT_CHARACTER_ID, getCharacter } from "./characters";
 
 const THREADS_KEY = "unicrew.threads.v2";
@@ -38,7 +39,11 @@ export function loadThreads(): Thread[] {
   try {
     const raw = localStorage.getItem(THREADS_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as Thread[];
+    // 旧版の版数つきモデル名（claude-opus-4-7 等）を別名へ直す。types.ts の normalizeModelId 参照
+    return (JSON.parse(raw) as Thread[]).map((t) => ({
+      ...t,
+      model: normalizeModelId(t.model),
+    }));
   } catch {
     return [];
   }
@@ -83,7 +88,7 @@ export function createThread(opts: {
     title: "新しい会話",
     characterId: charId,
     splitCharacterIds: opts.splitCharacterIds,
-    model: character?.defaultModel || "claude-sonnet-4-6",
+    model: normalizeModelId(character?.defaultModel),
     workspace: opts.workspace ?? null,
     messages: [],
     createdAt: Date.now(),

@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 pub mod providers;
 pub mod trust;
 pub mod observability;
+mod attention;
 pub mod pty;
 
 use providers::types::{AuthMode, NormalizedEvent, PermissionMode, SpawnOpts};
@@ -6160,7 +6161,23 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         // 自動アップデート用。フロントから @tauri-apps/plugin-updater 経由で check / download_and_install を叩く。
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(AgentState::default())
+        // 通知領域のアイコン（作業完了の印・開く・終了）。失敗しても本体は動かす
+        .setup(|app| {
+            if let Err(e) = attention::setup_tray(app.handle()) {
+                eprintln!("[unicrew/tray] 通知領域のアイコンを作れませんでした: {e}");
+            }
+            Ok(())
+        })
+        // 「×で閉じても常駐」が ON のときだけ、メイン窓の × を「隠す」に変える
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if attention::hide_instead_of_close(window) {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_api_key,
             set_api_key,
@@ -6247,6 +6264,9 @@ pub fn run() {
             fetch_github_avatar,
             graphify_update,
             get_lan_ip,
+            attention::set_tray_resident,
+            attention::set_unread_badge,
+            attention::notify_work_done,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

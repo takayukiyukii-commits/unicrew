@@ -13,6 +13,7 @@
  */
 
 import { isTauri } from "./tauri";
+import type { Artifact } from "./turn-artifacts";
 
 const PREVIEW_WINDOW_LABEL = "preview";
 export const PREVIEW_NAVIGATE_EVENT = "preview://navigate";
@@ -95,4 +96,81 @@ export async function openExternal(target: string): Promise<void> {
   } catch (e) {
     console.error("[preview] openExternal failed", e);
   }
+}
+
+// ── 作業ごとの自動プレビュー（2026-10-07）──────────────────────────────
+//
+// AI が1回の作業で作った・直したもの（lib/turn-artifacts.ts）をまとめて渡し、
+// プレビュー窓の左に「どのフォルダに何を作ったか」を並べ、右に中身を出す。
+// 中身の受け渡しは localStorage（同じアプリの窓どうしは同じ保存先を共有する）。
+// URL に全部載せると長くなり、窓の再利用時にも送り直せないため。
+
+
+export const PREVIEW_SESSION_KEY = "unicrew.preview.session.v1";
+
+export interface PreviewSession {
+  /** どの会話の作業か（窓のタイトル用） */
+  title: string;
+  workspace: string | null;
+  items: Artifact[];
+  /** 最初に開くもの（items のどれかの target） */
+  selected: string | null;
+  at: number;
+}
+
+export function loadPreviewSession(): PreviewSession | null {
+  try {
+    const raw = localStorage.getItem(PREVIEW_SESSION_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as PreviewSession;
+    return Array.isArray(v?.items) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 作業の成果物をプレビュー窓に出す。
+ * `focus: false`（自動で開くとき）は、打っている最中の入力欄からフォーカスを奪わない。
+ */
+export async function openPreviewSession(
+  session: PreviewSession,
+  opts: { focus?: boolean } = {},
+): Promise<void> {
+  const focus = opts.focus ?? true;
+  try {
+    localStorage.setItem(PREVIEW_SESSION_KEY, JSON.stringify(session));
+  } catch {
+    /* 容量超過などは無視（窓は前回の中身のまま） */
+  }
+  if (!isTauri()) return;
+  const { WebviewWindow } = await loadWebviewWindow();
+  const existing = await WebviewWindow.getByLabel(PREVIEW_WINDOW_LABEL);
+  if (existing) {
+    const { emitTo } = await loadEvent();
+    await emitTo(PREVIEW_WINDOW_LABEL, PREVIEW_NAVIGATE_EVENT, { session: true });
+    try {
+      await existing.unminimize();
+      await existing.show();
+      if (focus) await existing.setFocus();
+    } catch {
+      /* noop */
+    }
+    return;
+  }
+  const win = new WebviewWindow(PREVIEW_WINDOW_LABEL, {
+    url: `/preview?session=1`,
+    title: "UNICREW プレビュー",
+    width: 1280,
+    height: 840,
+    minWidth: 560,
+    minHeight: 360,
+    resizable: true,
+    decorations: true,
+    center: true,
+    focus,
+  });
+  win.once("tauri://error", (e) => {
+    console.error("[preview window] failed to create", e);
+  });
 }

@@ -2,7 +2,7 @@
 
 import { nanoid } from "nanoid";
 import type { AiTeam, ParticipantSlot } from "./types";
-import { PROVIDER_LABELS, type Provider } from "./types";
+import { PROVIDER_LABELS, normalizeModelId, type Provider } from "./types";
 
 // 監査（ファイルタブR1）: インポート/復元の入力上限。巨大JSONでのUIフリーズ・
 // localStorage 肥大を防ぐ。
@@ -46,7 +46,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
       characterId: "tmpl-ceo",
       role: "moderator",
     },
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     isTemplate: true,
     createdAt: 0,
     updatedAt: 0,
@@ -64,7 +64,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
       { id: "p2", provider: "claude", characterId: "tmpl-cdo" },
       { id: "p3", provider: "claude", characterId: "tmpl-cdo" },
     ],
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "opus",
     isTemplate: true,
     createdAt: 0,
     updatedAt: 0,
@@ -87,7 +87,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
       characterId: "tmpl-ceo",
       role: "moderator",
     },
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     isTemplate: true,
     createdAt: 0,
     updatedAt: 0,
@@ -105,7 +105,7 @@ export const TEMPLATE_TEAMS: AiTeam[] = [
       { id: "p2", provider: "claude", characterId: "tmpl-cso" },
       { id: "p3", provider: "claude", characterId: "tmpl-cpo" },
     ],
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     isTemplate: true,
     createdAt: 0,
     updatedAt: 0,
@@ -123,12 +123,15 @@ export function loadUserTeams(): AiTeam[] {
     // 監査（R1）: 非配列や壊れた要素で getAllTeams/handleCreateFromTeam が
     // TypeError で落ちるのを防ぐ。配列でない/participants が配列でない要素は捨てる。
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (t): t is AiTeam =>
-        !!t &&
-        typeof t === "object" &&
-        Array.isArray((t as { participants?: unknown }).participants),
-    );
+    return parsed
+      .filter(
+        (t): t is AiTeam =>
+          !!t &&
+          typeof t === "object" &&
+          Array.isArray((t as { participants?: unknown }).participants),
+      )
+      // 旧版の版数つきモデル名を別名へ直す（types.ts の normalizeModelId 参照）
+      .map((t) => ({ ...t, defaultModel: normalizeModelId(t.defaultModel) }));
   } catch {
     return [];
   }
@@ -286,9 +289,7 @@ export function importTeamFromJson(json: string): AiTeam {
     participants,
     moderator,
     defaultModel:
-      typeof obj.defaultModel === "string"
-        ? (obj.defaultModel as AiTeam["defaultModel"])
-        : "claude-sonnet-4-6",
+      normalizeModelId(obj.defaultModel),
     isTemplate: false,
     createdAt: now,
     updatedAt: now,

@@ -2,6 +2,7 @@
 
 import { nanoid } from "nanoid";
 import type { Character, ModelId, Provider, Thread } from "./types";
+import { normalizeModelId } from "./types";
 
 /**
  * 組み込みテンプレート。これらは「いきなり使える状態」ではなく、
@@ -24,7 +25,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "素の Claude Code（Anthropic公式CLI）の挙動。役割・人格付けなし。プログラミング全般・調査・要約・自然な対話まで万能。何のキャラを使えばいいか迷ったらこれ。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "claude",
     isTemplate: true,
@@ -40,7 +41,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "素の Codex CLI（OpenAI公式）の挙動。役割・人格付けなし。コード生成・リファクタ・実装の第二意見が得意。Claudeと並列にすると相互レビューになる。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "codex",
     isTemplate: true,
@@ -56,7 +57,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "OSS の OpenCode（sst 製）を Ollama のローカル LLM で動かす。API キー不要・完全無料で起動できる。FreeMode Wizard が終わると最初に立ち上がるキャラ。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "opencode",
     isTemplate: true,
@@ -72,7 +73,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "Alibaba QwenLM の OSS エージェント（Apache-2.0、Claude Code fork）。DashScope の DASHSCOPE_API_KEY が必要。議論モードで Anthropic/OpenAI/Google から独立した中立第三者役を担う。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "qwen",
     isTemplate: true,
@@ -88,7 +89,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "Moonshot AI の Kimi Code CLI を ACP 経由で動かす。OAuth login で認証完結（UNICREW 側にキー管理不要）。長文・自律実行に強み。manual install（Python+uv ベース）。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "kimi",
     isTemplate: true,
@@ -104,7 +105,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "xAI 公式 Grok CLI（@xai-official/grok）を ACP 経由で動かす。認証は `grok login` のデバイスコード方式で CLI 側に完結（UNICREW 側にキー管理不要）。grok-4.6（コンテキスト50万トークン）。Windows ネイティブ対応。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "grok",
     isTemplate: true,
@@ -120,7 +121,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
     description:
       "Cursor 公式 Agent CLI（cursor-agent）を stream-json 経由で動かす。認証は `cursor-agent login` か CURSOR_API_KEY（CLI 側で完結）。GPT / Claude / Gemini 等をモデル指定で切替可能。🚨 Windows はネイティブ非対応のため WSL + cursor-agent 導入が必要（macOS / Linux はネイティブ）。",
     systemPrompt: "",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: null,
     provider: "cursor",
     isTemplate: true,
@@ -159,7 +160,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 
 複数ドメインにまたがる質問は、主担当を決めつつ「[CMOモード／一部CFO観点]」のように補助モードも明示してOK。
 ユーザーが特定モードで固定したい時は明示指示があるはずなので、その時だけ固定する。`,
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: "haiku",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -198,7 +199,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 
 判断材料が足りない時は「決められない、◯◯の数字が必要」と素直に保留する。
 情報が揃っている時は迷わず決める（CEOの仕事は決断であって分析ではない）。`,
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "opus",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -219,7 +220,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - セキュリティ・コスト・保守性の観点を必ず1行入れる
 - 推測ではなく、わからないものは「未確認」と明示
 - コードはTypeScript / Python / SQLを優先、不要な抽象化は嫌う`,
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "opus",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -240,7 +241,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - 提案は必ず「フック→約束→根拠→CTA」の構造
 - 押し売り口調は避ける、本質重視
 - X/Instagram/note/LINE/YouTubeの媒体特性を踏まえる`,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -261,7 +262,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - 反論処理は「共感→質問→再フレーミング→次の一歩」
 - 高圧・煽り口調は厳禁、信頼を最優先
 - 商談は常に「相手の現状→理想→ギャップ→次の行動」で組み立てる`,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -282,7 +283,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - 提案は必ずユーザー視点：「何を理解できるか」を起点
 - "インプット→演習→振り返り→実戦"のサイクルで設計
 - 過剰な情報量を嫌い、削ることを恐れない`,
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "opus",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -302,7 +303,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - 推測値は「推計」と明示し、レンジで答える
 - リスクは過大評価せず、確率と影響度の2軸で整理
 - 法務・税務に関わる断定はせず、専門家確認を促す`,
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -323,7 +324,7 @@ export const TEMPLATE_CHARACTERS: Character[] = [
 - 不明点は確認質問を1つだけしてから動く
 - スケジュール提示は候補3つで提案する癖をつける
 - プロとしての一線は保つ`,
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: "haiku",
     personalityId: "polite",
     provider: "claude",
     isTemplate: true,
@@ -337,7 +338,11 @@ export function loadUserCharacters(): Character[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as Character[];
+    // 旧版の版数つきモデル名を別名へ直す（types.ts の normalizeModelId 参照）
+    return (JSON.parse(raw) as Character[]).map((c) => ({
+      ...c,
+      defaultModel: normalizeModelId(c.defaultModel),
+    }));
   } catch {
     return [];
   }
@@ -421,7 +426,7 @@ export function blankCharacter(): Character {
     systemPrompt: "",
     personalityId: "polite",
     provider: "claude",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "sonnet",
     isTemplate: false,
   };
 }

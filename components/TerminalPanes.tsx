@@ -24,6 +24,7 @@ import {
   Play,
   Plug,
   Copy,
+  Cpu,
 } from "lucide-react";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import {
@@ -34,6 +35,15 @@ import {
 } from "@/lib/terminal-clis";
 import { useTranslation } from "@/lib/i18n";
 import { ptyWriteText, ptyIdForPane } from "@/lib/pty";
+import { WorkDetector } from "@/lib/work-detector";
+import {
+  TERMINAL_MODEL_CHOICES,
+  appendTail,
+  isAwaitingChoice,
+  sequenceFor,
+  splitModelTargets,
+  type TerminalModelChoice,
+} from "@/lib/terminal-model";
 import {
   effortLevelsFor,
   supportsEffort,
@@ -135,6 +145,11 @@ interface Props {
    * ようになったのに、中を覗く手段がターミナル側に無かった。
    */
   worktrees?: { label: string; path: string; branch?: string }[];
+  /**
+   * AI のターミナルが働いたあと静かになった（作業が終わった・確認待ち）とき。
+   * label はペインの名前（例: "2. Claude Code"）。シェルのペインでは呼ばない
+   */
+  onWorkDone?: (label: string, workedMs: number) => void;
 }
 
 const newKey = (prefix: string) =>
@@ -294,6 +309,7 @@ export function TerminalPanes({
   workspace = null,
   onSendToAi,
   worktrees = [],
+  onWorkDone,
 }: Props) {
   const { t } = useTranslation();
   // ターミナル画面の枠もアプリの外観プリセットに追従させる
@@ -401,6 +417,55 @@ export function TerminalPanes({
    */
   const [broadcastOff, setBroadcastOff] = useState<Record<string, boolean>>({});
   const [broadcastBusy, setBroadcastBusy] = useState(false);
+
+  // ── 作業の終わりの見分け（ペインごと。出力の止まり方で判断する）──────────
+  const detectorsRef = useRef<Map<string, WorkDetector>>(new Map());
+  const onWorkDoneRef = useRef(onWorkDone);
+  onWorkDoneRef.current = onWorkDone;
+  /** ペインの key → 通知に出す名前（描画のたびに更新。tick から読む） */
+  const paneLabelsRef = useRef<Map<string, string>>(new Map());
+  /** ペインの key → 最近の出力の末尾（確認画面の見張り用・lib/terminal-model.ts） */
+  const tailsRef = useRef<Map<string, string>>(new Map());
+  const detectorFor = useCallback((key: string) => {
+    let d = detectorsRef.current.get(key);
+    if (!d) {
+      d = new WorkDetector();
+      detectorsRef.current.set(key, d);
+    }
+    return d;
+  }, []);
+  const noteOutput = useCallback(
+    (key: string, text: string) => {
+      detectorFor(key).output(Date.now());
+      tailsRef.current.set(key, appendTail(tailsRef.current.get(key) ?? "", text));
+    },
+    [detectorFor],
+  );
+  const noteInput = useCallback(
+    (key: string) => detectorFor(key).input(Date.now()),
+    [detectorFor],
+  );
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, d] of detectorsRef.current) {
+        const worked = d.tick(now);
+        const label = paneLabelsRef.current.get(key);
+        // 閉じたペインの見分け器は捨てる
+        if (label === undefined) {
+          detectorsRef.current.delete(key);
+          continue;
+        }
+        if (worked !== null) onWorkDoneRef.current?.(label, worked);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // ── モデル一括切替（並べた Claude Code へ同じ /model を流す）──────────
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelBusy, setModelBusy] = useState(false);
+  const modelMenuRef = useRef<HTMLSpanElement>(null);
 
   /** いま表示中のページ id（イベント側から参照するため ref で持つ）。 */
   const activePageIdRef = useRef<string>("");
@@ -587,6 +652,74 @@ export function TerminalPanes({
     t,
   ]);
 
+  /** いま表示しているページの Claude Code ペイン（モデル一括切替の対象）。 */
+  const modelSplit = splitModelTargets(
+    pages.find((pg) => pg.id === resolvedActiveId)?.panes ?? [],
+  );
+
+  /**
+   * 表示中ページの Claude Code 全部へ `/model <別名>` を流す。
+   * 🚨 対象は一斉送信と同じく**アクティブページに限る**（見ていないターミナルを変えない）。
+   * 文字と Enter は分けて送る（lib/terminal-model.ts の sequenceFor 参照）。
+   */
+  const switchAllModels = useCallback(
+    async (model: TerminalModelChoice) => {
+      if (modelBusy) return;
+      const { targets, skipped } = splitModelTargets(
+        pages.find((pg) => pg.id === resolvedActiveId)?.panes ?? [],
+      );
+      setModelMenuOpen(false);
+      if (targets.length === 0) {
+        showToast(t("terminal.modelSwitchNoTarget"), "error");
+        return;
+      }
+      // 許可の確認画面が出ているペインは外す（Enter が「はい」を押してしまう）
+      const waiting = targets.filter((pn) =>
+        isAwaitingChoice(tailsRef.current.get(pn.key) ?? ""),
+      );
+      const sendTo = targets.filter((pn) => !waiting.includes(pn));
+      if (sendTo.length === 0) {
+        showToast(t("terminal.modelSwitchAllWaiting", { n: waiting.length }), "error");
+        return;
+      }
+      setModelBusy(true);
+      const parts = sequenceFor(model);
+      // ペイン同士は並列に送る（6枚を順に待つと遅い）。1ペインの中は順番を守る
+      const results = await Promise.all(
+        sendTo.map(async (pn) => {
+          try {
+            for (let i = 0; i < parts.length; i++) {
+              if (i > 0) await new Promise((r) => setTimeout(r, 150));
+              await ptyWriteText(ptyIdForPane(pn.key), parts[i]);
+            }
+            return true;
+          } catch {
+            // まだ一度も表示していないペインは PTY が開いていない
+            return false;
+          }
+        }),
+      );
+      setModelBusy(false);
+      const ok = results.filter(Boolean).length;
+      const ng = results.length - ok;
+      const base =
+        ng === 0
+          ? t("terminal.modelSwitched", { n: ok, model })
+          : t("terminal.modelSwitchedPartial", { n: ok, ng, model });
+      const extras = [
+        skipped > 0 ? t("terminal.modelSwitchSkipped", { n: skipped }) : "",
+        waiting.length > 0
+          ? t("terminal.modelSwitchWaiting", { n: waiting.length })
+          : "",
+      ].filter(Boolean);
+      showToast(
+        extras.length > 0 ? `${base} ${extras.join(" ")}` : base,
+        ng === 0 && waiting.length === 0 ? "info" : "error",
+      );
+    },
+    [modelBusy, pages, resolvedActiveId, t],
+  );
+
   /**
    * ワークスペースから実行できるタスクを探す（読むだけ・実行はしない）。
    * 見つからなければ空配列。失敗しても例外は投げない（ターミナルを壊さない）。
@@ -649,6 +782,16 @@ export function TerminalPanes({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [integrationOpen]);
 
+  // 外側クリックでモデル一括切替のメニューを閉じる
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!modelMenuRef.current?.contains(e.target as Node)) setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [modelMenuOpen]);
+
   // 外側クリックでタスク一覧を閉じる
   useEffect(() => {
     if (!tasksOpen) return;
@@ -709,6 +852,10 @@ export function TerminalPanes({
 
   const handleClosePane = useCallback(
     (pageId: string, key: string) => {
+      // 閉じたペインの作業見分けを止める（閉じた後に「終わりました」と鳴らさない）
+      paneLabelsRef.current.delete(key);
+      detectorsRef.current.delete(key);
+      tailsRef.current.delete(key);
       setPages((prev) =>
         prev.map((pg) => {
           if (pg.id !== pageId) return pg;
@@ -1001,6 +1148,57 @@ export function TerminalPanes({
           )}
         </span>
 
+        {/* モデル一括切替（このページに Claude Code が1つでもあれば出す） */}
+        {modelSplit.targets.length > 0 && (
+          <span className="relative" ref={modelMenuRef}>
+            <button
+              type="button"
+              onClick={() => setModelMenuOpen((v) => !v)}
+              disabled={modelBusy}
+              className={`p-1 rounded transition disabled:opacity-40 ${
+                modelMenuOpen
+                  ? "bg-[var(--color-accent)] text-white"
+                  : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+              }`}
+              title={t("terminal.modelSwitchTitle")}
+              aria-label={t("terminal.modelSwitchTitle")}
+              aria-expanded={modelMenuOpen}
+              data-testid="terminal-model-switch"
+            >
+              <Cpu size={13} />
+            </button>
+            {modelMenuOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-1 shadow-lg">
+                <div className="px-2 py-1 text-[11px] text-[var(--color-muted)]">
+                  {t("terminal.modelSwitchHeading", {
+                    n: modelSplit.targets.length,
+                  })}
+                </div>
+                {TERMINAL_MODEL_CHOICES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => void switchAllModels(m)}
+                    className="flex w-full items-baseline gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--color-text)] hover:bg-[var(--color-surface)]"
+                    data-testid={`terminal-model-${m}`}
+                  >
+                    <span className="font-medium capitalize">{m}</span>
+                    <span className="text-[10.5px] text-[var(--color-muted)]">
+                      {t(`terminal.modelHint.${m}`)}
+                    </span>
+                  </button>
+                ))}
+                <div className="border-t border-[var(--color-border)] px-2 pt-1 pb-0.5 text-[10.5px] leading-snug text-[var(--color-muted)]">
+                  {modelSplit.skipped > 0
+                    ? `${t("terminal.modelSwitchSkipNote", { n: modelSplit.skipped })} `
+                    : ""}
+                  {t("terminal.modelSwitchNote")}
+                </div>
+              </div>
+            )}
+          </span>
+        )}
+
         {/* 一斉送信の開閉（1 ペインのときは意味が無いので出さない） */}
         {(pages.find((pg) => pg.id === resolvedActiveId)?.panes.length ?? 0) >
           1 && (
@@ -1090,6 +1288,11 @@ export function TerminalPanes({
                   ? terminalCliById(pane.cliId)
                   : undefined;
               const isMax = maxKey === pane.key;
+              // 作業終わりの通知に出す名前（例: "2. Claude Code"）
+              paneLabelsRef.current.set(
+                pane.key,
+                `${idx + 1}. ${cli?.label ?? (pane.kind === "shell" ? t("terminal.shellBadge") : "Claude Code")}`,
+              );
               // 🚨 最大化は「全面に広げて上に重ねる」だけ。他のペインを
               // 描画から外すと unmount → PTY が死ぬ（セッションが消える）。
               // 変数名は既存の placement()（グリッド上の行・列を決める関数）と
@@ -1363,6 +1566,17 @@ export function TerminalPanes({
                       effort={pane.effort}
                       visible={isActivePage}
                       onActivity={(k) => markPageActivity(pg.id, k)}
+                      onWorkOutput={
+                        // AI のペインだけ見分ける（シェルは常駐サーバーのログで鳴りっぱなしになる）
+                        pane.kind === "claude" || pane.cliId
+                          ? (text) => noteOutput(pane.key, text)
+                          : undefined
+                      }
+                      onWorkInput={
+                        pane.kind === "claude" || pane.cliId
+                          ? () => noteInput(pane.key)
+                          : undefined
+                      }
                       onSendToAi={
                         onSendToAi
                           ? (text) =>

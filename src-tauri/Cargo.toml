@@ -16,7 +16,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.1", features = [] }
+# tray-icon / image-png: 通知領域の常駐アイコンと「終わった作業あり」の印（src/attention.rs）
+tauri = { version = "2.1", features = ["tray-icon", "image-png"] }
+# 作業が終わったときの OS 通知（Rust から直接出す。画面側の権限は足さない）
+tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"
 tauri-plugin-shell = "2.0"

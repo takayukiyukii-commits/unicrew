@@ -1499,6 +1499,55 @@ export function SettingsModal({
           </section>
 
           <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
+            <h4 className="font-semibold text-[13px]">{tr("settings.work.heading")}</h4>
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.autoPreview ?? true}
+                onChange={(e) => onSave({ ...settings, autoPreview: e.target.checked })}
+                className="w-4 h-4 mt-0.5"
+                data-testid="setting-autoPreview"
+              />
+              <span className="flex-1">
+                <span className="font-medium">{tr("settings.work.autoPreviewTitle")}</span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  {tr("settings.work.autoPreviewBody")}
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.notifyOnDone ?? true}
+                onChange={(e) => onSave({ ...settings, notifyOnDone: e.target.checked })}
+                className="w-4 h-4 mt-0.5"
+                data-testid="setting-notifyOnDone"
+              />
+              <span className="flex-1">
+                <span className="font-medium">{tr("settings.work.notifyTitle")}</span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  {tr("settings.work.notifyBody")}
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.trayResident ?? true}
+                onChange={(e) => onSave({ ...settings, trayResident: e.target.checked })}
+                className="w-4 h-4 mt-0.5"
+                data-testid="setting-trayResident"
+              />
+              <span className="flex-1">
+                <span className="font-medium">{tr("settings.work.trayTitle")}</span>
+                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
+                  {tr("settings.work.trayBody")}
+                </span>
+              </span>
+            </label>
+          </section>
+
+          <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
             <h4 className="font-semibold text-[13px]">プライバシー</h4>
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
               <input

@@ -110,6 +110,8 @@ export function InteractiveTerminal({
   onCwd,
   visible = true,
   onActivity,
+  onWorkOutput,
+  onWorkInput,
   onSendToAi,
   initialCwd = null,
   initialInput,
@@ -158,6 +160,13 @@ export function InteractiveTerminal({
    * 出力のたびに呼ぶと再描画が走るので、非表示期間ごとに最大 1 回に絞っている。
    */
   onActivity?: (kind: "output" | "exit", info?: PtyExitInfo) => void;
+  /**
+   * 出力が来るたびに呼ぶ（作業の終わりの見分け用・lib/work-detector.ts）。
+   * 🚨 親で setState しないこと（出力ごとに 24 ペイン分の再描画になる）。ref に記録するだけにする
+   */
+  onWorkOutput?: (text: string) => void;
+  /** 利用者がこのペインに文字を打ったとき（打鍵の表示を「AI の作業」と数えないため） */
+  onWorkInput?: () => void;
   /**
    * ターミナルで選択したテキストを AI へ渡す（未指定ならボタンを出さない）。
    * 折り返し改行は取り除いた本文を渡す（コピーと同じ整形）。
@@ -330,6 +339,10 @@ export function InteractiveTerminal({
   const visibleRef = useRef(visible);
   const onActivityRef = useRef(onActivity);
   onActivityRef.current = onActivity;
+  const onWorkOutputRef = useRef(onWorkOutput);
+  onWorkOutputRef.current = onWorkOutput;
+  const onWorkInputRef = useRef(onWorkInput);
+  onWorkInputRef.current = onWorkInput;
   /** 非表示期間ごとに 1 回だけ通知するためのフラグ。 */
   const activityFiredRef = useRef(false);
   useEffect(() => {
@@ -1235,6 +1248,12 @@ export function InteractiveTerminal({
             /* observer hook must never break the terminal */
           }
         }
+        // 作業の終わりの見分け・確認画面の見張り（lib/work-detector.ts / lib/terminal-model.ts）
+        try {
+          onWorkOutputRef.current?.(text);
+        } catch {
+          /* 見分けの失敗でターミナルを壊さない */
+        }
         // シェル統合（OSC 133/7）。入れていないシェルでは 1 件も拾えず何も起きない。
         if (text) {
           const [ready, pending] = splitPendingOsc(oscCarry.value + text);
@@ -1394,6 +1413,11 @@ export function InteractiveTerminal({
 
       term.onData((d: string) => {
         void ptyWriteText(id, d);
+        try {
+          onWorkInputRef.current?.();
+        } catch {
+          /* noop */
+        }
         // 送った指示を写し取る（画面を読むのではなく、送った文字を正本にする）
         setEcho((prev) => feedInput(prev, d));
         // 文字入力・Enter で claude(TUI) は自動的に最下部へ戻るため、

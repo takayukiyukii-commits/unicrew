@@ -1,13 +1,41 @@
-export type ModelId =
-  | "claude-opus-4-7"
-  | "claude-sonnet-4-6"
-  | "claude-haiku-4-5-20251001";
+/**
+ * チャットで使う Claude のモデル。**版数を書かず、CLI の別名（opus / sonnet / haiku）で持つ。**
+ *
+ * 🚨 2026-10-07 実測：以前は `claude-opus-4-7` のように版数を固定していたため、
+ *    CLI が新しいモデルを出しても古いモデルで動き続けていた。古いモデルは
+ *    ①1トークンあたりの単価が高い（Opus 4.7 は Opus 5.5 の約1.25倍、Sonnet 4.6 は Sonnet 5.5 の約1.5倍）
+ *    ②既定の思考の深さが深い（Opus 4.7 = xhigh / Sonnet 4.6 = high。現行モデルは medium）
+ *    の二重で、同じ作業をターミナルより多く使っていた（ターミナルは版数を渡さない）。
+ *    別名を渡すと CLI が常に現行モデルを選ぶ（実測: opus→claude-opus-5-5 / sonnet→claude-sonnet-5-5）。
+ */
+export type ModelId = "opus" | "sonnet" | "haiku";
 
 export const MODEL_LABELS: Record<ModelId, string> = {
-  "claude-opus-4-7": "Opus 4.7（最強・じっくり）",
-  "claude-sonnet-4-6": "Sonnet 4.6（バランス）",
-  "claude-haiku-4-5-20251001": "Haiku 4.5（高速）",
+  opus: "Opus（最強・じっくり）",
+  sonnet: "Sonnet（バランス）",
+  haiku: "Haiku（高速・節約）",
 };
+
+/**
+ * 保存済みの値（旧版の `claude-opus-4-7` など）を別名へ直す。
+ * 読めない値は sonnet に倒す（チャットの既定と同じ）。
+ */
+export function normalizeModelId(m: unknown): ModelId {
+  if (typeof m !== "string") return "sonnet";
+  const s = m.toLowerCase();
+  if (s === "opus" || s === "sonnet" || s === "haiku") return s;
+  if (s.includes("opus")) return "opus";
+  if (s.includes("haiku")) return "haiku";
+  return "sonnet";
+}
+
+/**
+ * CLI に渡すモデル名。Claude にだけ別名を渡し、他社の CLI には渡さない（空＝その CLI の既定）。
+ * 他社 CLI に `sonnet` を渡すと、モデルが無いエラーで起動直後に落ちる。
+ */
+export function cliModelFor(provider: string, model: unknown): string {
+  return provider === "claude" ? normalizeModelId(model) : "";
+}
 
 export type Role = "user" | "assistant";
 
@@ -397,6 +425,15 @@ export interface AppSettings {
    * 未設定なら globals.css 既定＝既存ユーザーは無変化。
    */
   appearance?: { preset?: string; bg?: string; accent?: string };
+  /**
+   * AI の作業が終わったとき、作った Web ページ・文章・画像をプレビュー窓に自動で出す（既定 ON）。
+   * 入力欄のフォーカスは奪わない。lib/turn-artifacts.ts / lib/preview-window.ts
+   */
+  autoPreview?: boolean;
+  /** 作業が1つ終わるたびに OS の通知を出す（既定 ON）。lib/attention.ts */
+  notifyOnDone?: boolean;
+  /** × で閉じても通知領域に常駐する（既定 ON）。終了は通知領域のアイコンの右クリックから */
+  trayResident?: boolean;
   // apiKey は OS Keychain（Tauri）に格納するためここに置かない
   // ブラウザdev時のみ localStorage 経由で別キー保管（lib/tauri.ts）
 }

@@ -190,7 +190,10 @@ import type {
   Thread,
   ToolUseBlock,
 } from "@/lib/types";
-import { PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/types";
+import { cliModelFor, PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/types";
+import { collectArtifacts, pickPrimary } from "@/lib/turn-artifacts";
+import { openPreviewSession } from "@/lib/preview-window";
+import { applyTrayResident, clearUnread, reportWorkDone } from "@/lib/attention";
 
 interface PendingSend {
   text: string;
@@ -651,6 +654,43 @@ export default function Page() {
   useEffect(() => {
     applyAppearance(settings.appearance);
   }, [settings.appearance]);
+
+  // 作業完了の知らせ（通知・自動プレビュー）はイベントの中から読むので、最新の設定を ref に置く
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  // × で閉じても常駐（Rust 側は画面からの指示があるまで OFF＝画面が壊れていても終われる）
+  useEffect(() => {
+    void applyTrayResident(settings.trayResident ?? true);
+  }, [settings.trayResident]);
+
+  // 窓が前に来た＝見たので、通知領域・タスクバーの「終わった作業あり」の印を消す
+  useEffect(() => {
+    const onSeen = () => {
+      if (document.visibilityState === "visible") void clearUnread();
+    };
+    window.addEventListener("focus", onSeen);
+    document.addEventListener("visibilitychange", onSeen);
+    return () => {
+      window.removeEventListener("focus", onSeen);
+      document.removeEventListener("visibilitychange", onSeen);
+    };
+  }, []);
+
+  /** ターミナルの AI の作業が止まった（終わった・確認待ち）とき。 */
+  const handleTerminalWorkDone = useCallback(
+    (label: string, workedMs: number) => {
+      const s = settingsRef.current;
+      void reportWorkDone({
+        title: tr("attention.terminalDoneTitle", { label }),
+        body: tr("attention.terminalDoneBody", {
+          sec: Math.round(workedMs / 1000),
+        }),
+        notify: s.notifyOnDone ?? true,
+      });
+    },
+    [tr],
+  );
 
   // 匿名の起動記録（インストール数を数えるためだけ・設定でオフにできる）。
   // 🚨 送るのは乱数ID・バージョン・OSの3つだけ。PRIVACY.md と必ず一致させること。
@@ -1151,7 +1191,9 @@ export default function Page() {
     }
 
     if (event.kind === "result") {
+      const doneDraft = draftsRef.current[sid];
       finalizeDraft(sid);
+      if (doneDraft) onTurnDone(doneDraft);
       return;
     }
 
@@ -1175,6 +1217,51 @@ export default function Page() {
       finalizeDraft(sid);
     }
   }
+
+  /**
+   * AI の作業が1つ終わったとき（result が届いたとき）。
+   * ①作った Web ページ・文章・画像をプレビュー窓に出す ②OS の通知とタスクバーの印。
+   * 監査役・議論の審判は対象外（利用者の作業ではない）。中身ゼロの応答も知らせない。
+   */
+  const onTurnDone = (d: ActiveDraft) => {
+    if (d.audit || d.isModerator || d.blocks.length === 0) return;
+    const s = settingsRef.current;
+    const thread = threadsRef.current.find((t) => t.id === d.threadId);
+    const title = thread?.title ?? "UNICREW";
+    const arts = collectArtifacts(d.blocks, thread?.workspace ?? null);
+    const primary = pickPrimary(arts);
+    if ((s.autoPreview ?? true) && primary) {
+      void openPreviewSession(
+        {
+          title,
+          workspace: thread?.workspace ?? null,
+          items: arts,
+          selected: primary.target,
+          at: Date.now(),
+        },
+        { focus: false },
+      ).catch(() => {});
+    }
+    const lastText = [...d.blocks]
+      .reverse()
+      .find((b): b is TextBlock => b.kind === "text" && b.text.trim() !== "");
+    const body =
+      arts.length > 0
+        ? tr("attention.chatDoneBodyFiles", {
+            n: arts.length,
+            names: arts
+              .slice(-3)
+              .map((a) => a.name)
+              .join("、"),
+          })
+        : (lastText?.text.trim().replace(/\s+/g, " ").slice(0, 80) ??
+          tr("attention.chatDoneBodyPlain"));
+    void reportWorkDone({
+      title: tr("attention.chatDoneTitle", { title }),
+      body,
+      notify: s.notifyOnDone ?? true,
+    });
+  };
 
   const finalizeDraft = (sid: string) => {
     const d = draftsRef.current[sid];
@@ -2480,7 +2567,8 @@ export default function Page() {
       sessionId: sid,
       workspace: slotCwd,
       systemPrompt: promptWithSide,
-      model: thread.model,
+      // 版数つきの古いモデル名で起動しない／他社 CLI に Claude の名前を渡さない（types.ts 参照）
+      model: cliModelFor(slot.provider, thread.model),
       authMode: settings.authMode,
       apiKey,
       provider: slot.provider,
@@ -2888,7 +2976,7 @@ ${command}
         sessionId: sid,
         workspace: cwd,
         systemPrompt: buildEffectiveSystemPrompt(auditorSystemPrompt(), null, false, "plan"),
-        model: thread.model,
+        model: cliModelFor(auditor, thread.model),
         authMode: settings.authMode,
         apiKey,
         provider: auditor,
@@ -4332,6 +4420,7 @@ ${command}
           <TerminalPanes
             workspace={activeThread?.workspace ?? null}
             onSendToAi={handleTerminalTextToAi}
+            onWorkDone={handleTerminalWorkDone}
             worktrees={
               activeThread
                 ? effectiveParticipants(activeThread)
