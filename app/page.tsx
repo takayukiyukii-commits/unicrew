@@ -194,6 +194,8 @@ import { cliModelFor, PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/t
 import { collectArtifacts, pickPrimary } from "@/lib/turn-artifacts";
 import { openPreviewSession } from "@/lib/preview-window";
 import { applyTrayResident, clearUnread, reportWorkDone } from "@/lib/attention";
+import { summarizeInstruction } from "@/lib/claude-title";
+import type { WorkDoneDetail } from "@/components/TerminalPanes";
 
 interface PendingSend {
   text: string;
@@ -679,15 +681,35 @@ export default function Page() {
 
   /** ターミナルの AI の作業が止まった（終わった・確認待ち）とき。 */
   const handleTerminalWorkDone = useCallback(
-    (label: string, workedMs: number) => {
+    (label: string, workedMs: number, detail?: WorkDoneDetail) => {
       const s = settingsRef.current;
-      void reportWorkDone({
-        title: tr("attention.terminalDoneTitle", { label }),
-        body: tr("attention.terminalDoneBody", {
-          sec: Math.round(workedMs / 1000),
-        }),
-        notify: s.notifyOnDone ?? true,
-      });
+      const sec = Math.round(workedMs / 1000);
+      const dur =
+        sec >= 60
+          ? tr("attention.durMin", { n: Math.round(sec / 60) })
+          : tr("attention.durSec", { n: sec });
+      if (!detail) {
+        // Claude Code 以外の AI（終わりを出力の止まり方で推測している）
+        void reportWorkDone({
+          title: tr("attention.terminalDoneTitle", { label }),
+          body: tr("attention.terminalDoneBody", { sec }),
+          notify: s.notifyOnDone ?? true,
+        });
+        return;
+      }
+      // Claude Code（止まった瞬間をタイトルで取っている）。何の作業かを本文に書く
+      const what = summarizeInstruction(detail.instruction);
+      const title = detail.waiting
+        ? tr("attention.terminalWaitingTitle", { label })
+        : tr("attention.terminalFinishedTitle", { label });
+      const body = detail.waiting
+        ? what
+          ? tr("attention.terminalWaitingBody", { what })
+          : tr("attention.terminalWaitingBodyPlain")
+        : what
+          ? tr("attention.terminalFinishedBody", { what, dur })
+          : tr("attention.terminalFinishedBodyPlain", { dur });
+      void reportWorkDone({ title, body, notify: s.notifyOnDone ?? true });
     },
     [tr],
   );

@@ -56,6 +56,14 @@ import {
   appendTail,
 } from "@/lib/terminal-status";
 import { feedInput, EMPTY_ECHO, type EchoState } from "@/lib/terminal-input-echo";
+import {
+  ClaudeTitleTracker,
+  CLAUDE_BLINK_WINDOW_MS,
+  CLAUDE_IDLE_GRACE_MS,
+  classifyClaudeTitle,
+  looksLikeWaiting,
+} from "@/lib/claude-title";
+import { isAwaitingChoice } from "@/lib/terminal-model";
 import { showsDefaultEffortBadge } from "@/lib/terminal-effort";
 import {
   parseShellEvents,
@@ -113,6 +121,8 @@ export function InteractiveTerminal({
   onActivity,
   onWorkOutput,
   onWorkInput,
+  onClaudeStop,
+  onClaudeTitleSeen,
   onSendToAi,
   initialCwd = null,
   initialInput,
@@ -168,6 +178,13 @@ export function InteractiveTerminal({
   onWorkOutput?: (text: string) => void;
   /** 利用者がこのペインに文字を打ったとき（打鍵の表示を「AI の作業」と数えないため） */
   onWorkInput?: () => void;
+  /**
+   * Claude Code が止まった瞬間（タイトルが作業中→✳・lib/claude-title.ts）。
+   * waiting = 画面が許可の確認になっている／instruction = 最後に送った指示
+   */
+  onClaudeStop?: (ev: { workedMs: number; waiting: boolean; instruction: string | null }) => void;
+  /** このペインで Claude Code の作業中タイトルを初めて見たとき（以後はタイトルで判定する） */
+  onClaudeTitleSeen?: () => void;
   /**
    * ターミナルで選択したテキストを AI へ渡す（未指定ならボタンを出さない）。
    * 折り返し改行は取り除いた本文を渡す（コピーと同じ整形）。
@@ -333,6 +350,11 @@ export function InteractiveTerminal({
 
   // ── 直近に送った指示のピン留め ─────────────────────────────
   const [echo, setEcho] = useState<EchoState>(EMPTY_ECHO);
+  /** 通知の本文用（タイトルのイベントから読むので ref に写す） */
+  const echoRef = useRef<EchoState>(EMPTY_ECHO);
+  echoRef.current = echo;
+  /** PTY から出力が届いた回数（止まった後も出力が続くか＝確認待ちか、を見る） */
+  const outputCountRef = useRef(0);
   const [pinOpen, setPinOpen] = useState(true);
   const [pinExpanded, setPinExpanded] = useState(false);
 
@@ -344,6 +366,10 @@ export function InteractiveTerminal({
   onWorkOutputRef.current = onWorkOutput;
   const onWorkInputRef = useRef(onWorkInput);
   onWorkInputRef.current = onWorkInput;
+  const onClaudeStopRef = useRef(onClaudeStop);
+  onClaudeStopRef.current = onClaudeStop;
+  const onClaudeTitleSeenRef = useRef(onClaudeTitleSeen);
+  onClaudeTitleSeenRef.current = onClaudeTitleSeen;
   /** 非表示期間ごとに 1 回だけ通知するためのフラグ。 */
   const activityFiredRef = useRef(false);
   useEffect(() => {
@@ -826,6 +852,53 @@ export function InteractiveTerminal({
         /* 非対応版では既定のまま */
       }
       term.open(ref.current);
+
+      // ── Claude Code の「止まった瞬間」をタイトルで取る（lib/claude-title.ts）──
+      // 出力の量で推測するより正確。止まったときの画面が許可の確認なら「確認待ち」として知らせる
+      const titleTracker = new ClaudeTitleTracker();
+      let titleSeenSent = false;
+      let settleTimer: ReturnType<typeof setTimeout> | null = null;
+      const readScreen = (): string => {
+        try {
+          const b = term.buffer.active;
+          const lines: string[] = [];
+          for (let i = Math.max(0, b.length - term.rows); i < b.length; i++) {
+            lines.push(b.getLine(i)?.translateToString(true) ?? "");
+          }
+          return lines.join("\n");
+        } catch {
+          return "";
+        }
+      };
+      term.onTitleChange((title: string) => {
+        titleTracker.feed(title, Date.now());
+        if (titleTracker.seen && !titleSeenSent) {
+          titleSeenSent = true;
+          onClaudeTitleSeenRef.current?.();
+        }
+        if (classifyClaudeTitle(title) !== "idle") return;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(() => {
+          settleTimer = null;
+          if (disposed) return;
+          const worked = titleTracker.settle(Date.now());
+          if (worked === null) return;
+          // 止まった後も出力が続くか少し見る（確認待ちは「●」の点滅で出力が続く）
+          const before = outputCountRef.current;
+          const instruction = echoRef.current.last;
+          setTimeout(() => {
+            if (disposed) return;
+            // 見ている間に作業へ戻った（すぐ許可された等）なら知らせない
+            if (titleTracker.isWorking()) return;
+            const blinks = outputCountRef.current - before;
+            onClaudeStopRef.current?.({
+              workedMs: worked,
+              waiting: looksLikeWaiting(blinks) || isAwaitingChoice(readScreen()),
+              instruction,
+            });
+          }, CLAUDE_BLINK_WINDOW_MS);
+        }, CLAUDE_IDLE_GRACE_MS + 50);
+      });
       termRef.current = term;
 
       // ── 右端ドラッグ・スクロールバー（設計書①）──────────────────────
@@ -1255,6 +1328,7 @@ export function InteractiveTerminal({
             /* observer hook must never break the terminal */
           }
         }
+        outputCountRef.current += 1;
         // 作業の終わりの見分け・確認画面の見張り（lib/work-detector.ts / lib/terminal-model.ts）
         try {
           onWorkOutputRef.current?.(text);

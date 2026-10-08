@@ -150,7 +150,15 @@ interface Props {
    * AI のターミナルが働いたあと静かになった（作業が終わった・確認待ち）とき。
    * label はペインの名前（例: "2. Claude Code"）。シェルのペインでは呼ばない
    */
-  onWorkDone?: (label: string, workedMs: number) => void;
+  onWorkDone?: (label: string, workedMs: number, detail?: WorkDoneDetail) => void;
+}
+
+/** 作業の終わりの詳しい中身（Claude Code はタイトルで正確に取れるので付く） */
+export interface WorkDoneDetail {
+  /** 許可の確認で止まっている（終わったのではない） */
+  waiting: boolean;
+  /** 最後に送った指示 */
+  instruction: string | null;
 }
 
 const newKey = (prefix: string) =>
@@ -427,6 +435,11 @@ export function TerminalPanes({
   const paneLabelsRef = useRef<Map<string, string>>(new Map());
   /** ペインの key → 最近の出力の末尾（確認画面の見張り用・lib/terminal-model.ts） */
   const tailsRef = useRef<Map<string, string>>(new Map());
+  /**
+   * タイトルで終わりを取れるペイン（Claude Code）。ここに入ったペインは
+   * 出力量による推測（WorkDetector）では鳴らさない＝誤報を出さない
+   */
+  const titleAwareRef = useRef<Set<string>>(new Set());
   const detectorFor = useCallback((key: string) => {
     let d = detectorsRef.current.get(key);
     if (!d) {
@@ -457,6 +470,7 @@ export function TerminalPanes({
           detectorsRef.current.delete(key);
           continue;
         }
+        if (titleAwareRef.current.has(key)) continue;
         if (worked !== null) onWorkDoneRef.current?.(label, worked);
       }
     }, 1000);
@@ -873,6 +887,7 @@ export function TerminalPanes({
       paneLabelsRef.current.delete(key);
       detectorsRef.current.delete(key);
       tailsRef.current.delete(key);
+      titleAwareRef.current.delete(key);
       setPages((prev) =>
         prev.map((pg) => {
           if (pg.id !== pageId) return pg;
@@ -1605,6 +1620,15 @@ export function TerminalPanes({
                           ? () => noteInput(pane.key)
                           : undefined
                       }
+                      onClaudeTitleSeen={() => titleAwareRef.current.add(pane.key)}
+                      onClaudeStop={(ev) => {
+                        const label = paneLabelsRef.current.get(pane.key);
+                        if (label === undefined) return; // 閉じたペイン
+                        onWorkDoneRef.current?.(label, ev.workedMs, {
+                          waiting: ev.waiting,
+                          instruction: ev.instruction,
+                        });
+                      }}
                       onSendToAi={
                         onSendToAi
                           ? (text) =>
