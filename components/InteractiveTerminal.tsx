@@ -797,6 +797,12 @@ export function InteractiveTerminal({
         fontSize: fontSizeRef.current,
         // 配色は画面の外観プリセットに追従する。明るいテーマでは従来と同じ値。
         theme: themeRef.current,
+        // 🚨 背景との明暗差が足りない文字は自動で読める色に寄せる（WCAG AA = 4.5）。
+        //    Claude Code はダークテーマのとき、質問の選択肢などを RGB の白で直接描く。
+        //    RGB 指定は theme の色の置き換えを素通りするので、明るい背景だと白地に白で
+        //    読めなかった（2026-10-08 利用者報告）。暗い背景では普段の文字はもともと
+        //    十分な差があるので見た目は変わらない。
+        minimumContrastRatio: 4.5,
       });
       fit = new FitAddon();
       term.loadAddon(fit);
