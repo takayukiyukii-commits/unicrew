@@ -84,7 +84,8 @@ ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apa
 
 ## 必要環境
 
-- **OS**: Windows 10 1809+ / Windows 11 / macOS / Linux（3 OS 分のインストーラーを Releases で配布）
+- **OS**: Windows 10 1809+ / Windows 11 / macOS 11+ / Linux（3 OS 分のインストーラーを Releases で配布）
+  - macOS は **Safari 15.4 以上**が必要です（UNICREW の画面は Mac に入っている Safari の部品で表示されます）。古い場合は「ソフトウェアアップデート」で Safari か macOS を更新してください。足りないときはアプリが起動時に案内を表示します
 - **AI を動かすために、以下のいずれか 1 つ以上**:
   - Claude Pro / Max のサブスクリプション
   - ChatGPT Plus / Pro のサブスクリプション
@@ -114,7 +115,7 @@ ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apa
 | OS | 署名 | 初回起動時 |
 |---|---|---|
 | **Windows** | **ZUBOLAND株式会社名義で署名済み**（v0.2.47〜） | 通常は警告が出ません。出た場合は「詳細情報」→「実行」で、発行元が ZUBOLAND株式会社 であることを確認してください |
-| **macOS** | 未署名（Apple Developer Program 未加入のため） | Gatekeeper → アプリを右クリック →「開く」 |
+| **macOS** | 未署名（Apple Developer Program 未加入のため） | 一度開こうとして警告を閉じたあと、「システム設定」→「プライバシーとセキュリティ」→「このまま開く」（macOS 14 以前はアプリを右クリック →「開く」でも可） |
 | **Linux** | 未署名 | AppImage は実行権限を付けてから起動してください（`chmod +x`） |
 
 配布物には Tauri Updater 用の署名ファイル（`.sig`）が付いており、自動更新はこの署名を検証してから適用されます。

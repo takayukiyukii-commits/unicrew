@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 import {
   RefreshCw,
   ExternalLink,
@@ -381,7 +380,7 @@ export function PreviewWindow() {
             <div className="h-full overflow-auto" data-testid="preview-doc">
               {doc.markdown ? (
                 <article className="prose prose-sm max-w-3xl mx-auto px-8 py-6 text-[14px] leading-7 text-neutral-800 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-3 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mt-6 [&_h2]:mb-2 [&_h3]:font-bold [&_h3]:mt-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-2 [&_code]:bg-neutral-100 [&_code]:px-1 [&_code]:rounded [&_pre]:bg-neutral-100 [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto [&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_th]:border [&_th]:px-2 [&_blockquote]:border-l-4 [&_blockquote]:pl-3 [&_blockquote]:text-neutral-600 [&_a]:text-blue-600 [&_a]:underline">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{doc.text}</ReactMarkdown>
+                  <Markdown>{doc.text}</Markdown>
                 </article>
               ) : (
                 <pre className="px-6 py-4 text-[12.5px] leading-6 whitespace-pre-wrap break-words font-mono text-neutral-800">

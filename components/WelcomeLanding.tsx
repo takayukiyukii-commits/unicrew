@@ -97,9 +97,6 @@ export function WelcomeLanding({
           />
           <h1 className="text-3xl font-bold tracking-tight text-[var(--color-text)] mb-2">
             UNICREW
-            <span className="ml-2 text-[11px] align-middle px-2 py-0.5 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-semibold">
-              β
-            </span>
           </h1>
           <p className="text-[15px] text-[var(--color-muted)]">
             {t("welcome.tagline")}

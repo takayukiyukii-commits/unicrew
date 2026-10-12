@@ -14,6 +14,7 @@ pub mod trust;
 pub mod observability;
 mod attention;
 mod voice;
+mod thread_store;
 pub mod pty;
 
 use providers::types::{AuthMode, NormalizedEvent, PermissionMode, SpawnOpts};
@@ -6180,6 +6181,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            thread_store::threads_load_all,
+            thread_store::thread_write,
+            thread_store::thread_delete,
+            thread_store::threads_backup_legacy,
+            thread_store::thread_write_now,
+            thread_store::threads_flush,
             get_api_key,
             set_api_key,
             delete_api_key,
@@ -6270,8 +6277,15 @@ pub fn run() {
             attention::notify_work_done,
             voice::start_voice_typing,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // 終了時に、会話の書き残しを書き切ってから終わる（src/thread_store.rs・最大5秒）。
+            // それでも保存できなかった会話は記録して、次の起動で知らせる
+            if let tauri::RunEvent::Exit = event {
+                thread_store::flush_on_exit(app, std::time::Duration::from_secs(5));
+            }
+        });
 }
 
 #[cfg(test)]

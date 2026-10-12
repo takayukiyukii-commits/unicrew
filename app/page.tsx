@@ -87,6 +87,8 @@ import {
   loadLastWorkspace,
   loadSettings,
   loadThreads,
+  loadThreadsAsync,
+  mergeLoadedThreads,
   saveLastWorkspace,
   saveSettings,
   saveThreads,
@@ -743,11 +745,37 @@ export default function Page() {
 
   // hydrate
   useEffect(() => {
-    const t = loadThreads();
     const s = loadSettings();
-    setThreads(t);
     setSettings(s);
-    setHydrated(true);
+    // 会話は配布アプリではファイルから読む（lib/storage.ts の loadThreadsAsync）。
+    // 読み終わるまで hydrated を立てない＝空の一覧で保存を走らせない
+    void (async () => {
+      try {
+        const r = await loadThreadsAsync(isTauri());
+        // 読み込み中に作った会話は消さずに足す（2026-10-13 監査）
+        setThreads((prev) => mergeLoadedThreads(r.threads, prev));
+        if (r.migrated > 0) showToast(tr("storage.migrated", { count: r.migrated }));
+        if (r.broken.length > 0) {
+          showToast(tr("storage.broken", { count: r.broken.length, names: r.broken.join(", ") }), "error");
+        }
+        if (r.exitErrors.length > 0) {
+          // 前回の終了の間際に保存できなかった会話（画面が閉じた後の失敗は、その場では知らせられない）
+          const titleOf = (id: string) => r.threads.find((t) => t.id === id)?.title ?? id;
+          showToast(
+            tr("storage.exitErrors", {
+              count: r.exitErrors.length,
+              names: r.exitErrors.map((x) => titleOf(x.id)).join("、"),
+            }),
+            "error",
+          );
+        }
+      } catch (e) {
+        // ファイルから読めないときは、従来の保存（localStorage）で開く
+        setThreads((prev) => mergeLoadedThreads(loadThreads(), prev));
+        showToast(tr("storage.saveFailed", { message: e instanceof Error ? e.message : String(e) }), "error");
+      }
+      setHydrated(true);
+    })();
     if (typeof window !== "undefined") {
       const v = localStorage.getItem("unicrew.explorerOpen");
       if (v === "1") setExplorerOpen(true);
@@ -791,6 +819,7 @@ export default function Page() {
         }
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1032,7 +1061,14 @@ export default function Page() {
 
   // 20. 保存（localStorage）の失敗を利用者に見せる（2026-09-04 監査）
   useEffect(() => {
-    setThreadsSaveErrorHandler((message) => showToast(tr("storage.saveFailed", { message }), "error"));
+    setThreadsSaveErrorHandler((message, title) =>
+      showToast(
+        title !== undefined
+          ? tr("storage.saveFailedThread", { title, message })
+          : tr("storage.saveFailed", { message }),
+        "error",
+      ),
+    );
     return () => setThreadsSaveErrorHandler(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

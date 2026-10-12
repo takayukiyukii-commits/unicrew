@@ -17,6 +17,7 @@
 - 🚨 他社CLIの引数を触ったら `python scripts/verify_codex_route.py` を通す（6項目・全組み合わせを実際に起動する）。**自社コードを1文字も変えていなくても、相手がフラグを整理した瞬間に壊れる**。2026-09-01 実測＝`codex exec --ask-for-approval` が消えており、**Planモード×Codexは新規・再開の両方で exit code 2 の起動即死**だった（UIからは「応答が来ない」としか見えない）。`codex exec` と `codex exec resume` で使えるフラグが違う（`-C` `-s/--sandbox` は resume に無い／`-c` `-i/--image` は両方にある）
 - 🚨 AI へ渡す本文に **CLI 固有の道具名（`Read` 等）を書かない**。UNICREW は11プロバイダを載せていて `Read` を持つのは Claude Code だけ。※「だから他経路では必ず失敗する」は**誤り**（2026-09-01 実測で否定＝codex 0.150.1 は誤った道具名を無視して正答した）。書かない理由は「壊れるから」ではなく「モデルの気の利きに寄りかからないため」
 - 🚨 `npm run build:tauri` は前処理で実行中の unicrew.exe を強制終了する（stopDevServers）。アプリを使用中にビルドしないこと（実際に作業中のアプリを落とした事故あり）
+- 🚨 会話は v0.6.3〜 アプリ専用フォルダの `threads/<id>.json`（src-tauri/src/thread_store.rs・lib/storage.ts）。起動時に localStorage の古い保存をファイルへ移し、`threads-backup/legacy-*.json` に控えを書いてから localStorage を消す。**`tauri dev` は配布版と同じ identifier＝同じ保存場所なので、開発版を起動しただけで自分の実データが移行される**（古い版はファイルを読めない）。移行の検証は別の identifier か使い捨ての環境で行う
 
 ## 全社共通（要遵守）
 - デプロイとコミットはワンセット（未コミット残し禁止）。git add は個別ファイル指定

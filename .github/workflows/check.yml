@@ -35,4 +35,12 @@ jobs:
       # 社内限定の符丁・鍵が混ざっていないか。過去に2回、同じ型の混入事故がある
       - name: public repo boundary (必須)
         run: python3 scripts/verify_public_repo.py --selftest && python3 scripts/verify_public_repo.py
+      # 古い macOS（Safari 16.4 未満の WKWebView）で JS が構文エラーになり、画面は出るのに
+      # ボタンが全部効かなかった（2026-10-13）。Windows（最新 Chromium）では再現しないので、
+      # 配布用の静的ビルドを作って機械で検査する（配布ビルドでは scripts/build_tauri.js も同じ検査で止める）
+      - name: old WebKit compat (必須)
+        run: |
+          node scripts/verify_webkit_compat.mjs --selftest
+          UNICREW_TAURI=1 npx next build
+          node scripts/verify_webkit_compat.mjs out
 

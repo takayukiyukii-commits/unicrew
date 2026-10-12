@@ -956,7 +956,17 @@ export interface UnicrewUpdateInfo {
 
 // Update オブジェクトは Promise を返すと壊れるので、グローバルにキャッシュしてトークンで参照する。
 let _updateCache:
-  | { token: number; update: { available: boolean; version: string; body?: string | null; downloadAndInstall: (cb?: (e: unknown) => void) => Promise<void> } }
+  | {
+      token: number;
+      update: {
+        available: boolean;
+        version: string;
+        body?: string | null;
+        downloadAndInstall: (cb?: (e: unknown) => void) => Promise<void>;
+        download: (cb?: (e: unknown) => void) => Promise<void>;
+        install: () => Promise<void>;
+      };
+    }
   | null = null;
 let _updateTokenSeq = 1;
 
@@ -1002,7 +1012,17 @@ export async function downloadAndInstallUnicrewUpdate(
   if (!_updateCache || _updateCache.token !== token) {
     throw new Error("更新トークンが古いため再度チェックしてください");
   }
-  await _updateCache.update.downloadAndInstall(progressCb);
+  // ダウンロードとインストールを分け、インストールの直前に会話の書き残しを書き切る。
+  // Windows の updater はインストール後に終了処理（RunEvent::Exit）を通らずプロセスを終わらせるため、
+  // ここで書き切らないと最新の変更が失われ、次回の起動でも知らせられない（2026-10-13 監査）
+  await _updateCache.update.download(progressCb);
+  try {
+    const invoke = await loadInvoke();
+    await invoke("threads_flush");
+  } catch (e) {
+    console.error("[updater] threads_flush failed", e);
+  }
+  await _updateCache.update.install();
   // インストール直後にアプリ再起動（プロセス入れ替え）
   try {
     const { relaunch } = await import("@tauri-apps/plugin-process");

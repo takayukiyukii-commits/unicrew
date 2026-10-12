@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   readLogicalLine,
   matchToBufferRange,
+  classifyOscLink,
+  toOpenFileArg,
   type LineLike,
   type CellLike,
 } from "./terminal-links";
@@ -310,5 +312,44 @@ describe("readLogicalLine - Ink 折り返し（インデント付き継続行）
     const info = readLogicalLine(asGetLine(lines), 0)!;
     expect(info.text).toBe("項目1です。");
     expect(info.endRow).toBe(0);
+  });
+});
+
+describe("classifyOscLink（OSC 8 埋め込みリンクの行き先）", () => {
+  it("http(s) は URL として開く", () => {
+    expect(classifyOscLink("https://example.com/a?b=1")).toEqual({ kind: "url", url: "https://example.com/a?b=1" });
+  });
+  it("Windows のドライブ付き file URI を日本語ごとパスに戻す", () => {
+    expect(
+      classifyOscLink("file:///E:/projects/%E8%A8%AD%E8%A8%88%EF%BC%88%E7%AC%AC%E4%BA%8C%E7%89%88%EF%BC%89/a.md"),
+    ).toEqual({ kind: "file", path: "E:/projects/設計（第二版）/a.md" });
+  });
+  it("Mac / Linux の file URI", () => {
+    expect(classifyOscLink("file:///Users/me/a%20b.ts")).toEqual({ kind: "file", path: "/Users/me/a b.ts" });
+    expect(classifyOscLink("file://localhost/tmp/x.md")).toEqual({ kind: "file", path: "/tmp/x.md" });
+  });
+  it("危ないスキーム・他のマシン・壊れた URI は開かない", () => {
+    expect(classifyOscLink("javascript:alert(1)")).toBeNull();
+    expect(classifyOscLink("file://otherhost/share/a.md")).toBeNull();
+    expect(classifyOscLink("not a uri")).toBeNull();
+  });
+});
+
+describe("classifyOscLink の安全側の判定（2026-10-13 監査）", () => {
+  it("共有フォルダ（UNC）とデバイス名前空間は、host が空でも開かない", () => {
+    expect(classifyOscLink("file:////attacker.example/share/readme.md")).toBeNull();
+    expect(classifyOscLink("file:///%2Fattacker.example/share/readme.md")).toBeNull();
+    expect(classifyOscLink("file:///%5C%5Cattacker.example%5Cshare%5Creadme.md")).toBeNull();
+    expect(classifyOscLink("file://localhost//attacker.example/share/a.md")).toBeNull();
+    expect(classifyOscLink("file:////./C:/a.md")).toBeNull();
+    expect(classifyOscLink("file:////?/C:/a.md")).toBeNull();
+  });
+  it("ドライブの後ろがバックスラッシュでも開ける", () => {
+    expect(classifyOscLink("file:///C:%5Cwork%5Ca.md")).toEqual({ kind: "file", path: "C:\\work\\a.md" });
+  });
+  it("toOpenFileArg は % を %25 にして、Rust 側の復号で元の名前に戻るようにする", () => {
+    const t = classifyOscLink("file:///C:/work/report%2520final.md");
+    expect(t).toEqual({ kind: "file", path: "C:/work/report%20final.md" });
+    expect(toOpenFileArg("C:/work/report%20final.md")).toBe("C:/work/report%2520final.md");
   });
 });

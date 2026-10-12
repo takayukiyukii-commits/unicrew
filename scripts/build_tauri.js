@@ -106,6 +106,18 @@ try {
     },
   );
   exitCode = result.status ?? 1;
+  // 古い macOS（Safari 16.4 未満の WKWebView）で JS が読めず、画面は出るのにボタンが全部効かなかった
+  // （2026-10-13）。Windows では再現しないため、配布物を作るたびに機械で止める。
+  if (exitCode === 0) {
+    const compat = spawnSync("node", [path.join(__dirname, "verify_webkit_compat.mjs"), outDir], {
+      stdio: "inherit",
+      shell: false,
+    });
+    if (compat.status !== 0) {
+      console.error("[build_tauri] verify_webkit_compat が OK ではない → 配布ビルドを止める");
+      exitCode = compat.status ?? 1;
+    }
+  }
 } catch (e) {
   console.error("[build_tauri] error:", e);
   exitCode = 1;

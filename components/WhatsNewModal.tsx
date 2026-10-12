@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 import { Sparkles, X } from "lucide-react";
 import { fetchWhatsNew, markWhatsNewSeen, UNICREW_VERSION } from "@/lib/whatsnew";
 import { useTranslation } from "@/lib/i18n";
@@ -85,7 +84,7 @@ export function WhatsNewModal({ open, onClose }: Props) {
           )}
           {!loading && content && (
             <div className="prose prose-sm max-w-none unicrew-md">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <Markdown>{content}</Markdown>
             </div>
           )}
         </div>

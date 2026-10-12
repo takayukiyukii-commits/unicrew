@@ -242,9 +242,6 @@ export function Sidebar({
       <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold tracking-tight">UNICREW</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent-soft)] text-[var(--color-accent)] font-medium">
-            β
-          </span>
         </div>
       </div>
 

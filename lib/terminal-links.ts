@@ -273,3 +273,51 @@ export function matchToBufferRange(
     end: { x: e.x + e.width, y: e.row + 1 },
   };
 }
+
+/**
+ * OSC 8 の埋め込みリンク（端末出力に URI を埋め込む方式）の行き先を分類する。
+ *
+ * 【背景（2026-10-13 ユーザー報告「パスや URL を Ctrl+クリックしても、場所によって開けない」）】
+ * UNICREW は PTY に TERM_PROGRAM=vscode を渡すため、Claude Code は URL やファイルパスに
+ * OSC 8 リンクを付けて出力する。xterm は OSC 8 の範囲では自前のリンク処理より埋め込みリンクを
+ * 優先し、linkHandler 未設定だと confirm() を出してから開く（Tauri の WebView では開かない）。
+ * そのため埋め込みリンクが付いた範囲だけクリックが空振りしていた。
+ * → linkHandler でこの関数を使い、自前のリンクと同じ開き方（URL は既定ブラウザ・
+ *   ファイルはエディタ）にそろえる。
+ */
+export type OscLinkTarget = { kind: "url"; url: string } | { kind: "file"; path: string };
+
+export function classifyOscLink(uri: string): OscLinkTarget | null {
+  let u: URL;
+  try {
+    u = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (u.protocol === "http:" || u.protocol === "https:") return { kind: "url", url: u.href };
+  if (u.protocol !== "file:") return null; // javascript: 等は開かない
+  if (u.host && u.host !== "localhost") return null; // 他のマシンのファイルは扱わない
+  let p: string;
+  try {
+    p = decodeURIComponent(u.pathname);
+  } catch {
+    return null;
+  }
+  // 🚨 共有フォルダ（UNC：//host/share・\\host\share）とデバイス名前空間（//./・//?/）は開かない。
+  //    file:////host/… や file:///%2Fhost/… のように host が空でもパス側で UNC になる。
+  //    Ctrl+クリックだけで外部の SMB へ問い合わせが飛び、Windows の認証情報が送られうる（2026-10-13 監査）
+  if (/^[\\/]{2}/.test(p)) return null;
+  // file:///D:/a/b → "/D:/a/b" → "D:/a/b"（Windows のドライブ）
+  if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1);
+  if (/^[\\/]{2}/.test(p)) return null;
+  return p ? { kind: "file", path: p } : null;
+}
+
+/**
+ * openFileSmart（→ Rust の expand_user_path）へ渡すパスにする。
+ * Rust 側は「%XX が残っていれば復元」するため、復号済みのパスをそのまま渡すと二重に復号され、
+ * 名前に %20 などを含むファイルを開けない・別のファイルを開く（2026-10-13 監査）。% を %25 にして渡す。
+ */
+export function toOpenFileArg(path: string): string {
+  return path.replace(/%/g, "%25");
+}

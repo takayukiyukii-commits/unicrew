@@ -39,11 +39,13 @@ Repository → Settings → Secrets and variables → Actions → New repository
 4. Release のドラフトが出来上がるので、Web UI でリリースノートを最終確認 → 「Publish release」。
 
 5. `latest.json` が更新され、既存ユーザーの自動アップデートが翌起動で走る。
+   - 🚨 ただし更新の確認は画面の JS が動いてから走る。**JS が動かない版を入れている利用者には自動更新が届かない**（2026-10-13：古い Safari の Mac で v0.6.2 以前がこの状態だった）。そういう修正を出すときは、リリース本文に「dmg から入れ直してください」と書く
 
 ## macOS の注意
 
 - 現状 **Apple Developer ID で署名していない** ため、初回起動時に「開発元が未確認」警告が出ます。
-  - 暫定: Finder で右クリック → 開く → 「開く」を再度クリックでバイパス可
+  - 暫定: 一度開こうとして警告を閉じたあと「システム設定」→「プライバシーとセキュリティ」→「このまま開く」（macOS 15 以降は右クリック →「開く」では通らない。14 以前は右クリックでも可）
+- 画面は Mac の Safari（WKWebView）で表示されるため、**Safari 15.4 以上が必要**（Tailwind v4 の CSS が @layer を使う）。JS は package.json の browserslist で Safari 14 まで読める形に変換し、配布ビルドごとに `scripts/verify_webkit_compat.mjs` が機械で止める
   - 恒久: Apple Developer Program 加入 (年 $99) + 証明書設定 + notarytool が必要
 - universal binary なので Apple Silicon / Intel どちらでも動く
 

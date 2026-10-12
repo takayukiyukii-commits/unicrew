@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 import { Check, Copy, FileText, History, Image as ImageIcon, LifeBuoy, Play, Send, ShieldCheck } from "lucide-react";
 import type { Character, Message, MessageAttachment, MessageStats } from "@/lib/types";
 import { ToolUseBubble } from "./ToolUseBubble";
@@ -202,24 +201,22 @@ export function MessageItem({
           ) : message.blocks && message.blocks.length > 0 ? (
             message.blocks.map((b, i) =>
               b.kind === "text" ? (
-                <ReactMarkdown
+                <Markdown
                   key={i}
-                  remarkPlugins={[remarkGfm]}
                   components={renderers}
                 >
                   {prepMarkdown(b.text)}
-                </ReactMarkdown>
+                </Markdown>
               ) : (
                 <ToolUseBubble key={i} block={b} />
               ),
             )
           ) : (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+            <Markdown
               components={renderers}
             >
               {prepMarkdown(message.content) || "…"}
-            </ReactMarkdown>
+            </Markdown>
           )}
         </div>
         {message.attachments && message.attachments.length > 0 && (

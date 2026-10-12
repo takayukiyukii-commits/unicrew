@@ -69,15 +69,18 @@ export function joinHardWrappedLines(text: string, cols: number): string {
   let i = 0;
   while (i < lines.length) {
     let cur = lines[i];
+    // 判定は「直前の物理行」で行う。連結済みの cur の幅で見ると、一度つないだ後は
+    // 短い行までつなぎ続けてしまう（2026-10-13 監査で既存の不具合として指摘）
+    let lastRaw = lines[i];
     while (i + 1 < lines.length) {
       const next = lines[i + 1];
       const nextTrimmed = next.replace(/^\s+/, "");
       // 連結条件: 行が端末幅いっぱい（全角は最終セルに収まらないため cols-1 も満杯扱い）
       // かつ 次行が空でなく、罫線終わりでもない
       if (
-        displayWidth(cur) < cols - 1 ||
+        displayWidth(lastRaw) < cols - 1 ||
         nextTrimmed.length === 0 ||
-        endsWithBoxDrawing(cur)
+        endsWithBoxDrawing(lastRaw)
       ) {
         break;
       }
@@ -86,10 +89,79 @@ export function joinHardWrappedLines(text: string, cols: number): string {
       const glue =
         ASCII_WORD_RE.test(lastCh) && ASCII_WORD_RE.test(firstCh) ? " " : "";
       cur = cur + glue + nextTrimmed;
+      lastRaw = next;
       i++;
     }
     out.push(cur);
     i++;
   }
   return out.join("\n");
+}
+
+// 行末の空白（半角・タブ・ノーブレークスペース U+00A0・全角スペース U+3000）
+const TRAILING_WS = /[ \t\u00a0\u3000]+$/u;
+
+/**
+ * ターミナルからコピーする文面の整形（Ctrl/Cmd+C・AI へ送る）。
+ *
+ * 【2026-10-13 ユーザー報告】「初心者チャットではないターミナルで、Claude の文章をコピペすると空白までコピーされる」
+ *  0. 改行を LF にそろえる：Windows の xterm は選択を CRLF で返す。\r が残ると行末の空白を消せず、
+ *     幅の判定も狂う（2026-10-13 監査）
+ *  1. 行末の空白を消す：画面の埋め草として書かれた空白が、xterm の選択に残る。
+ *     ただし折返しの判定は元の行（空白込み）で行い、
+ *       - 行末の空白が2つ以上＝埋め草 → その行で切る（空白で埋まった行を折返しと取り違えない）
+ *       - 行末の空白がちょうど1つ＝語の区切りで折り返した → 空白1つでつなぐ（`/opt/test --help` を壊さない）
+ *     Markdown の「行末2スペースで改行」は、ターミナルでは描画済みの文字なので残さない（仕様）
+ *  2. 共通の字下げを外す：Claude Code は本文全体を左に字下げして描画する。
+ *     全行に共通する字下げだけを外す（Python・YAML の構造を壊さない）。
+ *     選択の始まりが行の途中なら、選んだ文字列の1行目には字下げが無い。そのときは呼び出し側が
+ *     「その行の画面上の字下げ」を firstLineIndent で渡し、それを1行目の字下げとして計算する
+ *     （文字列だけでは区別できない・「途中かどうか」だけで1行目を外すと YAML の子を最上位に動かす＝2026-10-13 監査）
+ */
+export function cleanTerminalCopy(text: string, cols: number, firstLineIndent?: number): string {
+  if (!text) return text;
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  if (cols <= 4) {
+    return dedentCommon(lines.map((l) => l.replace(TRAILING_WS, "")).join("\n"), firstLineIndent);
+  }
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    let raw = lines[i];
+    let cur = raw.replace(TRAILING_WS, "");
+    while (i + 1 < lines.length) {
+      const pad = raw.length - raw.replace(TRAILING_WS, "").length;
+      const nextTrimmed = lines[i + 1].replace(/^\s+/, "");
+      if (
+        displayWidth(raw) < cols - 1 ||
+        pad >= 2 ||
+        nextTrimmed.length === 0 ||
+        endsWithBoxDrawing(raw)
+      ) {
+        break;
+      }
+      const glue =
+        pad === 1 || (ASCII_WORD_RE.test(cur.slice(-1)) && ASCII_WORD_RE.test(nextTrimmed.charAt(0))) ? " " : "";
+      cur = cur + glue + nextTrimmed.replace(TRAILING_WS, "");
+      raw = lines[i + 1];
+      i++;
+    }
+    out.push(cur);
+    i++;
+  }
+  return dedentCommon(out.join("\n"), firstLineIndent);
+}
+
+function dedentCommon(text: string, firstLineIndent?: number): string {
+  const lines = text.split("\n");
+  const indentOf = (l: string) => /^ */.exec(l)?.[0].length ?? 0;
+  const widths: number[] = [];
+  lines.forEach((l, i) => {
+    if (!l.trim()) return;
+    widths.push(i === 0 && firstLineIndent !== undefined ? firstLineIndent : indentOf(l));
+  });
+  if (widths.length === 0) return text;
+  const min = Math.min(...widths);
+  if (min === 0) return text;
+  return lines.map((l) => l.slice(Math.min(indentOf(l), min))).join("\n");
 }

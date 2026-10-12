@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { BootMarker } from "@/components/BootMarker";
+import { OldWebkitNotice } from "@/components/OldWebkitNotice";
 
 export const metadata: Metadata = {
   title: "UNICREW - あなた専属のAIチームを、5分で。",
@@ -23,8 +25,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja">
-      <body className="h-screen overflow-hidden">{children}</body>
+    // 見張りが <html> に data-unicrew-old-webkit を付けるため（lib/old-webkit-guard.ts）
+    <html lang="ja" suppressHydrationWarning>
+      <body className="h-screen overflow-hidden">
+        {/* 古い WebKit で黙って壊れないための見張りと案内（理由は lib/old-webkit-guard.ts） */}
+        <OldWebkitNotice />
+        <BootMarker />
+        {children}
+      </body>
     </html>
   );
 }

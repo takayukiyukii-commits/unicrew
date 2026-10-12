@@ -54,8 +54,7 @@ import { resolveNativeSlash, rewriteSlashForHeadless } from "@/lib/slash-command
 import { formatElapsed, formatThinking, formatTokens } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import { isVoiceSendArmed, armVoiceSend, stripVoiceSend } from "@/lib/voice-send";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Markdown } from "./Markdown";
 
 interface ActiveDraftLite {
   threadId: string;
@@ -1394,7 +1393,7 @@ function ModeratorPanel({
         </div>
       ) : (
         <div className="md-body text-[12.5px] leading-relaxed text-amber-950">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text || "…"}</ReactMarkdown>
+          <Markdown>{text || "…"}</Markdown>
         </div>
       )}
     </div>
@@ -1751,7 +1750,7 @@ function ColumnContent({
     }
     return (
       <div className="md-body text-[13.5px] leading-relaxed">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{fallback}</ReactMarkdown>
+        <Markdown>{fallback}</Markdown>
       </div>
     );
   }
@@ -1759,9 +1758,9 @@ function ColumnContent({
     <div className="md-body text-[13.5px] leading-relaxed">
       {blocks.map((b, i) =>
         b.kind === "text" ? (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+          <Markdown key={i}>
             {b.text}
-          </ReactMarkdown>
+          </Markdown>
         ) : (
           <ToolUseBubble key={i} block={b} />
         ),
@@ -1794,9 +1793,9 @@ function DraftBubble({
         <div className="md-body text-[14.5px] leading-relaxed">
           {blocks.map((b, i) =>
             b.kind === "text" ? (
-              <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+              <Markdown key={i}>
                 {b.text}
-              </ReactMarkdown>
+              </Markdown>
             ) : (
               <ToolUseBubble key={i} block={b} />
             ),

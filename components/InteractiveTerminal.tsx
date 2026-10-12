@@ -41,9 +41,9 @@ import {
   type PtyExitInfo,
 } from "@/lib/pty";
 import { findPathMatches, findUrlMatches } from "@/lib/file-link";
-import { readLogicalLine, matchToBufferRange } from "@/lib/terminal-links";
+import { readLogicalLine, matchToBufferRange, classifyOscLink, toOpenFileArg } from "@/lib/terminal-links";
 import { findCompositionOverride } from "@/lib/terminal-ime";
-import { joinHardWrappedLines } from "@/lib/terminal-copy";
+import { cleanTerminalCopy } from "@/lib/terminal-copy";
 import {
   searchBuffer,
   pickHitIndex,
@@ -93,6 +93,31 @@ const SEARCH_DEBOUNCE_MS = 180;
 
 /** AI へ渡す選択テキストの上限（文字）。これを超えたら末尾側を残す。 */
 const MAX_SEND_TO_AI_CHARS = 20000;
+
+/**
+ * 選択の始まりが行の途中（その行の選択開始より左に文字がある）なら、その行の画面上の字下げ（先頭の空白の数）を返す。
+ * 行頭から選んでいれば undefined（選んだ文字列の1行目をそのまま使う）。
+ * cleanTerminalCopy の字下げ外しで1行目の字下げとして使う（lib/terminal-copy.ts）。
+ * 🚨 getSelectionPosition は型定義では 1 始まりだが、xterm 5.5 の実装は 0 始まり（列・行とも）
+ */
+function selectionFirstRowIndent(term: object): number | undefined {
+  type Line = { translateToString(trimRight?: boolean, start?: number, end?: number): string };
+  const t = term as {
+    getSelectionPosition?: () => { start: { x: number; y: number } } | undefined;
+    buffer?: { active?: { getLine(y: number): Line | undefined } };
+  };
+  try {
+    const pos = t.getSelectionPosition?.();
+    if (!pos || pos.start.x <= 0) return undefined;
+    const line = t.buffer?.active?.getLine(pos.start.y);
+    if (!line) return undefined;
+    const before = line.translateToString(false, 0, pos.start.x);
+    if (before.trim().length === 0) return undefined;
+    return /^ */.exec(before)?.[0].length ?? 0;
+  } catch {
+    return undefined;
+  }
+}
 
 /** TUI モード疑似つまみの高さ（%）。 */
 const TUI_THUMB_HEIGHT_PCT = 20;
@@ -533,7 +558,7 @@ export function InteractiveTerminal({
     if (!term || !onSendToAi) return;
     let text = "";
     try {
-      text = joinHardWrappedLines(term.getSelection(), term.cols).trim();
+      text = cleanTerminalCopy(term.getSelection(), term.cols, selectionFirstRowIndent(term)).trim();
     } catch {
       text = "";
     }
@@ -1192,6 +1217,26 @@ export function InteractiveTerminal({
       } catch {
         /* registerLinkProvider 非対応版では何もしない */
       }
+      // Claude Code 等が付ける OSC 8 の埋め込みリンクも、上と同じ開き方にそろえる。
+      // 未設定だと xterm は confirm() を出してから開く＝Tauri では開かず、埋め込みリンクの
+      // 範囲だけクリックが空振りしていた（理由は lib/terminal-links.ts の classifyOscLink）。
+      term.options.linkHandler = {
+        allowNonHttpProtocols: true, // file:// を受け取るため（開く先は classifyOscLink で http(s)/file に限定）
+        activate: (e: MouseEvent, uri: string) => {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          const target = classifyOscLink(uri);
+          if (!target) return;
+          if (target.kind === "url") {
+            void openExternal(target.url).catch(() => {
+              /* 開けない場合は無視 */
+            });
+          } else {
+            void openFileSmart(toOpenFileArg(target.path), ptyCwd, ptyCwd).catch(() => {
+              /* openFileSmart 内でトースト表示済み */
+            });
+          }
+        },
+      };
 
       // コピー＆ペースト（Ctrl/Cmd + C / V）。OS クリップボードを明示的に読み書きする。
       // - Ctrl/Cmd+C: 選択があれば writeClipboardText でコピー（無ければ既定の SIGINT を通す）
@@ -1231,7 +1276,7 @@ export function InteractiveTerminal({
             // claude(Ink) は本文を端末幅で折り返す際に実改行を挿入して描画するため、
             // そのままコピーすると画面上の折返し改行が混入して他アプリで崩れる。
             // 幅いっぱいの行だけ次行と連結して原文の改行に近づける（terminal-copy.ts）。
-            const sel = joinHardWrappedLines(term.getSelection(), term.cols);
+            const sel = cleanTerminalCopy(term.getSelection(), term.cols, selectionFirstRowIndent(term));
             // WebView2 では plugin / navigator.clipboard の書き込みが失敗し
             // 「Ctrl+C でコピーできない」事象がある。keydown ジェスチャ内で同期実行できる
             // execCommand("copy") を第一経路にして確実にコピーし、失敗時のみ OS
