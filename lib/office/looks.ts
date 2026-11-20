@@ -1,40 +1,27 @@
-/**
- * 社員の見た目の見本。最初から入っているもの。利用者は自分の絵に差し替えられる（StaffLook.kind="image"）。
- *
- * 見本は絵のファイルではなく「形と色の組み合わせ」で持つ。3D でも平面でも同じ見本から描ける。
- * 絵を足したいときは、ここに1行足す（描くのは components/office/ 側）。
- */
-export type HairStyle = "short" | "bob" | "bun" | "long" | "spiky" | "cap" | "curly" | "side";
-
+/** 人間を模さない乗組員。立体と平面は同じ筐体・画面・小物を使う。 */
 export interface LookSample {
   id: string;
-  label: string;
-  /** 服の色 */
   body: string;
-  /** 髪の色 */
-  hair: string;
-  hairStyle: HairStyle;
-  /** 肌の色 */
-  skin: string;
-  /** 小物（めがね等）。無ければ null */
-  accessory: "glasses" | "headset" | "ribbon" | null;
+  accent: string;
+  shape: "square" | "wide" | "tall";
+  accessory: "antenna" | "ears" | "fins" | "handle";
 }
-
 export const LOOK_SAMPLES: LookSample[] = [
-  { id: "navy-short", label: "ネイビー・ショート", body: "#1e293b", hair: "#111827", hairStyle: "short", skin: "#f5d0b5", accessory: null },
-  { id: "pink-bun", label: "ピンク・おだんご", body: "#f472b6", hair: "#3f2a1d", hairStyle: "bun", skin: "#f8d9c0", accessory: null },
-  { id: "coral-cap", label: "コーラル・帽子", body: "#fb7185", hair: "#1f2937", hairStyle: "cap", skin: "#f1c7a8", accessory: null },
-  { id: "magenta-bob", label: "マゼンタ・ボブ", body: "#d946ef", hair: "#5b3a29", hairStyle: "bob", skin: "#f5d0b5", accessory: "glasses" },
-  { id: "sky-short", label: "スカイ・ショート", body: "#38bdf8", hair: "#1f2937", hairStyle: "side", skin: "#f8d9c0", accessory: null },
-  { id: "blue-long", label: "ブルー・ロング", body: "#3b82f6", hair: "#111827", hairStyle: "long", skin: "#f1c7a8", accessory: "headset" },
-  { id: "yellow-curly", label: "イエロー・くせ毛", body: "#fbbf24", hair: "#6b3f24", hairStyle: "curly", skin: "#f5d0b5", accessory: null },
-  { id: "orange-spiky", label: "オレンジ・つんつん", body: "#fb923c", hair: "#0f172a", hairStyle: "spiky", skin: "#e9b995", accessory: null },
-  { id: "green-bob", label: "グリーン・ボブ", body: "#34d399", hair: "#7c4a2d", hairStyle: "bob", skin: "#f8d9c0", accessory: "ribbon" },
-  { id: "teal-short", label: "ティール・ショート", body: "#2dd4bf", hair: "#111827", hairStyle: "short", skin: "#e9b995", accessory: "glasses" },
-  { id: "violet-long", label: "バイオレット・ロング", body: "#a78bfa", hair: "#2a1a3e", hairStyle: "long", skin: "#f5d0b5", accessory: null },
-  { id: "gray-side", label: "グレー・横分け", body: "#94a3b8", hair: "#e5e7eb", hairStyle: "side", skin: "#f1c7a8", accessory: "glasses" },
+  { id: "relay", body: "#6366F1", accent: "#C7D2FE", shape: "square", accessory: "antenna" },
+  { id: "echo", body: "#0F766E", accent: "#99F6E4", shape: "wide", accessory: "ears" },
+  { id: "folio", body: "#475569", accent: "#CBD5E1", shape: "tall", accessory: "handle" },
+  { id: "kite", body: "#0369A1", accent: "#BAE6FD", shape: "square", accessory: "fins" },
+  { id: "amber", body: "#B45309", accent: "#FDE68A", shape: "wide", accessory: "antenna" },
+  { id: "mint", body: "#047857", accent: "#A7F3D0", shape: "tall", accessory: "ears" },
+  { id: "orbit", body: "#7C3AED", accent: "#DDD6FE", shape: "square", accessory: "handle" },
+  { id: "tide", body: "#0E7490", accent: "#A5F3FC", shape: "wide", accessory: "fins" },
+  { id: "clay", body: "#9A3412", accent: "#FED7AA", shape: "tall", accessory: "antenna" },
+  { id: "leaf", body: "#4D7C0F", accent: "#D9F99D", shape: "square", accessory: "ears" },
+  { id: "pearl", body: "#64748B", accent: "#E2E8F0", shape: "wide", accessory: "handle" },
+  { id: "dusk", body: "#4338CA", accent: "#A5B4FC", shape: "tall", accessory: "fins" },
 ];
-
+// 保存済みの見本とテンプレートの指定を、新しい乗組員に対応させる。
+const legacy = ["navy-short", "pink-bun", "coral-cap", "magenta-bob", "sky-short", "blue-long", "yellow-curly", "orange-spiky", "green-bob", "teal-short", "violet-long", "gray-side"];
 export function lookSample(id: string): LookSample {
-  return LOOK_SAMPLES.find((l) => l.id === id) ?? LOOK_SAMPLES[0];
+  return LOOK_SAMPLES.find((look) => look.id === id) ?? LOOK_SAMPLES[legacy.indexOf(id)] ?? LOOK_SAMPLES[0];
 }

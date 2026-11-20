@@ -5,19 +5,22 @@
  * ここで直したものは全部その場で保存される。「仕事のやり方」は次の仕事から使われる。
  */
 import { useEffect, useState } from "react";
-import { FolderOpen, ImageUp, Plus, Trash2, X } from "lucide-react";
-import { useOfficeT } from "@/lib/office/i18n";
+import { FileText, FolderOpen, ImageUp, Plus, Trash2, X } from "lucide-react";
+import { useOfficeT, type OfficeKey } from "@/lib/office/i18n";
 import { LOOK_SAMPLES, lookSample } from "@/lib/office/looks";
 import { buildOffice, newDepartment, newStaff, OFFICE_TEMPLATES } from "@/lib/office/templates";
 import { OFFICE_THEMES } from "@/lib/office/themes";
 import type { Office, OfficeRun, Staff } from "@/lib/office/types";
 import { CATEGORY_LABELS, CATEGORY_ORDER, PROVIDER_CATEGORY } from "@/lib/providerCategories";
 import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
-import { isTauri, pickAndSaveAvatar, pickWorkspace } from "@/lib/tauri";
+import { avatarSrc, isTauri, pickAndSaveAvatar, pickWorkspace } from "@/lib/tauri";
 import { showToast } from "@/lib/toast";
 import { MODEL_LABELS, PROVIDER_LABELS, type ModelId, type Provider } from "@/lib/types";
 
-const field = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] text-slate-900 outline-none focus:border-rose-400";
+import { LookFace } from "./OfficeCrew";
+export { LookFace } from "./OfficeCrew";
+
+const field = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] text-slate-900 outline-none focus:border-indigo-500";
 const label = "mb-1 block text-[12px] font-bold text-slate-600";
 
 function ProviderSelect({ value, onChange }: { value: Provider; onChange: (p: Provider) => void }) {
@@ -38,48 +41,6 @@ function ProviderSelect({ value, onChange }: { value: Provider; onChange: (p: Pr
           </optgroup>
         ))}
     </select>
-  );
-}
-
-/** 見本の絵（平面）。名札や見た目選びで使う。 */
-export function LookFace({ sample, size = 44 }: { sample: string; size?: number }) {
-  const l = lookSample(sample);
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
-      <circle cx="24" cy="24" r="24" fill={`${l.body}33`} />
-      <path d="M8 48c0-10 7-15 16-15s16 5 16 15z" fill={l.body} />
-      <circle cx="24" cy="22" r="11" fill={l.skin} />
-      {l.hairStyle === "long" ? <path d="M12 22c0-9 5-14 12-14s12 5 12 14v12h-5V22H17v12h-5z" fill={l.hair} /> : null}
-      {l.hairStyle === "bob" ? <path d="M11.5 25c-1-11 5-17 12.5-17s13.500 6 12.500 17l-3.500 2V20H15v7z" fill={l.hair} /> : null}
-      {l.hairStyle === "curly" ? (
-        <g fill={l.hair}>
-          {[14, 19, 24, 29, 34].map((x) => (
-            <circle key={x} cx={x} cy={x === 24 ? 11 : x === 19 || x === 29 ? 12 : 15} r="5" />
-          ))}
-        </g>
-      ) : null}
-      {l.hairStyle === "spiky" ? <path d="M12 20l2-9 4 5 2-8 4 7 3-8 3 8 4-5 2 10c-4-4-20-4-24 0z" fill={l.hair} /> : null}
-      {l.hairStyle === "cap" ? (
-        <g>
-          <path d="M12 19c0-7 5-11 12-11s12 4 12 11z" fill={l.body} />
-          <rect x="22" y="17" width="18" height="3.500" rx="1.700" fill={l.body} />
-        </g>
-      ) : null}
-      {l.hairStyle === "short" || l.hairStyle === "bun" ? <path d="M12.500 21c0-8 5-13 11.500-13s11.500 5 11.500 13c-4-5-19-5-23 0z" fill={l.hair} /> : null}
-      {l.hairStyle === "side" ? <path d="M12.500 22c-1-9 5-14 11.500-14s12 4 11.500 12c-6-1-12-3-15-7-1 4-4 7-8 9z" fill={l.hair} /> : null}
-      {l.hairStyle === "bun" ? <circle cx="24" cy="7" r="4.500" fill={l.hair} /> : null}
-      <circle cx="20" cy="23" r="1.400" fill="#1f2937" />
-      <circle cx="28" cy="23" r="1.400" fill="#1f2937" />
-      {l.accessory === "glasses" ? (
-        <g fill="none" stroke="#111827" strokeWidth="1.200">
-          <circle cx="20" cy="23" r="3.400" />
-          <circle cx="28" cy="23" r="3.400" />
-          <path d="M23.400 23h1.200" />
-        </g>
-      ) : null}
-      {l.accessory === "headset" ? <path d="M12 23a12 12 0 0 1 24 0" fill="none" stroke="#0f172a" strokeWidth="2.200" /> : null}
-      {l.accessory === "ribbon" ? <path d="M31 9l5-3v7zM31 9l-4-3v7z" fill="#f43f5e" /> : null}
-    </svg>
   );
 }
 
@@ -109,17 +70,20 @@ export function StaffPanel({
   const dirty = JSON.stringify(draft) !== JSON.stringify(staff);
   const set = (patch: Partial<Staff>) => setDraft((d) => ({ ...d, ...patch }));
   const busy = rt?.status === "working";
+  const [preview, setPreview] = useState<string | null>(avatarUrl);
+  const picturePath = draft.look.kind === "image" ? draft.look.path : null;
+  useEffect(() => {
+    let alive = true;
+    setPreview(null);
+    if (picturePath) void avatarSrc(picturePath).then((url) => { if (alive) setPreview(url); }).catch(() => {});
+    return () => { alive = false; };
+  }, [picturePath]);
 
   return (
-    <aside className="pointer-events-auto absolute bottom-3 right-3 top-3 z-40 flex w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl" aria-label={t("staff.title")}>
+    <aside className="pointer-events-auto absolute bottom-3 right-3 top-3 z-40 flex w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 office-shadow-modal" aria-label={t("staff.title")}>
       <header className="flex items-center gap-3 border-b border-slate-200 px-4 py-3">
         <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-100">
-          {draft.look.kind === "image" && avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <LookFace sample={draft.look.kind === "builtin" ? draft.look.sample : LOOK_SAMPLES[0].id} size={48} />
-          )}
+          <LookFace sample={draft.look.kind === "builtin" ? draft.look.sample : "pearl"} image={draft.look.kind === "image" ? preview : null} size={48} status={rt?.status} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] font-extrabold">{draft.name}</div>
@@ -153,7 +117,7 @@ export function StaffPanel({
         </div>
 
         {draft.lead ? (
-          <div className="rounded-lg bg-rose-50 px-3 py-2 text-[12.5px] font-bold text-rose-700">{t("staff.lead")}</div>
+          <div className="rounded-lg bg-indigo-50 px-3 py-2 text-[12.5px] font-bold text-indigo-700">{t("staff.lead")}</div>
         ) : (
           <label className="block">
             <span className={label}>{t("staff.dept")}</span>
@@ -186,7 +150,7 @@ export function StaffPanel({
             </label>
           ) : null}
         </div>
-        <p className="-mt-2 text-[11.5px] leading-relaxed text-slate-500">{t("staff.aiHint")}</p>
+        <p className="-mt-2 text-[12px] leading-relaxed text-slate-500">{t("staff.aiHint")}</p>
 
         <label className="block">
           <span className={label}>{t("staff.manual")}</span>
@@ -195,12 +159,12 @@ export function StaffPanel({
 
         <div>
           <span className={label}>{t("staff.look")}</span>
-          <div className="text-[11.5px] text-slate-500">{t("staff.lookSamples")}</div>
+          <div className="text-[12px] text-slate-500">{t("staff.lookSamples")}</div>
           <div className="mt-1.5 grid grid-cols-6 gap-1.5">
             {LOOK_SAMPLES.map((l) => {
-              const on = draft.look.kind === "builtin" && draft.look.sample === l.id;
+              const on = draft.look.kind === "builtin" && lookSample(draft.look.sample).id === l.id;
               return (
-                <button key={l.id} type="button" title={l.label} aria-label={l.label} aria-pressed={on} onClick={() => set({ look: { kind: "builtin", sample: l.id } })} className={`rounded-xl p-1 ${on ? "bg-rose-50 ring-2 ring-rose-400" : "hover:bg-slate-100"}`}>
+                <button key={l.id} type="button" title={t(`look.${l.id}` as OfficeKey)} aria-label={t(`look.${l.id}` as OfficeKey)} aria-pressed={on} onClick={() => set({ look: { kind: "builtin", sample: l.id } })} className={`rounded-xl p-1 ${on ? "bg-indigo-50 ring-2 ring-indigo-500" : "hover:bg-slate-100"}`}>
                   <LookFace sample={l.id} size={44} />
                 </button>
               );
@@ -224,7 +188,7 @@ export function StaffPanel({
               </button>
             ) : null}
           </div>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-500">{t("staff.lookUploadHint")}</p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-slate-500">{t("staff.lookUploadHint")}</p>
         </div>
       </div>
 
@@ -236,7 +200,7 @@ export function StaffPanel({
             onSave({ ...draft, name: draft.name.trim(), role: draft.role.trim() || staff.role });
             showToast(t("staff.saved"));
           }}
-          className="rounded-full bg-rose-500 px-5 py-2 text-[13px] font-bold text-white shadow disabled:opacity-40"
+          className="rounded-full bg-indigo-500 px-5 py-2 text-[13px] font-bold text-white shadow disabled:opacity-40"
         >
           {t("staff.save")}
         </button>
@@ -282,7 +246,7 @@ export function CompanyPanel({
   const { t } = useOfficeT();
   const patch = (p: Partial<Office>) => onChange({ ...office, ...p, updatedAt: Date.now() });
   return (
-    <aside className="pointer-events-auto absolute bottom-3 right-3 top-3 z-40 flex w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl" aria-label={t("company.title")}>
+    <aside className="pointer-events-auto absolute bottom-3 right-3 top-3 z-40 flex w-[400px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 office-shadow-modal" aria-label={t("company.title")}>
       <header className="flex items-center border-b border-slate-200 px-4 py-3">
         <h2 className="flex-1 text-[15px] font-extrabold">{t("company.title")}</h2>
         <button type="button" onClick={onClose} aria-label={t("staff.close")} className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100">
@@ -324,13 +288,13 @@ export function CompanyPanel({
           <span className={label}>{t("company.theme")}</span>
           <div className="grid grid-cols-3 gap-2">
             {OFFICE_THEMES.map((th) => (
-              <button key={th.id} type="button" aria-pressed={office.theme === th.id} onClick={() => patch({ theme: th.id })} className={`overflow-hidden rounded-xl border-2 text-left ${office.theme === th.id ? "border-rose-400" : "border-slate-200"}`}>
+              <button key={th.id} type="button" aria-pressed={office.theme === th.id} onClick={() => patch({ theme: th.id })} className={`overflow-hidden rounded-xl border-2 text-left ${office.theme === th.id ? "border-indigo-500" : "border-slate-200"}`}>
                 <span className="flex h-12 items-end gap-1 p-1.5" style={{ background: th.sky }}>
                   <span className="h-5 flex-1 rounded" style={{ background: th.floor }} />
                   <span className="h-7 w-3 rounded" style={{ background: th.ring }} />
                   <span className="h-4 w-6 rounded" style={{ background: th.signBg }} />
                 </span>
-                <span className="block px-2 py-1 text-[11.5px] font-bold">{th.label}</span>
+                <span className="block px-2 py-1 text-[12px] font-bold">{t(`theme.${th.id}`)}</span>
               </button>
             ))}
           </div>
@@ -365,7 +329,7 @@ export function CompanyPanel({
               <Plus size={14} aria-hidden="true" />
               {t("company.addDept")}
             </button>
-            <button type="button" onClick={() => onAddStaff(null)} className="flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-[12.5px] font-bold text-white">
+            <button type="button" onClick={() => onAddStaff(null)} className="flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-[12.5px] font-bold text-slate-700">
               <Plus size={14} aria-hidden="true" />
               {t("company.addStaff")}
             </button>
@@ -381,7 +345,7 @@ export function CompanyPanel({
         </button>
       </div>
       <footer className="flex items-center gap-2 border-t border-slate-200 px-4 py-3">
-        <button type="button" onClick={onClose} className="rounded-full bg-rose-500 px-5 py-2 text-[13px] font-bold text-white shadow">
+        <button type="button" onClick={onClose} className="rounded-full bg-indigo-500 px-5 py-2 text-[13px] font-bold text-white shadow">
           {t("company.done")}
         </button>
         <span className="flex-1" />
@@ -413,7 +377,13 @@ export function OfficeSetup({ canCancel, onCreate, onCancel }: { canCancel: bool
   const ready = demo || !!workspace;
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-slate-100/80 p-4 backdrop-blur-sm">
-      <div className="my-auto w-full max-w-[720px] rounded-3xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
+      <div className="my-auto w-full max-w-[720px] rounded-xl border border-slate-200 bg-white p-6 text-slate-900 office-shadow-modal">
+        <div className="mb-3 flex items-center gap-2" aria-hidden="true">
+          <LookFace sample="relay" size={48} />
+          <FileText size={20} className="text-indigo-500" />
+          <LookFace sample="echo" size={48} />
+          <LookFace sample="folio" size={48} />
+        </div>
         <h1 className="text-[22px] font-black">{t("setup.title")}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-slate-600">{t("setup.lead")}</p>
 
@@ -428,16 +398,16 @@ export function OfficeSetup({ canCancel, onCreate, onCancel }: { canCancel: bool
             {OFFICE_TEMPLATES.map((tp) => {
               const on = tp.id === templateId;
               return (
-                <button key={tp.id} type="button" aria-pressed={on} onClick={() => setTemplateId(tp.id)} className={`rounded-2xl border-2 p-3 text-left ${on ? "border-rose-400 bg-rose-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                <button key={tp.id} type="button" aria-pressed={on} onClick={() => setTemplateId(tp.id)} className={`rounded-xl border-2 p-3 text-left ${on ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}>
                   <span className="flex items-center gap-2">
                     <span className="text-[14px] font-extrabold">{tp.label}</span>
-                    <span className="rounded-full bg-slate-200 px-2 py-px text-[11px] font-bold text-slate-700">{t("setup.people", { n: tp.staff.length })}</span>
-                    {tp.recommended ? <span className="rounded-full bg-rose-500 px-2 py-px text-[11px] font-bold text-white">{t("setup.recommended")}</span> : null}
+                    <span className="rounded-full bg-slate-200 px-2 py-px text-[12px] font-bold text-slate-700">{t("setup.people", { n: tp.staff.length })}</span>
+                    {tp.recommended ? <span className="rounded-full bg-indigo-500 px-2 py-px text-[12px] font-bold text-white">{t("setup.recommended")}</span> : null}
                   </span>
                   <span className="mt-1 block text-[12px] leading-relaxed text-slate-600">{tp.description}</span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     {tp.departments.map((d) => (
-                      <span key={d.key} className="rounded-full px-2 py-px text-[11px] font-bold text-white" style={{ background: d.color }}>
+                      <span key={d.key} className="rounded-full px-2 py-px text-[12px] font-bold text-white" style={{ borderLeft: `3px solid ${d.color}`, background: "#F8FAFC", color: "#475569" }}>
                         {d.name}
                       </span>
                     ))}
@@ -461,7 +431,7 @@ export function OfficeSetup({ canCancel, onCreate, onCancel }: { canCancel: bool
                   setWorkspace(p);
                 }
               }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-[13px] font-bold text-white"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-2 text-[13px] font-bold text-slate-700"
             >
               <FolderOpen size={15} aria-hidden="true" />
               {t("setup.pick")}
@@ -486,7 +456,7 @@ export function OfficeSetup({ canCancel, onCreate, onCancel }: { canCancel: bool
               const template = OFFICE_TEMPLATES.find((x) => x.id === templateId) ?? OFFICE_TEMPLATES[0];
               onCreate(buildOffice({ template, name, workspace: workspace ?? (demo ? "C:/demo-workspace" : null), provider }));
             }}
-            className="rounded-full bg-rose-500 px-6 py-2.5 text-[14px] font-extrabold text-white shadow-lg disabled:opacity-40"
+            className="rounded-full bg-indigo-500 px-6 py-2.5 text-[14px] font-extrabold text-white office-shadow-floating disabled:opacity-40"
           >
             {t("setup.create")}
           </button>
@@ -504,3 +474,5 @@ export function OfficeSetup({ canCancel, onCreate, onCancel }: { canCancel: bool
 }
 
 export { newStaff };
+
+

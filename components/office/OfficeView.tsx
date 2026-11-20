@@ -9,10 +9,10 @@
  */
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Building2 } from "lucide-react";
+import { OfficeAvatarContext } from "./OfficeCrew";
 import OfficeFloor2D from "@/components/office/OfficeFloor2D";
 import { CompanyPanel, OfficeSetup, StaffPanel, newStaff } from "@/components/office/OfficeDialogs";
-import { BossDesk, OfficeBoard, OfficeSide, OfficeSign, OfficeTicker, OfficeTopBar } from "@/components/office/OfficePanels";
+import { BossDesk, OfficeBoard, OfficeSide, OfficeTopBar } from "@/components/office/OfficePanels";
 import { emptyRun, reconcileRun } from "@/lib/office/engine";
 import { useOfficeT } from "@/lib/office/i18n";
 import { layoutOffice } from "@/lib/office/layout";
@@ -27,9 +27,9 @@ import type { AppSettings } from "@/lib/types";
 
 const OfficeScene = dynamic(() => import("@/components/office/OfficeScene"), { ssr: false });
 
+// 保存済みの表示設定を、静かな待機モーションの設定として引き継ぐ。
 const CHATTER_KEY = "unicrew.office.chatter.v1";
-const CHATTER_JA = ["コーヒー淹れてこよ", "今日はいい天気だな", "お昼なに食べよう", "肩こったなあ", "この前の件、うまくいってよかった", "机、片づけようかな"];
-const CHATTER_EN = ["Coffee time", "Nice weather today", "What's for lunch?", "Time to stretch", "Glad that last one worked out", "Should tidy my desk"];
+
 
 interface Props {
   /** いまこの画面が表に出ているか（隠れている間は部屋の描画を止める） */
@@ -45,7 +45,7 @@ function absPath(file: string, workspace: string | null): string {
 }
 
 export default function OfficeView({ active, settings, onWorkspaceChange }: Props) {
-  const { t, locale } = useOfficeT();
+  const { t } = useOfficeT();
   const [hydrated, setHydrated] = useState(false);
   const [offices, setOffices] = useState<Office[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -55,7 +55,6 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   const [flat, setFlat] = useState(false);
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const [chatter, setChatter] = useState(true);
-  const [chatterBubble, setChatterBubble] = useState<{ staffId: string; text: string } | null>(null);
 
   const office = useMemo(() => offices.find((o) => o.id === activeId) ?? null, [offices, activeId]);
   const officeRef = useRef(office);
@@ -142,23 +141,6 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     };
   }, [lookKey]);
 
-  // にぎやかしの独り言（手が空いている社員が、ときどき一言）。仕事の実況とは別物
-  useEffect(() => {
-    if (!chatter || !active) return;
-    const id = setInterval(() => {
-      const cur = officeRef.current;
-      const r = runRef.current;
-      if (!cur || !r || document.visibilityState !== "visible") return;
-      const idle = cur.staff.filter((s) => (r.staff[s.id]?.status ?? "idle") === "idle");
-      if (idle.length === 0 || Math.random() < 0.45) return;
-      const who = idle[Math.floor(Math.random() * idle.length)];
-      const lines = locale === "ja" ? CHATTER_JA : CHATTER_EN;
-      setChatterBubble({ staffId: who.id, text: lines[Math.floor(Math.random() * lines.length)] });
-      setTimeout(() => setChatterBubble((b) => (b?.staffId === who.id ? null : b)), 4200);
-    }, 14_000);
-    return () => clearInterval(id);
-  }, [chatter, active, locale]);
-
   const updateOffice = useCallback((next: Office) => {
     setOffices((list) => list.map((o) => (o.id === next.id ? next : o)));
     officeRef.current = next;
@@ -227,83 +209,42 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     return s;
   }, [run]);
 
-  // 部屋に渡す「いま」：独り言と、OK が出た直後の喜ぶ動きを重ねる（保存する状態は汚さない）
-  const [cheering, setCheering] = useState(false);
-  useEffect(() => {
-    if (!run?.cheerAt || Date.now() - run.cheerAt > 3000) return;
-    setCheering(true);
-    const id = setTimeout(() => setCheering(false), 2400);
-    return () => clearTimeout(id);
-  }, [run?.cheerAt]);
-  const sceneRun = useMemo(() => {
-    if (!run) return null;
-    if (!chatterBubble && !cheering) return run;
-    const staff = { ...run.staff };
-    if (chatterBubble && staff[chatterBubble.staffId]?.status === "idle") {
-      staff[chatterBubble.staffId] = { ...staff[chatterBubble.staffId], bubble: chatterBubble.text, status: "waiting" };
-    }
-    if (cheering) {
-      for (const [id, s] of Object.entries(staff)) if (s.status === "done") staff[id] = { ...s, bubble: locale === "ja" ? "やった！" : "Yay!" };
-    }
-    return { ...run, staff };
-  }, [run, chatterBubble, cheering, locale]);
-
   if (!hydrated) return <div className="absolute inset-0" style={{ background: theme.sky }} />;
 
   const selectedStaff: Staff | null = office && selected ? office.staff.find((s) => s.id === selected) ?? null : null;
-  const wallLeft = office && run ? <OfficeBoard office={office} run={run} theme={theme} onSelectStaff={setSelected} flat={flat} /> : null;
-  const wallRight = office ? <OfficeSign office={office} theme={theme} /> : null;
-  const sceneLabels = { working: t("status.working"), waiting: t("status.waiting"), done: t("status.done"), idle: t("status.idle"), resetView: t("scene.resetView") };
   const sidePanelOpen = !!selectedStaff || panel === "company";
 
   return (
-    <div className="office-root relative h-full w-full overflow-hidden" style={{ background: theme.sky }} data-office-theme={theme.id}>
-      {office && run && sceneRun && layout ? (
+    <OfficeAvatarContext.Provider value={avatarUrls}>
+    <div className="office-root relative h-full w-full overflow-hidden" style={{ background: theme.sky }} data-office-theme={theme.id} data-office-flat={flat} data-companies={offices.length > 1}>
+      {office && run && layout ? (
         <>
           {flat ? (
-            <OfficeFloor2D office={office} run={sceneRun} layout={layout} theme={theme} avatarUrls={avatarUrls} needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} wallLeft={wallLeft} wallRight={wallRight} />
+            <OfficeFloor2D office={office} run={run} layout={layout} theme={theme} avatarUrls={avatarUrls} needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} active={active} animateIdle={chatter} key={office.id} />
           ) : (
             <OfficeScene
               office={office}
-              run={sceneRun}
+              run={run}
               layout={layout}
               theme={theme}
               avatarUrls={avatarUrls}
               active={active}
-              insets={{ left: 170, right: sidePanelOpen ? 424 : 0 }}
+              animateIdle={chatter}
+              key={office.id}
               needsBoss={needsBoss}
               selectedStaffId={selected}
               onSelectStaff={setSelected}
               onUnsupported={() => setFlat(true)}
-              wallLeft={wallLeft}
-              wallRight={wallRight}
-              labels={sceneLabels}
             />
           )}
           <OfficeTopBar office={office} run={run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
-          <OfficeTicker office={office} run={run} theme={theme} />
+          <OfficeBoard office={office} run={run} onSelectStaff={setSelected} />
 
-          {/* 会社の切り替え（2つ以上あるとき）と、新しい会社 */}
-          <div className="pointer-events-none absolute left-3 top-[76px] z-20 flex max-w-[220px] flex-col gap-1.5">
-            {offices.length > 1
-              ? offices.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => o.id !== office.id && switchOffice(o.id)}
-                    aria-current={o.id === office.id}
-                    className={`pointer-events-auto flex items-center gap-1.5 overflow-hidden rounded-full border px-3 py-1.5 text-left text-[12px] font-bold shadow ${
-                      o.id === office.id ? "border-rose-400 bg-rose-500 text-white" : theme.dark ? "border-white/10 bg-slate-900/80 text-slate-200" : "border-slate-200 bg-white/90 text-slate-700"
-                    }`}
-                  >
-                    <Building2 size={13} aria-hidden="true" className="shrink-0" />
-                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">{o.name}</span>
-                  </button>
-                ))
-              : null}
-          </div>
+          {offices.length > 1 ? <select aria-label={t("list.title")} value={office.id} onChange={(event) => switchOffice(event.target.value)} className="office-company-switch">
+            {offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select> : null}
 
-          <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex h-[min(56%,560px)] items-end">
+          <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex h-[min(40%,560px)] items-end">
             <BossDesk
               office={office}
               run={run}
@@ -317,7 +258,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
             />
           </div>
           {!sidePanelOpen ? (
-            <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex h-[min(50%,480px)] items-end">
+            <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex h-[min(40%,480px)] items-end">
               <OfficeSide
                 office={office}
                 run={run}
@@ -395,5 +336,6 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       ) : null}
       {panel === "setup" ? <OfficeSetup canCancel={offices.length > 0} onCreate={createOffice} onCancel={() => setPanel("none")} /> : null}
     </div>
+    </OfficeAvatarContext.Provider>
   );
 }
