@@ -7,10 +7,9 @@
  * - 会社の名簿（offices）と、選んでいる会社の「いま」（run）をここで持ち、変わるたびに保存する
  * - AI とのやり取りは OfficeRunner に任せる（ここは画面だけ）
  */
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OfficeAvatarContext } from "./OfficeCrew";
-import OfficeFloor2D from "@/components/office/OfficeFloor2D";
+import OfficeScene from "@/components/office/OfficeScene";
 import { CompanyPanel, OfficeSetup, StaffPanel, newStaff } from "@/components/office/OfficeDialogs";
 import { BossDesk, OfficeBoard, OfficeSide, OfficeTopBar } from "@/components/office/OfficePanels";
 import { emptyRun, reconcileRun } from "@/lib/office/engine";
@@ -25,7 +24,6 @@ import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
 import { avatarSrc, isTauri, pickWorkspace, revealInFileManager } from "@/lib/tauri";
 import type { AppSettings } from "@/lib/types";
 
-const OfficeScene = dynamic(() => import("@/components/office/OfficeScene"), { ssr: false });
 
 // 保存済みの表示設定を、静かな待機モーションの設定として引き継ぐ。
 const CHATTER_KEY = "unicrew.office.chatter.v1";
@@ -52,7 +50,6 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   const [run, setRun] = useState<OfficeRun | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [panel, setPanel] = useState<"none" | "company" | "setup">("none");
-  const [flat, setFlat] = useState(false);
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const [chatter, setChatter] = useState(true);
 
@@ -216,27 +213,12 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
 
   return (
     <OfficeAvatarContext.Provider value={avatarUrls}>
-    <div className="office-root relative h-full w-full overflow-hidden" style={{ background: theme.sky }} data-office-theme={theme.id} data-office-flat={flat} data-companies={offices.length > 1}>
+    <div className="office-root relative h-full w-full overflow-hidden" style={{ background: theme.sky }} data-office-theme={theme.id} data-companies={offices.length > 1}>
       {office && run && layout ? (
         <>
-          {flat ? (
-            <OfficeFloor2D office={office} run={run} layout={layout} theme={theme} avatarUrls={avatarUrls} needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} active={active} animateIdle={chatter} key={office.id} />
-          ) : (
-            <OfficeScene
-              office={office}
-              run={run}
-              layout={layout}
-              theme={theme}
-              avatarUrls={avatarUrls}
-              active={active}
-              animateIdle={chatter}
-              key={office.id}
-              needsBoss={needsBoss}
-              selectedStaffId={selected}
-              onSelectStaff={setSelected}
-              onUnsupported={() => setFlat(true)}
-            />
-          )}
+          <OfficeScene office={office} run={run} layout={layout} theme={theme}
+            avatarUrls={avatarUrls} active={active} animateIdle={chatter} key={office.id}
+            needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} />
           <OfficeTopBar office={office} run={run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
           <OfficeBoard office={office} run={run} onSelectStaff={setSelected} />
 

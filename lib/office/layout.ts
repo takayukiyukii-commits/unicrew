@@ -1,52 +1,34 @@
-/** 手渡しデッキ。上段に乗組員、手前中央に取りまとめ役と社長席を置く。 */
+/** 背景の6つの島に部署を順番に割り当てる。保存データには触れない。 */
 import type { Department, Office, Staff } from "./types";
-export interface Seat { staff: Staff; x: number; z: number; facing: number }
-export interface Island { dept: Department | null; cx: number; cz: number; w: number; d: number; seats: Seat[] }
-export interface OfficeLayout { lead: Seat | null; islands: Island[]; width: number; depth: number }
+import { SCENE, type ScenePoint } from "./scene-map";
+export interface Seat extends ScenePoint { staff: Staff; node: string }
+export interface Island { index: number; departments: Department[]; seats: Seat[] }
+export interface OfficeLayout { lead: Seat | null; islands: Island[] }
 export function layoutOffice(office: Office): OfficeLayout {
-  const lead = office.staff.find((s) => s.lead);
+  const islands: Island[] = SCENE.islands.map((_, index) => ({ index, departments: [], seats: [] }));
+  office.departments.forEach((dept, i) => islands[i % 6].departments.push(dept));
   const members = office.staff.filter((s) => !s.lead);
-  const ordered = [
-    ...office.departments.flatMap((d) => members.filter((s) => s.deptId === d.id)),
-    ...members.filter((s) => !office.departments.some((d) => d.id === s.deptId)),
-  ];
-  const islands: Island[] = [];
-  const columns = Math.min(6, Math.max(1, Math.ceil(ordered.length / 2)));
-  ordered.forEach((staff, index) => {
-    const row = Math.floor(index / columns);
-    const count = Math.min(columns, ordered.length - row * columns);
-    const x = (index % columns - (count - 1) / 2) * (25 / columns);
-    const dept = office.departments.find((d) => d.id === staff.deptId) ?? null;
-    let island = islands[islands.length - 1];
-    if (!island || island.cz !== row || island.dept?.id !== dept?.id) {
-      island = { dept, cx: x, cz: row, w: 0, d: 1, seats: [] };
-      islands.push(island);
-    }
-    island.seats.push({ staff, x, z: row, facing: 0 });
-    island.cx = island.seats.reduce((sum, s) => sum + s.x, 0) / island.seats.length;
-    island.w = (island.seats.length - 1) * (25 / columns) + 2.2;
-  });
-  return { lead: lead ? { staff: lead, x: 0, z: -1, facing: 0 } : null, islands, width: 26, depth: 14 };
+  const place = (staff: Staff, preferred: number) => {
+    const island = islands[preferred].seats.length < 4 ? islands[preferred] : islands.find((i) => i.seats.length < 4);
+    if (!island) return;
+    // 2人なら前後の席を使い、札の間に余白を取る。
+    const slot = [2, 0, 3, 1][island.seats.length];
+    const node = SCENE.islands[island.index][slot];
+    island.seats.push({ staff, node, ...SCENE.points[node] });
+    const dept = office.departments.find((d) => d.id === staff.deptId);
+    if (dept && !island.departments.some((d) => d.id === dept.id)) island.departments.push(dept);
+  };
+  for (const staff of members.filter((s) => office.departments.some((d) => d.id === s.deptId))) {
+    place(staff, office.departments.findIndex((d) => d.id === staff.deptId) % 6);
+  }
+  for (const staff of members.filter((s) => !office.departments.some((d) => d.id === s.deptId))) {
+    const free = islands.find((i) => i.seats.length === 0 && i.departments.length === 0) ?? islands.reduce((a, b) => a.seats.length <= b.seats.length ? a : b);
+    place(staff, free.index);
+  }
+  const lead = office.staff.find((s) => s.lead);
+  return { islands, lead: lead ? { staff: lead, node: "lead", ...SCENE.points.lead } : null };
 }
 export function allSeats(layout: OfficeLayout): Seat[] {
   return [...layout.islands.flatMap((i) => i.seats), ...(layout.lead ? [layout.lead] : [])];
-}
-export interface DeckPoint { x: number; y: number }
-export function deckWorkHeight(height: number): number {
-  return 146 + Math.max(98, Math.min(112, height * 0.6 - 228));
-}
-/** 立体・平面・書類が同じ位置を使う。下の左右は操作欄のために空ける。 */
-export function deckPoint(layout: OfficeLayout, target: string, width: number, height: number): DeckPoint {
-  const center = width / 2 + 36;
-  const workHeight = deckWorkHeight(height);
-  if (target === "boss") return { x: center - 30, y: height - 90 };
-  if (target === "shelf") return { x: center + 160, y: height - 130 };
-  let seat = layout.lead?.staff.id === target ? layout.lead : null;
-  if (!seat) for (const island of layout.islands) {
-    const match = island.seats.find((s) => s.staff.id === target);
-    if (match) { seat = match; break; }
-  }
-  if (!seat || seat.staff.lead) return { x: center, y: workHeight + 62 };
-  return { x: width / 2 + seat.x / layout.width * width, y: 64 + seat.z * (workHeight - 146) };
 }
 

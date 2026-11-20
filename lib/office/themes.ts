@@ -1,18 +1,13 @@
-/** 同じ白いデッキを、昼光・月明かり・木漏れ日で照らす。操作面は常に白。 */
+/** 背景は1枚。部屋の色だけ変え、操作面は白を保つ。 */
 export interface OfficeTheme {
   id: "day" | "night" | "wood";
-  sky: string; floor: string; wall: string; wallSide: string;
-  desk: string; deskLeg: string; chair: string; ring: string;
-  ambient: string; ambientIntensity: number; sun: string; sunIntensity: number;
-  signText: string; signGlow: string; signBg: string; dark: boolean;
+  sky: string; floor: string; ring: string; signBg: string; dark: boolean;
+  filter: string; overlay: string;
 }
-const base = {
-  wall: "#FFFFFF", wallSide: "#E2E8F0", desk: "#FFFFFF", deskLeg: "#CBD5E1", chair: "#94A3B8",
-  ring: "#6366F1", signText: "#475569", signGlow: "transparent", signBg: "#FFFFFF", dark: false,
-};
+const base = { ring: "#6366F1", signBg: "#FFFFFF", dark: false };
 export const OFFICE_THEMES: OfficeTheme[] = [
-  { ...base, id: "day", sky: "#F8FAFC", floor: "#FFFFFF", ambient: "#FFFFFF", ambientIntensity: 1.6, sun: "#F1F5FF", sunIntensity: 1.4 },
-  { ...base, id: "night", sky: "#E8ECF5", floor: "#F4F5FF", desk: "#F8FAFF", wallSide: "#B6C0DB", ambient: "#CAD4FF", ambientIntensity: 1.2, sun: "#E8EDFF", sunIntensity: 1.1 },
-  { ...base, id: "wood", sky: "#F5F2EB", floor: "#FFFCF7", desk: "#F4E9D8", wallSide: "#D8C8B2", ambient: "#FFFAEF", ambientIntensity: 1.6, sun: "#FFE4B8", sunIntensity: 1.3 },
+  { ...base, id: "day", sky: "#F7F2E9", floor: "#EACCA9", filter: "none", overlay: "transparent" },
+  { ...base, id: "night", sky: "#E3E5F1", floor: "#BCB4D1", filter: "brightness(.70) saturate(.75)", overlay: "rgba(55,65,120,.18)" },
+  { ...base, id: "wood", sky: "#F4EDDD", floor: "#D5B184", filter: "sepia(.20) saturate(.95)", overlay: "rgba(231,181,95,.08)" },
 ];
 export function officeTheme(id: string): OfficeTheme { return OFFICE_THEMES.find((t) => t.id === id) ?? OFFICE_THEMES[0]; }

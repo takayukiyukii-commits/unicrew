@@ -222,7 +222,7 @@ html, body {
 }
 
 
-/* ───────── AIオフィス：手渡しデッキ ───────── */
+/* ───────── AIオフィス：ドット絵のオフィス ───────── */
 .office-root {
   --office-primary: #6366F1;
   --office-deep: #4F46E5;
@@ -282,61 +282,40 @@ html, body {
 .office-progress-hint { margin-left: auto; color: #64748B; letter-spacing: .04em; }
 .office-company-switch { position: absolute; z-index: 26; top: 88px; right: 24px; width: 200px; background: white; border: 1px solid #E2E8F0; font-size: 12px; }
 .office-root[data-companies="true"] .office-progress-hint, .office-root[data-office-flat="true"] .office-progress-hint { display: none; }
-.office-deck { position: absolute; top: 144px; bottom: 0; left: 0; right: 0; overflow: hidden; }
-.office-department {
-  position: absolute; transform: translateX(-50%); padding: 0 6px 0 8px;
-  border-left: 3px solid; font-size: 12px; font-weight: 600; color: #475569;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
-}
-.office-seat-label {
-  position: absolute; z-index: 3; transform: translateX(-50%); padding: 5px 8px;
-  border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF; color: #0F172A;
-  text-align: left; line-height: 1.3; min-height: 72px;
-}
-.office-seat-label:hover { border-color: #CBD5E1; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
-.office-seat-label[aria-pressed="true"] { border-color: #6366F1; outline: 2px solid #6366F1; }
-.office-seat-label[data-status="waiting"] { border-left: 3px solid #F59E0B; }
-.office-seat-name { display: flex; align-items: center; height: 26px; gap: 4px; }
-.office-seat-name strong { font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.office-seat-state, .office-seat-task { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; line-height: 18px; color: #64748B; }
-.office-seat-state { color: #475569; }
-.office-seat-state i { display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: #94A3B8; vertical-align: middle; }
-.office-seat-label[data-status="working"] .office-seat-state i { background: #6366F1; }
-.office-seat-label[data-status="waiting"] .office-seat-state i { background: #F59E0B; }
-.office-seat-label[data-status="done"] .office-seat-state i { background: #10B981; }
-.office-boss-port, .office-shelf-port { position: absolute; transform: translate(-50%, -10%); display: flex; flex-direction: column; align-items: center; gap: 2px; color: #475569; font-size: 12px; pointer-events: none; }
-.office-boss-port { border-top: 2px solid #6366F1; width: 150px; padding: 8px; background: #FFFFFF; border-radius: 12px; }
-.office-boss-port strong { color: #0F172A; }
-.office-boss-port[data-waiting="true"] { border-color: #F59E0B; }
-.office-review-paper { position: absolute; right: 8px; top: -34px; background: #FFFBEB; border: 1px solid #F59E0B; border-radius: 6px; padding: 6px; color: #92400E; transform: rotate(8deg); }
-.office-shelf-port { width: 112px; padding-top: 6px; }
-.office-deck-plaque { position: absolute; left: calc(50% + 36px); bottom: 10px; transform: translateX(-50%); display: flex; max-width: 330px; align-items: center; gap: 8px; font-size: 12px; color: #64748B; white-space: nowrap; }
-.office-deck-plaque > span:first-child { color: #6366F1; letter-spacing: .1em; font-weight: 800; font-size: 11px; }
-.office-deck-plaque strong { max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.office-deck-plaque > span:last-child { display: none; }
-.office-handoffs { position: absolute; inset: 0; pointer-events: none; z-index: 8; overflow: hidden; }
-.office-packet { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 52px; height: 62px; background: #FFFFFF; border: 1px solid #6366F1; border-top: 5px solid #6366F1; border-radius: 6px; color: #4F46E5; font-size: 10px; opacity: 0; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
-.office-packet--report { border-color: #64748B; color: #475569; }
-.office-packet--review, .office-packet--returned { border-color: #F59E0B; color: #92400E; }
-.office-packet--approved, .office-packet--delivery { border-color: #10B981; color: #047857; }
-.office-packet--approved { border: 3px solid #10B981; height: 56px; width: 70px; background: #ECFDF5; }
-.office-flat-platform { position: absolute; top: 4px; left: 1.5%; right: 1.5%; height: 48%; border: 1px solid #E2E8F0; border-bottom: 8px solid #CBD5E1; border-radius: 12px; }
-.office-flat-platform::after { content: ""; position: absolute; top: 100%; left: calc(50% - 162px); width: 400px; height: 240px; background: inherit; border: 1px solid #E2E8F0; border-top: 0; border-radius: 0 0 12px 12px; }
-.office-flat-crew { position: absolute; transform: translateX(-50%); }
-.office-flat-table { position: absolute; height: 16px; border: 1px solid #E2E8F0; border-bottom: 3px solid; border-radius: 6px; transform: translateX(-50%); }
-.office-deck[data-motion="on"][data-breathe="true"] .office-flat-crew[data-status="idle"] { animation: office-breathe 5s ease-in-out infinite; }
-@keyframes office-breathe { 50% { margin-top: -1px; } }
-.office-flat-stack { position: absolute; width: 68px; height: 40px; bottom: 100%; }
-.office-flat-stack i { position: absolute; width: 28px; height: 22px; left: 4px; border: 1px solid #CBD5E1; border-left: 4px solid #10B981; border-radius: 3px; background: #FFFFFF; }
-.office-fallback-note { position: absolute; top: 88px; right: 28px; z-index: 26; font-size: 12px; color: #64748B; }
-.office-root[data-companies="true"] .office-fallback-note { right: 240px; }
-.office-fallback-note summary { height: 40px; display: flex; align-items: center; cursor: pointer; list-style: none; }
-.office-fallback-note summary::-webkit-details-marker { display: none; }
-.office-fallback-note p { position: absolute; right: 0; top: 44px; width: 280px; border: 1px solid #E2E8F0; border-radius: 12px; padding: 12px; background: #FFFFFF; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
-.office-ticker { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); }
-.office-dots { display: inline-flex; gap: 3px; align-items: center; }
-.office-dots i { width: 4px; height: 4px; border-radius: 50%; background: #94A3B8; }
-.office-dots--muted { color: #94A3B8; }
+
+/* 絵と座標の比率を固定する。狭い窓では札の文字を縮めず横にスクロールする。 */
+.office-scene-scroll { position: absolute; inset: 144px 0 0; overflow: auto; background: #F7F2E9; }
+.office-pixel-scene { position: relative; width: 100%; min-width: 1400px; aspect-ratio: 16 / 9; isolation: isolate; }
+.office-scene-background, .office-scene-tint { position: absolute; inset: 0; pointer-events: none; }
+.office-scene-background { background: url("/office/scene/office-day.webp") center / 100% 100% no-repeat; image-rendering: pixelated; }
+.office-scene-tint { z-index: 1; }
+.office-place-sign, .office-island-sign { position: absolute; transform: translateX(-50%); display: flex; align-items: center; gap: 5px; padding: 3px 9px; background: rgba(255,255,255,.95); border: 1px solid #D7D2CC; border-radius: 5px; color: #475569; font-size: 12px; font-weight: 600; white-space: nowrap; z-index: 2; }
+.office-island-sign { max-width: 170px; display: block; overflow: hidden; text-overflow: ellipsis; border-left-width: 4px; font-size: 11px; }
+.office-label-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 110; }
+.office-root .office-person { position: absolute; left: 0; top: 0; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; background: transparent; }
+.office-person-image { display: block; position: absolute; bottom: 0; left: -36px; width: 72px; height: 72px; transform-origin: center bottom; }
+.office-person[data-waiting="true"] .office-crew-face { width: 54px !important; height: 54px !important; margin-left: 9px; margin-top: 18px; }
+.office-carry-paper { display: none; position: absolute; left: 13px; bottom: 23px; padding: 2px; color: #6366F1; background: white; border: 1px solid #C7D2FE; border-radius: 3px; }
+.office-person[data-action="report"] .office-carry-paper, .office-person[data-action="delivery"] .office-carry-paper { display: block; }
+.office-person[aria-pressed="true"] .office-person-image { filter: drop-shadow(0 0 3px #6366F1); }
+.office-crew-face { display: inline-block; flex-shrink: 0; image-rendering: pixelated; vertical-align: middle; }
+.office-crew-custom { border: 3px solid #FFFFFF; border-radius: 8px; background: #F8FAFC; box-shadow: 0 2px 0 #94A3B8; }
+.office-person-alert { position: absolute; top: -80px; left: 17px; display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; color: #92400E; background: #FEF3C7; border: 1px solid #F59E0B; font-size: 15px; font-weight: 800; }
+.office-root .office-person-label { position: absolute; top: 0; left: 0; z-index: 120; width: 112px; min-height: 0; padding: 3px 5px; border: 1px solid #D7D2CC; border-left: 3px solid; border-radius: 5px; background: #FFFFFF; text-align: left; line-height: 1.35; box-shadow: 0 1px 3px #0F172A12; }
+.office-person-label strong, .office-person-label > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-person-label strong { color: #1E293B; font-size: 12px; }
+.office-person-label > span { color: #64748B; font-size: 11px; }
+.office-person-label[aria-pressed="true"], .office-person-label:hover { outline: 2px solid #6366F1; outline-offset: 1px; }
+.office-person-label .office-person-bubble { margin: 3px -2px 0; padding: 2px 3px; background: #EEF2FF; border-radius: 3px; color: #4F46E5; }
+.office-person-label[data-status="waiting"] .office-person-bubble { color: #92400E; background: #FFFBEB; }
+.office-person-label[data-status="done"] .office-person-bubble { color: #047857; background: #ECFDF5; }
+.office-pixel-scene[data-motion="on"] .office-person[data-walking="true"] .office-person-image { animation: office-walk .28s steps(2,end) infinite; }
+.office-pixel-scene[data-motion="on"] .office-person[data-working="true"] .office-person-image { animation: office-work 1.4s steps(2,end) infinite; }
+@keyframes office-walk { 50% { transform: translateY(-3px) rotate(2deg); } }
+@keyframes office-work { 50% { transform: translateY(-1px); } }
+.office-pixel-scene[data-motion="off"] * { animation: none !important; }
+.office-overflow-staff { padding: 12px; background: white; }
+.office-overflow-staff button { margin: 4px; padding: 5px 10px; border: 1px solid #CBD5E1; }
 .office-md p { margin: 0 0 .5em; }
 .office-md p:last-child { margin-bottom: 0; }
 .office-md ul, .office-md ol { margin: .25em 0 .5em 1.2em; list-style: revert; }
