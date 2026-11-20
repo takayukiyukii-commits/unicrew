@@ -76,6 +76,8 @@ export interface StaffRuntime {
   started: boolean;
   /** 最後の報告・返事の出だし（部屋の中の会話の吹き出しに出す）。古い保存には無い */
   said?: string | null;
+  /** この時刻に「出社」した（表示だけ。RUNner の仕事を受け取った社員が扉から入ってくる）。保存しない */
+  arrive?: number;
   /** いまのターンで数え済みのトークン（実況の数字は同じターンの中で増えていくので差分だけ足す） */
   turnIn: number;
   turnOut: number;

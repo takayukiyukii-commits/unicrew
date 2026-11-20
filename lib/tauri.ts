@@ -201,6 +201,23 @@ export async function listDirectory(path: string): Promise<DirEntry[]> {
  * パスが実在するか。失敗（未起動・権限）は false に倒す。
  * 「無いかもしれない場所」を使う前の確認用（例: 前回のターミナルの作業場）。
  */
+export interface FileTail {
+  size: number;
+  modified_ms: number;
+  text: string;
+}
+
+/** ファイルの大きさ・更新時刻と、末尾（fromStart のときは先頭）だけを読む。maxBytes が 0 なら中身は読まない。無ければ null */
+export async function fileTail(path: string, maxBytes: number, fromStart = false): Promise<FileTail | null> {
+  if (!isTauri()) return null;
+  try {
+    const invoke = await loadInvoke();
+    return await invoke<FileTail>("file_tail", { path, maxBytes, fromStart });
+  } catch {
+    return null;
+  }
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   if (!isTauri()) return false;
   try {

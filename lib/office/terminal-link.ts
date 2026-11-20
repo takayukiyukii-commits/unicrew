@@ -14,9 +14,13 @@
 export type TerminalEventKind = "start" | "activity" | "waiting" | "stop";
 
 export interface TerminalEvent {
-  /** ペインの番号（1から） */
+  /** ペインの番号（1から）。RUNner の知らせは 1000 番台を使う */
   pane: number;
   kind: TerminalEventKind;
+  /** どこから来た知らせか（無ければターミナル） */
+  source?: "terminal" | "runner";
+  /** RUNner のゴールの番号（8桁） */
+  key?: string;
   /** 最後に送った指示（分かるときだけ） */
   instruction?: string | null;
   /** いま使っている道具の名前と中身（画面の「● Read(…)」の行から読む） */
@@ -92,6 +96,10 @@ export class ToolLineWatcher {
 /** ターミナルの作業を、社員ごとの「いま」に直したもの（表示用）。 */
 export interface TerminalActivity {
   pane: number;
+  source: "terminal" | "runner";
+  key: string | null;
+  /** 始まった時刻（RUNner の仕事で、社員が扉から入ってくるきっかけ） */
+  startedAt: number;
   status: "working" | "waiting" | "done";
   instruction: string | null;
   /** いま使っている道具（無ければ null） */
@@ -105,15 +113,17 @@ let toolSeq = 0;
 
 /** 知らせを1つ受けて、そのペインの「いま」を次に進める。stop のあとは呼び出し側が数秒後に消す。 */
 export function nextTerminalActivity(prev: TerminalActivity | undefined, ev: TerminalEvent): TerminalActivity {
-  const base: TerminalActivity = prev ?? { pane: ev.pane, status: "working", instruction: null, tool: null, finished: null, at: ev.at };
+  const base: TerminalActivity = prev ?? { pane: ev.pane, source: ev.source ?? "terminal", key: ev.key ?? null, startedAt: ev.at, status: "working", instruction: null, tool: null, finished: null, at: ev.at };
   switch (ev.kind) {
     case "start":
-      return { ...base, status: "working", instruction: ev.instruction ?? base.instruction, tool: null, finished: null, at: ev.at };
+      // 止まっていた・終わっていた所から動き出したら、始まりの時刻を新しくする（同じ作業の途中の知らせでは変えない）
+      return { ...base, status: "working", startedAt: prev && prev.status === "working" ? base.startedAt : ev.at, instruction: ev.instruction ?? base.instruction, tool: prev && prev.status === "working" ? base.tool : null, finished: prev && prev.status === "working" ? base.finished : null, at: ev.at };
     case "activity": {
       toolSeq += 1;
       return {
         ...base,
         status: "working",
+        instruction: ev.instruction ?? base.instruction,
         finished: base.tool ? { id: base.tool.id, name: base.tool.name } : base.finished,
         tool: ev.tool ? { id: `term-${ev.pane}-${toolSeq}`, name: ev.tool, detail: ev.detail ?? "" } : base.tool,
         at: ev.at,

@@ -335,6 +335,19 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
           kind: afterBoss.has(seat.staff.id) ? "review" : "home", targets: { [seat.staff.id]: destinations[seat.staff.id] }, hold: 0,
         });
       } else queue.push(...walkChanges(before, after, office, layout, linesRef.current));
+      // 出社：RUNner の仕事を受け取った社員は、扉から入って席に着く（仕事を受け取るたびに1回）
+      if (!reduced) {
+        const comers: Record<string, string> = {};
+        for (const seat of seats) {
+          const id = seat.staff.id, actor = actors.get(id);
+          const arrive = after.staff[id]?.arrive;
+          if (!actor || !arrive || arrive === before.staff[id]?.arrive) continue;
+          if (actor.node !== seat.node || actor.route.length || afterBoss.has(id)) continue; // 席にいないときは、そのまま続ける
+          actor.node = "door"; actor.point = { ...SCENE.points.door };
+          comers[id] = seat.node;
+        }
+        if (Object.keys(comers).length > 0) queue.unshift({ kind: "enter", targets: comers, hold: 0 });
+      }
       // しぐさ：仕事が終わったらガッツポーズ（報告に行く前に見せる）。ファイルを1つ書き終えたら、席で手を挙げる
       if (!reduced) {
         const nowG = performance.now();

@@ -383,3 +383,7 @@ html, body {
 .office-carry-paper { left: calc(14px * var(--s, .75)); bottom: calc(30px * var(--s, .75)); }
 /* 社員の置き場所の印は高さ1px（ボタンの最小の高さ40pxの決まりから外す。外さないと、絵が足元より40px下にずれる） */
 .office-root button.office-person.office-person { min-height: 0; height: 1px; }
+
+/* RUNner の仕事が動いているときに出す入口（UNIHUB をブラウザで開く） */
+.office-root button.office-run-chip { position: absolute; right: 12px; top: 150px; z-index: 30; min-height: 0; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C7D2FE; background: #EEF2FF; color: #4F46E5; font-size: 12px; font-weight: 600; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
+.office-root button.office-run-chip:hover { background: #E0E7FF; }

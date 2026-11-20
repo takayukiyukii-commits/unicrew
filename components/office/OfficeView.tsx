@@ -20,12 +20,13 @@ import { OfficeRunner } from "@/lib/office/runner";
 import { deleteRun, loadActiveOfficeId, loadOffices, loadRun, saveActiveOfficeId, saveOffices, saveRun } from "@/lib/office/store";
 import { officeTheme } from "@/lib/office/themes";
 import type { Office, OfficeRun, Staff } from "@/lib/office/types";
-import { openPreviewWindow } from "@/lib/preview-window";
+import { openExternal, openPreviewWindow } from "@/lib/preview-window";
 import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
-import { avatarSrc, isTauri, pickWorkspace, revealInFileManager } from "@/lib/tauri";
+import { avatarSrc, fileTail, isTauri, listDirectory, pathExists, pickWorkspace, revealInFileManager } from "@/lib/tauri";
 import type { AppSettings } from "@/lib/types";
 import { describeTool } from "@/lib/progress-text";
 import { nextTerminalActivity, publishTerminal, subscribeTerminal, type TerminalActivity } from "@/lib/office/terminal-link";
+import { RUN_DIR_CANDIDATES, RUN_LIVE_MS, RUN_LOG_NAME, RUN_PANE_BASE, RUN_SITE_URL, RUN_TAIL_BYTES, RunWatcher } from "@/lib/office/run-link";
 
 
 // 保存済みの表示設定を、静かな待機モーションの設定として引き継ぐ。
@@ -230,6 +231,41 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     if (!isTauri()) (window as unknown as { __officeTerminal?: typeof publishTerminal }).__officeTerminal = publishTerminal;
     return () => { off(); timers.forEach((id) => window.clearTimeout(id)); };
   }, []);
+  // ── RUNner との連動：RUNner の作業フォルダの記録（末尾だけ）を数秒おきに読み、動いているゴールを社員の動きにする。読むだけ
+  useEffect(() => {
+    if (!isTauri()) return;
+    let alive = true;
+    let dir: string | null = null;
+    const watcher = new RunWatcher();
+    const tick = async () => {
+      try {
+        if (!dir) {
+          for (const candidate of RUN_DIR_CANDIDATES) if (await pathExists(candidate)) { dir = candidate; break; }
+          if (!dir) return; // RUNner を使っていないPC
+        }
+        const folders = (await listDirectory(dir)).filter((entry) => entry.is_dir && !entry.name.startsWith("_")).slice(0, 80);
+        const now = Date.now();
+        const readings = [];
+        for (const folder of folders) {
+          const log = `${folder.path.replace(/[\\/]+$/, "")}/${RUN_LOG_NAME}`;
+          const meta = await fileTail(log, 0);
+          if (!meta) continue;
+          // 動いている記録だけ、末尾を読む
+          const tail = now - meta.modified_ms < RUN_LIVE_MS ? (await fileTail(log, RUN_TAIL_BYTES))?.text ?? null : null;
+          readings.push({ key: folder.name, modifiedMs: meta.modified_ms, tail });
+        }
+        if (!alive) return;
+        for (const ev of watcher.feed(readings, now)) publishTerminal(ev);
+      } catch {
+        /* 読めなくても、オフィスは止めない（次の回でまた読む） */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 5000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, []);
+  /** 動いている・返事を待っている RUNner の仕事の数（UNIHUB を開く入口に出す） */
+  const runGoals = useMemo(() => Object.values(terminal).filter((act) => act.source === "runner" && act.status !== "done").length, [terminal]);
   /** 表示用の「いま」：オフィスの仕事で手が空いている社員に、ターミナルの作業を重ねる */
   const viewRun = useMemo(() => {
     if (!run || !office) return run;
@@ -239,7 +275,10 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     const staff = { ...run.staff };
     const permissions = [...run.permissions];
     for (const act of panes) {
-      const who = members[(act.pane - 1) % members.length];
+      // ターミナルは席の前から順に、RUNner の仕事は後ろの席から順に割り当てる（同じ人に重なりにくくする）
+      const runner = act.source === "runner";
+      const who = runner ? members[members.length - 1 - ((act.pane - RUN_PANE_BASE) % members.length)] : members[(act.pane - 1) % members.length];
+      const k = runner ? "run" : "term";
       const rt = staff[who.id];
       if (!rt || rt.status === "working" || rt.status === "waiting") continue; // オフィスの仕事の最中は、そちらを優先
       const doing = act.tool ? describeTool({ kind: "tool_use", toolUseId: act.tool.id, toolName: act.tool.name, input: toolInput(act.tool.detail), status: "pending" }, false) : null;
@@ -250,12 +289,13 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       staff[who.id] = {
         ...rt,
         status: act.status === "done" ? "done" : act.status === "waiting" ? "waiting" : "working",
-        task: what || t("term.working", { n: act.pane }),
-        bubble: act.status === "waiting" ? t("term.waiting", { n: act.pane }) : act.status === "done" ? t("term.done", { n: act.pane }) : doing ?? (what ? t("term.instruction", { n: act.pane, text: what }) : t("term.working", { n: act.pane })),
-        said: act.status === "done" ? t("term.done", { n: act.pane }) : rt.said,
+        task: what || t(`${k}.working`, { n: act.pane }),
+        arrive: runner ? act.startedAt : rt.arrive,
+        bubble: act.status === "waiting" ? t(`${k}.waiting`, { n: act.pane }) : act.status === "done" ? t(`${k}.done`, { n: act.pane }) : runner && what ? t("run.instruction", { text: what }) : doing ?? (what ? t(`${k}.instruction`, { n: act.pane, text: what }) : t(`${k}.working`, { n: act.pane })),
+        said: act.status === "done" ? t(`${k}.done`, { n: act.pane }) : rt.said,
         tools,
       };
-      if (act.status === "waiting") permissions.push({ id: `term-${act.pane}`, staffId: who.id, requestId: "", toolName: "terminal", text: t("term.waiting", { n: act.pane }), at: act.at });
+      if (act.status === "waiting") permissions.push({ id: `term-${act.pane}`, staffId: who.id, requestId: "", toolName: "terminal", text: t(`${k}.waiting`, { n: act.pane }), at: act.at });
     }
     return { ...run, staff, permissions };
   }, [run, office, terminal, t]);
@@ -283,6 +323,9 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
           <OfficeScene office={office} run={viewRun ?? run} layout={layout} theme={theme}
             avatarUrls={avatarUrls} active={active} animateIdle={chatter} key={office.id}
             needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} />
+          {runGoals > 0 ? <button type="button" className="office-run-chip" onClick={() => void openExternal(RUN_SITE_URL).catch(() => {})} title={t("run.openHint")}>
+            {t("run.chip", { n: runGoals })}
+          </button> : null}
           <OfficeTopBar office={office} run={run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
           <OfficeBoard office={office} run={viewRun ?? run} onSelectStaff={setSelected} />
 

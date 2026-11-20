@@ -4588,6 +4588,58 @@ async fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Serialize)]
+struct FileTail {
+    /// ファイルの大きさ（バイト）
+    size: u64,
+    /// 最後に書かれた時刻（1970年からのミリ秒。取れなければ 0）
+    modified_ms: u64,
+    /// 末尾（from_start のときは先頭）の文字。max_bytes が 0 なら空
+    text: String,
+}
+
+/// ファイルの大きさ・更新時刻と、末尾（または先頭）だけを読む。
+/// 大きな記録（RUNner の作業の記録など）を、丸ごと読まずに「動いているか・いま何をしているか」だけ見るために使う。
+/// 読むだけ。1回に読むのは 1MB まで。
+#[tauri::command]
+async fn file_tail(path: String, max_bytes: u64, from_start: Option<bool>) -> Result<FileTail, String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let p = expand_user_path(&path);
+    let meta = tokio::fs::metadata(&p).await.map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("ファイルではありません".to_string());
+    }
+    let size = meta.len();
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let take = max_bytes.min(size).min(1_048_576);
+    let mut text = String::new();
+    if take > 0 {
+        let mut f = tokio::fs::File::open(&p).await.map_err(|e| e.to_string())?;
+        if !from_start.unwrap_or(false) {
+            f.seek(std::io::SeekFrom::Start(size - take))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        let mut buf = Vec::with_capacity(take as usize);
+        f.take(take)
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
+        // 途中から読むので、文字の切れ目に当たっても落とさない
+        text = String::from_utf8_lossy(&buf).to_string();
+    }
+    Ok(FileTail {
+        size,
+        modified_ms,
+        text,
+    })
+}
+
 /// 設計書③: workspace 配下で相対パス／裸ファイル名の実体を探索する。
 /// 1) workspace/rel が存在すればそれを返す（絶対パスは呼び出し側でスキップ済み）
 /// 2) 無ければ workspace 配下を BFS 探索し、rel をサフィックスとして含む最初の一致、
@@ -6231,6 +6283,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             read_text_file,
+            file_tail,
             resolve_file_candidate,
             path_exists,
             default_shell,
