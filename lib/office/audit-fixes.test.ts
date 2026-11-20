@@ -2,7 +2,7 @@
  * 出荷前の監査（2026-11-21）で見つかった不具合が戻らないことを確かめる。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { boardOf, emptyRun, reconcileRun, step } from "./engine";
+import { boardOf, canTakeInstruction, emptyRun, reconcileRun, step } from "./engine";
 import { findStaffByName, parseLeadDirectives } from "./protocol";
 import { planSend, sessionKeyOf } from "./runner";
 import { __resetStoreForTest, brokenStores, loadOffices, loadRun, repairRun, saveOffices, saveRun } from "./store";
@@ -407,5 +407,35 @@ describe("保存の控え（追加）", () => {
     } finally {
       Storage.prototype.setItem = original;
     }
+  });
+});
+
+describe("自分の直しの監査・2回目（第6回）で見つかった点", () => {
+  it("取りまとめ役が失敗で止まったあとは、社員の返事が届いても預かった指示を渡さない", () => {
+    const w = world();
+    const [a] = w.members;
+    w.send({ t: "boss", text: "作って", at: 1 });
+    w.say(w.lead.id, `[[依頼:${a.name}]]A[[/依頼]]`);
+    w.send({ t: "boss", text: "B", at: 3 });
+    w.agent(w.lead.id, { kind: "error", message: "process exited" });
+    const before = w.sends().length;
+    w.say(a.id, "A の報告");
+    expect(w.sends().length).toBe(before);
+    expect(w.run.pending).toHaveLength(1);
+  });
+
+  it("預かりがいっぱいのときは「受け取れない」と答える（送り手が持っていられるように）", () => {
+    const w = world();
+    expect(canTakeInstruction(w.run, w.o)).toBe(true);
+    w.send({ t: "boss", text: "main", at: 1 });
+    for (let i = 1; i <= 29; i++) w.send({ t: "boss", text: `q-${i}`, at: 1 + i });
+    expect(canTakeInstruction(w.run, w.o)).toBe(true);
+    w.send({ t: "boss", text: "q-30", at: 40 });
+    expect(canTakeInstruction(w.run, w.o)).toBe(false);
+  });
+
+  it("同じ行の中で閉じているコード（```x```）を、囲みの始まりと取り違えない", () => {
+    expect(parseLeadDirectives("```x```\n[[依頼:Alice]]Aを調査[[/依頼]]").delegations).toEqual([{ to: "Alice", text: "Aを調査" }]);
+    expect(parseLeadDirectives("[[確認:コード]]\n```x```\n[[/確認]]").approval?.body).toBe("```x```");
   });
 });

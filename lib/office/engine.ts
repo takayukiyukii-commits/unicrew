@@ -219,6 +219,13 @@ function leadFree(run: OfficeRun, leadId: string): boolean {
   return run.staff[leadId]?.status !== "working" && run.awaiting.length === 0 && !run.approval && !run.permissions.some((p) => p.staffId === leadId);
 }
 
+/** いま指示を受け取れるか（すぐ渡せる、または預かれる）。受け取れないときは、送り手の側で持っていてもらう。 */
+export function canTakeInstruction(run: OfficeRun, office: Office): boolean {
+  const lead = leadOf(office);
+  if (!lead) return false;
+  return leadFree(run, lead.id) || (run.pending ?? []).length < MAX_PENDING;
+}
+
 /** 前の仕事の印（完了・付箋）を片づけ、使った量を数え直す。 */
 function beginFreshJob(run: OfficeRun): OfficeRun {
   const staff: Record<string, StaffRuntime> = {};
@@ -244,7 +251,8 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput, locale
   const pending = r.run.pending ?? [];
   // 預かっていた指示：取りまとめ役の返事が普通に終わって手が空いたら、まとめて渡す。
   // 失敗で止まった直後には渡さない（同じ返事の「失敗」の知らせが続けて届き、次の仕事まで止めてしまうため。次に指示を送ったとき一緒に渡す）
-  const turnEnded = (input.t === "agent" && input.ev.kind === "result" && !FAILED_RESULT.test(input.ev.subtype ?? "")) || input.t === "sync";
+  // （社員の返事では渡さない。取りまとめ役が失敗で止まったあとに、まだ動いていた社員の返事が届くことがある）
+  const turnEnded = (input.t === "agent" && input.ev.kind === "result" && input.staffId === lead?.id && !FAILED_RESULT.test(input.ev.subtype ?? "")) || input.t === "sync";
   const leadRt = lead ? r.run.staff[lead.id] : undefined;
   if (lead && leadRt && turnEnded && pending.length > 0 && leadFree(r.run, lead.id) && !waitsForBoss(r.run, lead.id) && (leadRt.status === "done" || leadRt.status === "idle")) {
     const at = "at" in input ? input.at : Date.now();

@@ -153,4 +153,16 @@ describe("RUNner の知らせ", () => {
     // 追っていたのに読めなかった物は、消えたと見る
     expect(w.feed([], now + 10_000, { partial: true }).map((e) => [e.kind, e.key])).toEqual([["stop", "aaaaaaaa"]]);
   });
+  it("記録を読めなかった回は、追っている仕事を忘れない（待ちのゴールを見失わない）。長く動きが無い物だけ終わりにする", () => {
+    const w = new RunWatcher();
+    const now = 80_000_000;
+    const wait = [claudeTool("t2", "mcp__run__request_approval", { title: "よいですか" }), result].join("\n");
+    w.feed([{ key: "aaaaaaaa", modifiedMs: now, tail: wait }], now);
+    expect(w.expire(now + 31 * 60_000)).toEqual([]);
+    expect(w.active()).toHaveLength(1);
+    // 読めるようになったあとも、同じ記録を読み直さずに待ちのまま
+    expect(w.feed([{ key: "aaaaaaaa", modifiedMs: now, tail: null }], now + 32 * 60_000)).toEqual([]);
+    expect(w.active()).toHaveLength(1);
+    expect(w.expire(now + RUN_WAIT_MAX_MS + 1000).map((e) => e.kind)).toEqual(["stop"]);
+  });
 });

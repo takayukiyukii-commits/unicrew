@@ -26,7 +26,7 @@ import type { AppSettings, Thread } from "@/lib/types";
 import { deletePastThread, loadLastWorkspace, loadSettings, loadThreadsAsync, saveLastWorkspace, saveSettings } from "@/lib/storage";
 import { fireDueRoutines, loadRoutines, saveRoutines } from "@/lib/routines";
 import { isWalkthroughDone, resetWalkthrough } from "@/lib/walkthrough";
-import { resetWhatsNew, shouldShowWhatsNew, UNICREW_VERSION } from "@/lib/whatsnew";
+import { markFirstRunSeen, resetWhatsNew, shouldShowWhatsNew, UNICREW_VERSION } from "@/lib/whatsnew";
 import { isLocaleUnset, useLocaleInit, useTranslation } from "@/lib/i18n";
 import { isWorkspaceTrusted, trustWorkspace } from "@/lib/trust";
 import { openFileInEditorWindow } from "@/lib/editor-window";
@@ -168,7 +168,7 @@ export default function Page() {
       if (alive) showToast(tr("past.loadError"), "error");
     }).finally(() => { if (alive) setHydrated(true); });
     if (isLocaleUnset()) setLanguagePickerOpen(true);
-    else if (!isWalkthroughDone()) setWalkthroughOpen(true);
+    else if (!isWalkthroughDone()) { markFirstRunSeen(); setWalkthroughOpen(true); }
     else if (shouldShowWhatsNew()) setWhatsNewOpen(true);
     void (async () => {
       if (!isTauri()) return;

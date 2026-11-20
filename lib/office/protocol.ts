@@ -55,11 +55,12 @@ function maskFences(text: string): { masked: string; restore: (s: string) => str
   };
   // 1行ずつ見る：字下げした囲み・長い囲み（````）も囲みとして扱う。閉じていない囲みは、最後まで囲みと見る
   for (const line of text.split("\n")) {
-    const m = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    const m = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
     if (open) {
       open.lines.push(line);
       if (m && m[1][0] === open.mark[0] && m[1].length >= open.mark.length && line.trim() === m[1]) flush();
-    } else if (m) {
+    } else if (m && !(m[1][0] === "`" && m[2].includes("`"))) {
+      // 同じ行の中で閉じている物（```x```）は、囲みの始まりではない
       open = { mark: m[1], lines: [line] };
     } else {
       out.push(line);

@@ -169,6 +169,19 @@ export class RunWatcher {
     return t ? modifiedMs > t.modified : now - modifiedMs < RUN_RECENT_MS;
   }
 
+  /** 記録を読めなかった回：追っている物は忘れず、長く動きが無い物だけ終わりにする。 */
+  expire(now: number): TerminalEvent[] {
+    const events: TerminalEvent[] = [];
+    for (const [key, t] of this.tracked) {
+      const quiet = now - t.modified;
+      if ((t.state === "working" && quiet > RUN_WORK_IDLE_MS) || (t.state === "waiting" && quiet > RUN_WAIT_MAX_MS)) {
+        t.state = "done";
+        events.push(this.ev(key, t, "stop", now));
+      }
+    }
+    return events;
+  }
+
   /** partial＝追っているゴールだけを読んだ回（読んでいないフォルダを「消えた」と見なさない。追っているのに読めなかった物だけ、消えたと見る） */
   feed(readings: readonly RunLogReading[], now: number, opts: { partial?: boolean } = {}): TerminalEvent[] {
     const events: TerminalEvent[] = [];

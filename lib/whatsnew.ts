@@ -13,7 +13,7 @@
 import { compare as compareVersions } from "./semver-mini";
 
 /** ビルド時に NEXT_PUBLIC_UNICREW_VERSION が無いときの fallback。package.json と同じ値にする（機械検査あり）。 */
-const UNICREW_VERSION_FALLBACK = "0.6.3";
+const UNICREW_VERSION_FALLBACK = "0.7.0";
 
 /**
  * 表示中バージョン。正本は package.json（next.config.ts が NEXT_PUBLIC_UNICREW_VERSION に埋める）。
@@ -45,6 +45,12 @@ export function shouldShowWhatsNew(): boolean {
 export function markWhatsNewSeen(version: string = UNICREW_VERSION): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, version);
+}
+
+/** 初めて使う人：いまの版を「見た」ことにしておく（初回の案内を終えた次の起動で、同じ版のお知らせを出さない）。 */
+export function markFirstRunSeen(): void {
+  if (typeof window === "undefined") return;
+  if (!localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, UNICREW_VERSION);
 }
 
 /** Palette / Help から強制再表示する用 */

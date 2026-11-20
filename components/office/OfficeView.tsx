@@ -12,7 +12,7 @@ import { OfficeAvatarContext } from "./OfficeCrew";
 import OfficeScene from "@/components/office/OfficeScene";
 import { CompanyPanel, OfficeSetup, StaffPanel, newStaff } from "@/components/office/OfficeDialogs";
 import { BossDesk, OfficeBoard, OfficeSide, OfficeTopBar } from "@/components/office/OfficePanels";
-import { emptyRun, reconcileRun } from "@/lib/office/engine";
+import { emptyRun, reconcileRun, canTakeInstruction } from "@/lib/office/engine";
 import { registerBossReceiver } from "@/lib/office/boss-bus";
 import { useOfficeT } from "@/lib/office/i18n";
 import { layoutOffice } from "@/lib/office/layout";
@@ -167,7 +167,25 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== "unicrew.offices.v1" || ev.newValue === null) return;
       const list = loadOffices();
-      if (list.length > 0) setOffices(list);
+      if (list.length === 0) return;
+      setOffices(list);
+      const cur = officeRef.current;
+      const same = cur ? list.find((o) => o.id === cur.id) : undefined;
+      if (same) {
+        // 開いている会社が書き換わった（社員が消えた等）：待ち合わせをそろえ直す
+        officeRef.current = same;
+        runnerRef.current?.dispatch({ t: "sync", at: Date.now() });
+        return;
+      }
+      // 開いている会社が、別の窓で消された：動いている AI を止めて、残っている会社へ移る
+      if (cur) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
+      const next = list[0];
+      officeRef.current = next;
+      const r = loadRun(next, localeRef.current);
+      runRef.current = r;
+      setRun(r);
+      setActiveId(next.id);
+      setSelected(null);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -222,6 +240,8 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     if (!cur.workspace?.trim()) return "noWorkspace";
     if (!cur.staff.some((s) => s.lead)) return "noLead";
     if (runRef.current?.officeId !== cur.id) return "notReady";
+    // 預かりがいっぱいのときは受け取らない（送り手の側に残してもらい、あとで送り直せるように）
+    if (!canTakeInstruction(runRef.current, cur)) return "notReady";
     dispatch({ t: "boss", text, at: Date.now() });
     return "accepted";
   }), [hydrated, dispatch]);
@@ -299,11 +319,11 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
         if (!alive) return;
         for (const ev of watcher.feed(readings, now, { partial: !full })) publishTerminal(ev);
       } catch {
-        // フォルダごと読めなくなった（外した・名前を変えた）：追っていた仕事は終わった扱いにして、次の回で探し直す
+        // 読めなかった（一時的かもしれない）：追っている仕事は忘れずに、次の回で場所から探し直す。長く動きが無い物だけ終わりにする
         dir = null;
         known = [];
         round = 0;
-        if (alive) for (const ev of watcher.feed([], now)) publishTerminal(ev);
+        if (alive) for (const ev of watcher.expire(now)) publishTerminal(ev);
       } finally {
         reading = false;
       }
@@ -320,7 +340,8 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   const viewRun = useMemo(() => {
     if (!run || !office) return run;
     const members = office.staff.filter((member) => !member.lead);
-    const panes = Object.entries(terminal);
+    // ターミナルを先に席に着ける（番号どおりの席）。RUNner の仕事は、そのあと空いている人へ
+    const panes = Object.entries(terminal).sort(([, a], [, b]) => Number(a.source === "runner") - Number(b.source === "runner"));
     const seats = seatsRef.current;
     for (const id of [...seats.keys()]) if (!terminal[id]) seats.delete(id);
     if (members.length === 0 || panes.length === 0) return run;
@@ -331,13 +352,13 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       const runner = act.source === "runner";
       // ターミナルは番号どおりの席（1番＝1人目）。RUNner の仕事は後ろの席から、空いている人に割り当てる。
       // 一度決めた人は、その仕事が終わるまで変えない（途中で別の人に飛ばない）
-      let who = runner ? members.find((m) => m.id === seats.get(id)) : members[(act.pane - 1) % members.length];
+      let who = runner ? members.find((m) => m.id === seats.get(id) && !taken.has(m.id)) : members[(act.pane - 1) % members.length];
       if (runner && !who) {
         const start = (act.pane - RUN_PANE_BASE) % members.length;
         for (let i = 0; i < members.length && !who; i++) {
           const m = members[members.length - 1 - ((start + i) % members.length)];
           const busyHere = run.staff[m.id]?.status === "working" || run.staff[m.id]?.status === "waiting";
-          if (!taken.has(m.id) && ![...seats.values()].includes(m.id) && !busyHere) who = m;
+          if (!taken.has(m.id) && ![...seats.entries()].some(([other, staffId]) => other !== id && staffId === m.id) && !busyHere) who = m;
         }
         if (who) seats.set(id, who.id);
       }
