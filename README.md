@@ -7,24 +7,21 @@
 
 ## 何ができる？
 
-UNICREW は **AI を動かすことだけに特化**したデスクトップアプリです。
-コードエディタは VSCode に任せて、AI セッションの起動・並列・切替・可視化を担当します。
+UNICREW は、AI の社員に仕事を頼む **AIオフィス**と、最大6分割の**ターミナル**を備えたデスクトップアプリです。
 
-- **11 プロバイダ対応** — Claude / Codex / Gemini / Goose / OpenCode / Codex-ACP / Kiro / Qwen / Kimi / Grok / Cursor を同じ UI で
-- **開発できるターミナル**（v0.5.0）— 中を検索（Ctrl+F）／出した指示を上に固定／選択をそのまま AI へ／`package.json`・`Makefile`・`Cargo.toml` のタスクをクリックで実行／同じ指示を複数 AI へ一斉送信／分割のドラッグ・最大化・**構成の復元**／終了コードの表示と再起動
-- **思考の深さを選んで開ける**（v0.5.0）— Claude Code / Codex / Grok / Kimi は起動時にエフォート（low〜max）を指定可能。既定は「おまかせ」＝これまでと同じ起動
-- **シェル統合**（v0.5.0）— 設定に数行貼ると、直前のコマンド・終了コード・所要時間・`cd` の移動先を認識し、「直前の出力だけを AI に渡す」が使える（UNICREW 側から設定ファイルは書き換えません）
-- **AI ごとに作業場を分ける**（v0.4.0）— 2人以上を並べるとき、AI ごとに独立した git worktree を切る。取り込みは merge かパッチ
-- **変更の差分ビュー**（v0.4.0）— AI が変えたファイルの一覧と ± 行数、左右比較（読み取り専用）。新しく作ったファイルも数える
-- **チェックポイント／巻き戻し**（v0.4.0）— 自分の発言の直前の状態に**ファイルだけ**戻す。会話・コミット・ブランチは動かさない
-- **相互監査**（v0.4.0）— `/監査` で、実装したのとは**別の会社の AI**が読み取り専用で点検する。観点は毎回1つで自動で入れ替わる
-- **サイドチャット／会話検索**（v0.4.0）— `/side` で本線の文脈を持ったまま脇で相談、`Ctrl+Shift+F` で全スレッド検索
-- **リモート受付は廃止**（v0.4.0）— UNIHUB 経由のスマホからの遠隔実行は機能ごと削除しました。当社サーバーへ送るのは匿名の起動情報3項目だけです（[PRIVACY.md](PRIVACY.md)）
-- **議論モード** — 複数の AI に役割を持たせて議論・相互レビュー（9 プリセット）
-- **並列モード** — 2 社以上を同時実行、レスポンスを横並びで比較
-- **Free モード** — 「1 分で始める」ボタン 1 つで Ollama + OpenCode を自動セットアップ。API キー不要・サブスク不要
-- **業界標準 ACP 対応** — Zed Industries 主導の Agent Client Protocol を採用、新エージェントの追加が容易
-- **キャラクター人格 13 種** — role / 口調を切替
+- **AIオフィス** — 会社を作り、取りまとめ役に指示を出します。社員1人につきAIセッション1本で仕事を進め、報告・質問・確認・納品をまとめます
+- **11 プロバイダ対応** — Claude / Codex / Gemini / Goose / OpenCode / Codex-ACP / Kiro / Qwen / Kimi / Grok / Cursor。社員ごとに使うAI・モデル・仕事のやり方を設定できます
+- **会社のひな形5種類・社員の見た目12種類** — 名前・部署・役割を編集でき、自分の画像にも差し替えられます
+- **ターミナル連動** — 最大6ペインでCLIを操作。作業や許可待ちをオフィスに表示し、「AI に渡す」で選択した文字を取りまとめ役に送れます
+- **RUNner連動（表示のみ）** — このPCにあるRUNnerの記録を読み、作業・返事待ち・完了をオフィスに表示します。指示・承認はUNIHUBで行います
+- **確認と納品** — 確認カードから「OKを出す」「差し戻す」を選び、納品欄から成果物を開けます
+- **相談の受け箱** — 貼り付けた相談に対する返事の下書きを依頼できます。送信は利用者が行います
+- **定期実行** — 毎日の指定時刻に、選択中の会社の取りまとめ役へ指示を渡します（アプリ起動中）
+- **過去の会話** — 以前の記録を開いて読めます。会話の再開・追記はできません
+- **Free モード** — 「ファイル」→「無料で使えるAIを準備する」からOllama + OpenCodeをセットアップできます
+- **業界標準 ACP 対応** — 対応エージェントを共通の通信方式で接続します
+
+従来のチャット画面・並列6ペイン・議論モード・サイドチャット・チェックポイント・タスクキュー・差分ビュー・チャット版の相互監査・キャラクター人格・スラッシュコマンドは廃止しました。ターミナルの6分割は引き続き使えます。
 
 ## 動かす経路は 3 種類
 
@@ -34,52 +31,30 @@ UNICREW は **AI を動かすことだけに特化**したデスクトップア�
 | **サブスク経路** | Claude Pro / Max / ChatGPT Plus / Pro 等の既存契約 | 既存契約のみ |
 | **BYOK 経路** | 各プロバイダの API キー（DASHSCOPE / OPENAI / 等） | 従量課金 |
 
-ユーザーは好きな経路を組み合わせて使えます。Claude Pro でメイン会話 + Free モードで並列議論、といった使い方も自然です。
+利用するCLIの認証・契約に合わせて設定し、社員ごとに使うAIを選べます。
 
 ## 設計の核：Pure CLI Conductor
 
-UNICREW は Anthropic / OpenAI / Google / Alibaba / Moonshot AI 等の **公式 CLI を subprocess として spawn する以外の経路を持ちません**。
-商用 SDK（`claude-agent-sdk` / `codex-sdk` 等）は import しません。
+UNICREW は公式CLI・OSSエージェントを subprocess として起動します。
+商用SDK（`claude-agent-sdk` / `codex-sdk` 等）は import せず、OAuthトークンの読み取り・保管・中継をしない方針です。ログインは各CLIの機能を使います。
 
-これは Anthropic ToS（2026-04-04 施行）の条文:
+各サービスの利用条件は提供元の規約に従います。[Claude Codeの認証・利用条件](https://code.claude.com/docs/en/legal-and-compliance)と[Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms)を参照してください。
 
-> "Using OAuth tokens obtained through Claude Free, Pro, or Max accounts in any other product, tool, or service — including the Agent SDK — is not permitted."
-
-> "For local Claude Code CLI usage on your own computer, nothing changes — it's Anthropic's official product built for scripted and automated use, and the Consumer ToS exempts it from the prohibition on automated access."
-
-に完全準拠するための設計判断です。VSCode の統合ターミナルから `claude` を呼ぶのと同じ法的立ち位置で動作します。
-
-ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi）は Apache-2.0 / MIT の OSS で、業界標準 ACP プロトコル経由で接続します。
+ACP 対応プロバイダ（Goose / OpenCode / Codex-ACP / Kiro / Kimi / Grok）は業界標準 ACP プロトコル経由で接続します。
 
 詳細は [DESIGN.md](./DESIGN.md) と [AGENTS.md](./AGENTS.md) を参照。
 
 ## アーキテクチャ
 
-```
-┌────────────────────────────────────────────────────────┐
-│ Tauri 2.x ウィンドウ                                    │
-│  ┌──────────────────────────────────────────────┐     │
-│  │ Next.js + React UI（チャット / 並列 / 議論）  │     │
-│  └────────────────────┬─────────────────────────┘     │
-│                       │ invoke / event                   │
-│  ┌────────────────────▼─────────────────────────┐     │
-│  │ Rust providers/                                │     │
-│  │  ├ trait CliProvider                           │     │
-│  │  ├ stream-json 経路: claude / codex / gemini   │     │
-│  │  │                    qwen                     │     │
-│  │  ├ ACP 経路 (acp_transport):                   │     │
-│  │  │   goose / opencode / codex_acp /            │     │
-│  │  │   kiro / kimi                               │     │
-│  │  └ stream_parser.rs                            │     │
-│  └────────────────────┬─────────────────────────┘     │
-│                       │ stdin / stdout / JSON-RPC        │
-│  ┌────────────────────▼─────────────────────────┐     │
-│  │ 公式 CLI / OSS エージェント subprocess         │     │
-│  │  claude -p --output-format stream-json …      │     │
-│  │  codex exec --json …                          │     │
-│  │  goose acp / opencode acp / kimi acp …        │     │
-│  └───────────────────────────────────────────────┘     │
-└────────────────────────────────────────────────────────┘
+```text
+Tauri + Next.js / React
+  ├─ AIオフィス → 進行役 → 社員ごとのCLIセッション
+  │                          ├─ JSON出力: Claude / Codex / Qwen / Cursor
+  │                          ├─ テキスト出力: Gemini
+  │                          └─ ACP: Goose / OpenCode / Codex-ACP / Kiro / Kimi / Grok
+  ├─ ターミナル（最大6分割） → CLIを直接操作 → オフィスに状態を表示
+  ├─ RUNnerのローカル記録 → オフィスに状態を表示
+  └─ 過去の会話 → 既存の保存を読む
 ```
 
 ## 必要環境
@@ -144,42 +119,48 @@ npm run tauri:build
 
 ## ディレクトリ構成
 
-```
+以下は主要なファイルです。
+
+```text
 unicrew/
-├── app/                       # Next.js (renderer)
-│   ├── page.tsx               # メインシェル
-│   ├── editor/                # 別ウィンドウのタブ式エディタ
-│   └── globals.css
+├── app/
+│   ├── page.tsx                  # オフィス・ターミナル・過去の会話の切替
+│   ├── editor/                   # 別ウィンドウのエディタ
+│   └── preview/                  # 成果物プレビュー
 ├── components/
+│   ├── office/                   # オフィス画面・社員・設定・案件ボード
+│   ├── PastConversation.tsx      # 過去の会話（閲覧のみ）
+│   ├── TerminalPanes.tsx         # 最大6分割ターミナル
+│   ├── InteractiveTerminal.tsx
 │   ├── Sidebar.tsx
-│   ├── ChatPane.tsx
 │   ├── SettingsModal.tsx
-│   ├── WelcomeLanding.tsx
-│   ├── ConferencePresets.tsx  # 議論モードプリセット
-│   ├── FreeModeWizard.tsx     # Ollama+OpenCode 自動セットアップ
-│   ├── CommandPalette.tsx
-│   ├── Walkthrough.tsx
-│   ├── WhatsNewModal.tsx
-│   └── ...
+│   ├── FreeModeWizard.tsx
+│   └── RoutinesModal.tsx
 ├── lib/
+│   ├── office/
+│   │   ├── engine.ts             # 仕事の進行
+│   │   ├── runner.ts             # CLIとの接続
+│   │   ├── protocol.ts           # 取りまとめ役の合図
+│   │   ├── templates.ts          # 会社のひな形
+│   │   ├── looks.ts              # 社員の見た目
+│   │   ├── store.ts              # 会社・現在の仕事の保存
+│   │   ├── i18n.ts               # オフィスの日本語・英語
+│   │   ├── terminal-link.ts      # ターミナルの作業表示
+│   │   └── run-link.ts           # RUNnerの記録を読む
+│   ├── storage.ts                # 過去の会話の読込・設定
+│   ├── routines.ts               # 毎日の定期実行
 │   ├── types.ts
-│   ├── characters.ts          # プリセット 13 体
-│   ├── providerCategories.ts  # UI 抽象化基盤
-│   ├── providerVisuals.tsx
 │   └── tauri.ts
 ├── src-tauri/
 │   ├── src/
-│   │   ├── lib.rs             # Tauri commands
-│   │   └── providers/         # CLI subprocess 抽象
-│   │       ├── claude.rs / codex.rs / gemini.rs / qwen.rs    (stream-json)
-│   │       ├── goose.rs / opencode.rs / codex_acp.rs /        (ACP)
-│   │       │   kiro.rs / kimi.rs
-│   │       ├── acp_transport.rs
-│   │       └── stream_parser.rs
+│   │   ├── lib.rs
+│   │   ├── thread_store.rs       # 旧会話ファイルの読込など
+│   │   └── providers/            # CLI subprocess / ACP
 │   └── Cargo.toml
-├── THIRD_PARTY_LICENSES/      # OSS NOTICE
-├── public/whatsnew/           # What's New ページ
-├── LICENSE                    # Apache-2.0
+├── THIRD_PARTY_LICENSES/
+├── public/office/                # オフィス・社員の絵
+├── public/whatsnew/
+├── LICENSE
 ├── NOTICE
 ├── PRIVACY.md
 └── TERMS.md
@@ -187,29 +168,34 @@ unicrew/
 
 ## 使い方フロー
 
-1. アプリ起動 → 「1 分で始める」で **Free モード**を試す（API キー不要）
-2. または「Claude / Codex / Gemini のサブスクをお持ちの方」から既存契約で接続
-3. **最初の会話を始める** → キャラクター（オプション）→ ワークスペース選択
-4. 会話中に「並列モード」「議論モード」へ自然に拡張
-5. プリセットから議論を始める：9 種のキャストから 1 クリックで選択
+1. 設定で利用するAI CLIの導入・ログインを確認します。Free モードは「ファイル」→「無料で使えるAIを準備する」から開けます
+2. AIオフィスで会社名・ひな形・作業フォルダ・使うAIを選び、「この内容で会社を作る」を押します
+3. 「あなた（社長）からの指示」に頼みたい仕事を書きます。取りまとめ役が必要に応じて質問し、社員に仕事を渡します
+4. 確認カードが届いたら中身を見て「OKを出す」か、理由を書いて「差し戻す」を選びます
+5. 納品欄から成果物を開いて確かめます。ターミナルで直接CLIを操作することもできます
 
-## キャラクター（プリセット 13 体）
+## 会社のひな形と社員
 
-| ID | 名前 | 役割 | プロバイダ |
-|---|---|---|---|
-| tmpl-claude-normal | Claude（normal） | 素の Claude | claude |
-| tmpl-codex-normal | Codex（normal） | 素の Codex | codex |
-| tmpl-opencode-normal | OpenCode（normal） | 無料・ローカル | opencode |
-| tmpl-qwen-normal | Qwen（normal） | コスト・OSS 派 | qwen |
-| tmpl-kimi-normal | Kimi（normal） | 長文・自律 | kimi |
-| tmpl-auto | おまかせ | 自動切替 | claude |
-| tmpl-ceo | CEO | 統括役 | claude |
-| tmpl-cdo | CDO | 技術責任者 | claude |
-| tmpl-cmo | CMO | マーケ | claude |
-| tmpl-cso | CSO | 営業 | claude |
-| tmpl-cpo | CPO | プロダクト | claude |
-| tmpl-cfo | CFO | 財務 | claude |
-| tmpl-secretary | 秘書 | アシスタント | claude |
+人数は取りまとめ役1人を含みます。部署・社員・仕事のやり方は作成後に変更できます。
+
+| ひな形 | 社員 | 部署 |
+|---|---:|---:|
+| まずは2人で | 2人 | 1 |
+| 会社まるごと（5つの部署） | 11人 | 5 |
+| 開発チーム | 5人 | 3 |
+| 発信チーム | 5人 | 3 |
+| Web制作チーム | 5人 | 2 |
+
+社員の見た目は12種類から選択するか、自分の画像に差し替えます。見た目と役割は別々に設定できます。
+社員ごとの「仕事のやり方」はAIへの指示として使われます。旧チャットのキャラクター人格プリセットではありません。
+
+## ターミナル・RUNnerとの連動
+
+ターミナルの作業は、取りまとめ役を除いた社員にペイン番号順で映ります。オフィス自身の仕事で作業中・待機中の社員はそちらを優先します。ターミナルの許可にはターミナル側で答えます。
+
+RUNner連動はローカルの作業記録を読む表示機能です。作業中・返事待ちの仕事があると「UNIHUB で開く」入口が出ます。オフィスからRUNnerに指示や承認を送る機能はありません。
+
+定期実行は毎日指定時刻の指示を、選択中の会社に届けます。アプリ起動中に約60秒ごとに確認し、当日まだ実行していなければ指定時刻を過ぎてからでも届けます。会社・作業フォルダ・取りまとめ役の準備ができていない場合は実行済みになりません。
 
 ## トラブルシューティング
 
@@ -257,7 +243,7 @@ Gemini CLI は npm 配布です。**Node.js（npm）が先に必要**です。
 2. PowerShell で `irm https://chatgpt.com/codex/install.ps1 | iex`（mac/Linux は `curl -fsSL https://chatgpt.com/codex/install.sh | sh`）
 3. `codex --version` で確認
 
-Codex は任意です。使わない場合は初期セットアップでスキップして構いません。
+Codex は任意です。使う場合は設定で導入・ログインを確認してください。
 
 ## 更新
 
@@ -269,13 +255,20 @@ Codex は任意です。使わない場合は初期セットアップでスキ�
 
 ## データはどこに保存されるか
 
-**すべてあなたのPCの中だけです。** 会話内容・APIキー・個人情報は外部に送信しません。
+会社の設定と仕事の記録は、このPCのアプリ内に保存されます。AIへの指示は利用するCLIを通じて選択したプロバイダへ送られます。
 
 | OS | 場所 |
 |---|---|
 | Windows | `%APPDATA%\jp.unilinks.unicrew\` |
 | macOS | `~/Library/Application Support/jp.unilinks.unicrew/` |
 | Linux | `~/.local/share/jp.unilinks.unicrew/` |
+
+- **会社の名簿・選択中の会社・会社ごとの「いま」**：WebViewのlocalStorage（`unicrew.offices.v1` / `unicrew.offices.active.v1` / `unicrew.office.run.v1.<会社ID>`）。書きかけの返事とツールの中身は保存しません
+- **アプリ設定・定期実行・表示言語**：localStorage（`unicrew.settings.v2` / `unicrew.routines.v1` / `unicrew.locale`）
+- **過去の会話**：上記アプリ専用フォルダの `threads/<id>.json` と、旧localStorageの `unicrew.threads.v2` をその場で読みます。起動時の移行・新規保存・書き戻しはしません。確認して削除した会話だけ元の保存先から消します
+- **成果物**：会社で選んだ作業フォルダ。会社を削除しても作業フォルダのファイルは削除しません
+- **配布アプリから登録するAPIキー**：OSの資格情報ストア（`src-tauri/src/lib.rs` のkeyring経路）
+- **CLIの認証・セッション履歴**：各CLIが管理します。オフィスは再開に使うCLIセッションIDを記録します
 
 - AI との会話は、あなたが選んだプロバイダ（Claude / Codex / ローカルの Ollama など）へ直接送られます。UNICREW を経由して当社に届くことはありません
 - Free モード（Ollama）で使う場合、会話はあなたのPCから外に出ません
@@ -305,7 +298,7 @@ AI を動かす経路として、①Free モード（Ollama + OpenCode・0円）
 <summary><b>VSCode や Cursor の代わりになりますか？</b></summary>
 
 なりません。UNICREW は**コードエディタではなく、AI を動かすことに特化した道具**です。
-編集は VSCode などに任せて、AI セッションの起動・並列・切替・可視化を UNICREW が担当します。
+AIオフィスでの仕事の分担と進行、ターミナルでのCLI操作を中心に使います。ファイルの編集には外部エディタも使えます。
 </details>
 
 <details>
@@ -318,7 +311,19 @@ AI を動かす経路として、①Free モード（Ollama + OpenCode・0円）
 <details>
 <summary><b>黒い画面（ターミナル）は必要ですか？</b></summary>
 
-不要です。AI CLI の導入もアプリ内のボタンから行えます。
+AIオフィスへの指示は通常の入力欄から送れます。CLIの導入・ログインは設定から行い、CLIを直接操作したい場合はターミナルを使えます。
+</details>
+
+<details>
+<summary><b>前の会話の続きを書けますか？</b></summary>
+
+過去の会話は読むだけです。「AIオフィスを開く」から新たに指示してください。過去の会話が自動でオフィスの指示に引き継がれることはありません。
+</details>
+
+<details>
+<summary><b>RUNnerの承認もオフィスでできますか？</b></summary>
+
+できません。オフィスはRUNnerの状態を表示するだけです。「UNIHUB で開く」からRUNnerの画面で指示・承認を行ってください。
 </details>
 
 <details>
@@ -358,7 +363,7 @@ UNICREW は各社のロゴ画像を使用していません（独自ロゴのみ
 | | 何をするもの | 行き先 |
 |---|---|---|
 | **KUZIRA** | マーケター特化のセカンドブラウザ。魚拓・タグ検知・競合ウォッチ | [製品ページ](https://zuboland.jp/products/kuzira) |
-| **UNICREW** | （このリポジトリ）複数のAIと議論しながら作業を進めるAIチーム型ワークスペース | [製品ページ](https://zuboland.jp/products/unicrew) |
+| **UNICREW** | （このリポジトリ）AIオフィスとターミナルで仕事を進めるワークスペース | [製品ページ](https://zuboland.jp/products/unicrew) |
 | **HONJIN** | 事業の今と動きを手元で見る作業台 | [Releases](https://github.com/zuboland/honjin/releases/latest) |
 
 3つとも登録不要・無料で使えます。

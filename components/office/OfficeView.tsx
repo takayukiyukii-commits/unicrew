@@ -52,7 +52,9 @@ function toolInput(detail: string): Record<string, unknown> {
 }
 
 export default function OfficeView({ active, settings, onWorkspaceChange }: Props) {
-  const { t } = useOfficeT();
+  const { t, locale } = useOfficeT();
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const [hydrated, setHydrated] = useState(false);
   const [offices, setOffices] = useState<Office[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     const cur = list.find((o) => o.id === id) ?? list[0] ?? null;
     setOffices(list);
     setActiveId(cur?.id ?? null);
-    setRun(cur ? loadRun(cur) : null);
+    setRun(cur ? loadRun(cur, localeRef.current) : null);
     if (list.length === 0) setPanel("setup");
     try {
       setChatter(window.localStorage.getItem(CHATTER_KEY) !== "0");
@@ -98,6 +100,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
         setRun(next);
       },
       getSettings: () => settingsRef.current,
+      getLocale: () => localeRef.current,
     });
     runnerRef.current = runner;
     void runner.attach();
@@ -152,7 +155,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     officeRef.current = next;
     const r = runRef.current;
     if (r && r.officeId === next.id) {
-      const rec = reconcileRun(r, next);
+      const rec = reconcileRun(r, next, { locale: localeRef.current });
       runRef.current = rec;
       setRun(rec);
     }
@@ -167,7 +170,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     setSelected(null);
     setPanel("none");
     if (next) {
-      const r = loadRun(next);
+      const r = loadRun(next, localeRef.current);
       runRef.current = r;
       setRun(r);
     }
@@ -413,7 +416,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
                 const next = rest[0] ?? null;
                 officeRef.current = next;
                 setActiveId(next?.id ?? null);
-                const r = next ? loadRun(next) : null;
+                const r = next ? loadRun(next, localeRef.current) : null;
                 runRef.current = r;
                 setRun(r);
               }}

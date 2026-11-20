@@ -1,10 +1,12 @@
 /**
  * AIオフィスの進行役。出来事（社長の指示・AI の実況）を受けて、会社の「いま」を次に進める。
  *
- * 画面にも Tauri にも触らない。`step(run, office, input)` が新しい状態と
+ * 画面にも Tauri にも触らない。`step(run, office, input, locale)` が新しい状態と
  * 「外でやってほしいこと（effects）」を返すだけなので、録った実況を流して試験できる。
  */
-import { describeTool } from "../progress-text";
+import type { Locale } from "../i18n";
+import { officeT, type OfficeKey } from "./i18n";
+import { describeOfficeTool } from "./tool-text";
 import { collectArtifacts } from "../turn-artifacts";
 import type { ToolUseBlock } from "../types";
 import {
@@ -75,7 +77,7 @@ export function emptyRun(office: Office): OfficeRun {
 }
 
 /** 社員が増えた・減ったあとに、状態の持ち主をそろえる。開き直したときの「動いている」も戻す。 */
-export function reconcileRun(run: OfficeRun, office: Office, opts: { afterRestart?: boolean } = {}): OfficeRun {
+export function reconcileRun(run: OfficeRun, office: Office, opts: { afterRestart?: boolean; locale?: Locale } = {}): OfficeRun {
   const staff: Record<string, StaffRuntime> = {};
   for (const s of office.staff) {
     const cur = run.staff[s.id] ?? emptyStaffRuntime();
@@ -110,7 +112,7 @@ export function reconcileRun(run: OfficeRun, office: Office, opts: { afterRestar
         id: uid("m", Date.now()),
         kind: "system",
         staffId: null,
-        text: "アプリを開き直したので、進めていた仕事は止まっています。続きを頼むときは、下の欄から指示を送ってください（これまでの話は覚えています）。",
+        text: officeT("engine.restarted", opts.locale ?? "ja"),
         at: Date.now(),
       },
     ];
@@ -176,13 +178,12 @@ function resultText(content: unknown): string {
 }
 
 /** 道具の許可を求められたとき、何をしようとしているかを人の言葉にする。 */
-function describeAsk(toolName: string, input: Record<string, unknown>): string {
-  const doing = describeTool(
-    { kind: "tool_use", toolUseId: "", toolName, input, status: "pending" },
-    false,
-  );
+function describeAsk(toolName: string, input: Record<string, unknown>, locale: Locale): string {
+  const doing = describeOfficeTool(toolName, input, locale);
   const cmd = typeof input.command === "string" ? `\n${clip(input.command, 160)}` : "";
-  return `${doing.replace(/(しています|ています)$/, (m) => (m === "しています" ? "しようとしています" : "ようとしています"))}${cmd}`;
+  const action = locale === "en" ? officeT("engine.askTool", locale, { action: doing })
+    : doing.replace(/(しています|ています)$/, (m) => (m === "しています" ? "しようとしています" : "ようとしています"));
+  return `${action}${cmd}`;
 }
 
 /** 全員が手を止めたか（社長の番か）を見て busy と時計を合わせる。 */
@@ -197,14 +198,15 @@ export interface StepResult {
   effects: OfficeEffect[];
 }
 
-export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepResult {
+export function step(run0: OfficeRun, office: Office, input: OfficeInput, locale: Locale = "ja"): StepResult {
+  const t = (key: OfficeKey, vars?: Record<string, string | number>) => officeT(key, locale, vars);
   const effects: OfficeEffect[] = [];
   const lead = leadOf(office);
   let run = run0;
   if (!lead) return { run, effects };
 
   const sendToLead = (text: string, at: number) => {
-    run = setStaff(run, lead.id, { status: "working", bubble: "考えています", draft: "", tools: {} });
+    run = setStaff(run, lead.id, { status: "working", bubble: t("engine.thinking"), draft: "", tools: {} });
     run = { ...run, busy: true, usage: openClock(run.usage, at) };
     effects.push({ t: "send", staffId: lead.id, text });
   };
@@ -217,8 +219,8 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
 
     case "start_failed": {
       const who = office.staff.find((s) => s.id === input.staffId);
-      run = pushNotice(run, input.staffId, `${who?.name ?? "社員"}さんの AI を起動できませんでした`, input.at);
-      run = failStaff(run, office, input.staffId, `AI を起動できませんでした（${clip(input.message, 200)}）`, input.at, effects);
+      run = pushNotice(run, input.staffId, t("engine.startFailed", { name: who?.name ?? t("engine.staff") }), input.at);
+      run = failStaff(run, office, input.staffId, `AI を起動できませんでした（${clip(input.message, 200)}）`, input.at, effects, locale, t("engine.startError", { message: clip(input.message, 200) }));
       return { run: settle(run, input.at), effects };
     }
 
@@ -253,8 +255,8 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
       const text = input.text.trim();
       if (!text) return { run, effects };
       run = { ...run, inbox: [{ id: uid("q", input.at), text, at: input.at, reply: null, replyAt: null }, ...run.inbox].slice(0, 30) };
-      run = pushNotice(run, null, "お客さんからの相談が届きました", input.at);
-      if (!run.staff[lead.id]?.task) run = setStaff(run, lead.id, { task: clip(`相談への返事：${text}`, 28) });
+      run = pushNotice(run, null, t("engine.inquiry"), input.at);
+      if (!run.staff[lead.id]?.task) run = setStaff(run, lead.id, { task: clip(t("engine.inquiryTask", { text }), 28) });
       sendToLead(inquiryMessage(text), input.at);
       return { run, effects };
     }
@@ -267,7 +269,7 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
       run = pushLog(run, {
         kind: "boss",
         staffId: null,
-        text: input.ok ? `「${ap.title}」に OK を出しました${comment ? `：${comment}` : ""}` : `「${ap.title}」を差し戻しました${comment ? `：${comment}` : ""}`,
+        text: t(input.ok ? "engine.approved" : "engine.rejected", { title: ap.title, comment: comment ? t("engine.comment", { comment }) : "" }),
         at: input.at,
       });
       sendToLead(
@@ -285,7 +287,7 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
       run = { ...run, permissions: run.permissions.filter((p) => p.id !== ask.id) };
       effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: input.allow });
       const stillAsked = run.permissions.some((p) => p.staffId === ask.staffId);
-      if (!stillAsked) run = setStaff(run, ask.staffId, { status: "working", bubble: input.allow ? "続きを進めています" : "別のやり方を考えています" });
+      if (!stillAsked) run = setStaff(run, ask.staffId, { status: "working", bubble: input.allow ? t("engine.continuing") : t("engine.alternative") });
       return { run: settle(run, input.at), effects };
     }
 
@@ -299,7 +301,7 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
         }
       }
       run = { ...run, awaiting: [], reports: [], permissions: [], approval: null };
-      run = pushLog(run, { kind: "system", staffId: null, text: "仕事を止めました。続きを頼むときは、下の欄から指示を送ってください。", at: input.at });
+      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.stopped"), at: input.at });
       return { run: settle(run, input.at), effects };
     }
 
@@ -316,16 +318,13 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
           return { run, effects };
         case "assistant_text": {
           if (rt.status !== "working") return { run, effects };
-          run = setStaff(run, who.id, { draft: rt.draft + ev.text, bubble: who.lead ? "返事をまとめています" : "報告を書いています" });
+          run = setStaff(run, who.id, { draft: rt.draft + ev.text, bubble: who.lead ? t("engine.replying") : t("engine.reporting") });
           return { run, effects };
         }
         case "tool_use": {
           if (rt.status !== "working" && rt.status !== "waiting") return { run, effects };
           const tools = { ...rt.tools, [ev.tool_use_id]: { name: ev.tool_name, input: ev.tool_input ?? {}, done: false, error: false } };
-          const bubble = describeTool(
-            { kind: "tool_use", toolUseId: ev.tool_use_id, toolName: ev.tool_name, input: ev.tool_input ?? {}, status: "pending" },
-            false,
-          );
+          const bubble = describeOfficeTool(ev.tool_name, ev.tool_input ?? {}, locale);
           // 道具を使う前に書いた文は途中のつぶやき。報告・返事には、最後の道具のあとに書いた文だけを使う
           // （2026-11-21 本物の Claude Code で実測：途中の文が報告の頭に混ざった）
           run = setStaff(run, who.id, { tools, bubble, draft: "" });
@@ -359,22 +358,22 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
             ...run,
             permissions: [
               ...run.permissions,
-              { id: uid("p", at), staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: describeAsk(ev.tool_name, ev.input ?? {}), at },
+              { id: uid("p", at), staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: describeAsk(ev.tool_name, ev.input ?? {}, locale), at },
             ],
           };
-          run = setStaff(run, who.id, { status: "waiting", bubble: "社長の許可を待っています" });
-          run = pushNotice(run, who.id, `${who.name}さんが許可を待っています`, at);
-          effects.push({ t: "attention", title: `${who.name}さんが許可を待っています`, body: clip(describeAsk(ev.tool_name, ev.input ?? {}), 80) });
+          run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.permission") });
+          run = pushNotice(run, who.id, t("engine.permissionNotice", { name: who.name }), at);
+          effects.push({ t: "attention", title: t("engine.permissionNotice", { name: who.name }), body: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80) });
           return { run: settle(run, at), effects };
         }
         case "error": {
-          run = pushNotice(run, who.id, `${who.name}さんの作業が止まりました`, input.at);
-          run = failStaff(run, office, who.id, clip(ev.message, 300), input.at, effects);
+          run = pushNotice(run, who.id, t("engine.staffStopped", { name: who.name }), input.at);
+          run = failStaff(run, office, who.id, clip(ev.message, 300), input.at, effects, locale);
           return { run: settle(run, input.at), effects };
         }
         case "result": {
           if (rt.status !== "working") return { run, effects };
-          run = finishTurn(run, office, who, input.at, effects);
+          run = finishTurn(run, office, who, input.at, effects, locale);
           return { run: settle(run, input.at), effects };
         }
       }
@@ -385,7 +384,8 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
 }
 
 /** 社員が途中で止まったときの後始末（取りまとめ役なら社長に知らせ、社員なら報告として返す）。 */
-function failStaff(run0: OfficeRun, office: Office, staffId: string, message: string, at: number, effects: OfficeEffect[]): OfficeRun {
+function failStaff(run0: OfficeRun, office: Office, staffId: string, message: string, at: number, effects: OfficeEffect[], locale: Locale, displayMessage = message): OfficeRun {
+  const t = (key: OfficeKey, vars?: Record<string, string | number>) => officeT(key, locale, vars);
   let run = run0;
   const who = office.staff.find((s) => s.id === staffId);
   if (!who) return run;
@@ -395,21 +395,22 @@ function failStaff(run0: OfficeRun, office: Office, staffId: string, message: st
     run = pushLog(run, {
       kind: "system",
       staffId: null,
-      text: `${who.name}さんの作業が止まりました。\n起きたこと: ${message}\nもう一度 指示を送ると、続きから進めます。何度も止まるときは、設定で AI にログインできているかを確かめてください。`,
+      text: t("engine.failureDetail", { name: who.name, message: displayMessage }),
       at,
     });
-    effects.push({ t: "attention", title: "仕事が止まりました", body: clip(message, 80) });
+    effects.push({ t: "attention", title: t("engine.failed"), body: clip(displayMessage, 80) });
     return run;
   }
   if (run.awaiting.includes(staffId)) {
     run = { ...run, reports: [...run.reports, { staffId, text: `作業の途中で止まりました。起きたこと: ${message}`, files: [], failed: true }] };
-    run = collectReports(run, office, at, effects);
+    run = collectReports(run, office, at, effects, locale);
   }
   return run;
 }
 
 /** 待っていた報告が全部そろったら、取りまとめ役に渡す。 */
-function collectReports(run0: OfficeRun, office: Office, at: number, effects: OfficeEffect[]): OfficeRun {
+function collectReports(run0: OfficeRun, office: Office, at: number, effects: OfficeEffect[], locale: Locale): OfficeRun {
+  const t = (key: OfficeKey, vars?: Record<string, string | number>) => officeT(key, locale, vars);
   let run = run0;
   const lead = leadOf(office);
   if (!lead) return run;
@@ -417,8 +418,8 @@ function collectReports(run0: OfficeRun, office: Office, at: number, effects: Of
   const note = run.reports.filter((r) => r.staffId === NOTE).map((r) => r.text).join("\n\n");
   const remaining = run.awaiting.filter((id) => !got.has(id));
   if (remaining.length > 0) {
-    const names = remaining.map((id) => office.staff.find((s) => s.id === id)?.name ?? "社員").join("・");
-    run = setStaff(run, lead.id, { bubble: `${names}さんの報告を待っています` });
+    const names = remaining.map((id) => office.staff.find((s) => s.id === id)?.name ?? t("engine.staff")).join(locale === "en" ? ", " : "・");
+    run = setStaff(run, lead.id, { bubble: t("engine.waitingReports", { names }) });
     return run;
   }
   if (run.reports.length === 0) return run;
@@ -432,13 +433,14 @@ function collectReports(run0: OfficeRun, office: Office, at: number, effects: Of
     note,
   );
   run = { ...run, awaiting: [], reports: [] };
-  run = setStaff(run, lead.id, { status: "working", bubble: "報告を読んでいます", draft: "", tools: {} });
+  run = setStaff(run, lead.id, { status: "working", bubble: t("engine.readingReports"), draft: "", tools: {} });
   effects.push({ t: "send", staffId: lead.id, text });
   return run;
 }
 
 /** 1回の返事（ターン）が終わったとき。 */
-function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, effects: OfficeEffect[]): OfficeRun {
+function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, effects: OfficeEffect[], locale: Locale): OfficeRun {
+  const t = (key: OfficeKey, vars?: Record<string, string | number>) => officeT(key, locale, vars);
   let run = run0;
   const rt = run.staff[who.id];
   const lead = leadOf(office);
@@ -455,16 +457,16 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
       ...run,
       deliveries: [...arts.map((a) => ({ id: uid("d", at), staffId: who.id, artifact: a, at })).reverse(), ...run.deliveries].slice(0, MAX_DELIVERIES),
     };
-    run = pushNotice(run, who.id, `${who.name}さんが ${arts[arts.length - 1].name} を${arts.length > 1 ? `ほか${arts.length - 1}件 ` : ""}納品しました`, at);
+    run = pushNotice(run, who.id, t("engine.delivered", { name: who.name, file: arts[arts.length - 1].name, more: arts.length > 1 ? t("engine.moreFiles", { n: arts.length - 1 }) : "" }), at);
   }
 
   if (!who.lead) {
     // 社員：報告として預かる
-    run = setStaff(run, who.id, { status: "done", bubble: "できました" });
+    run = setStaff(run, who.id, { status: "done", bubble: t("engine.done") });
     if (run.awaiting.includes(who.id)) {
       run = { ...run, reports: [...run.reports, { staffId: who.id, text: draft, files: arts.map((a) => a.target), failed: false }] };
-      run = pushNotice(run, who.id, `${who.name}さんが${lead.name}さんに報告しました`, at);
-      run = collectReports(run, office, at, effects);
+      run = pushNotice(run, who.id, t("engine.reported", { name: who.name, lead: lead.name }), at);
+      run = collectReports(run, office, at, effects, locale);
     }
     return run;
   }
@@ -481,8 +483,8 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
         ? run.inbox.map((q) => (q.id === open.id ? { ...q, reply: d.reply, replyAt: at } : q))
         : [{ id: uid("q", at), text: "", at, reply: d.reply, replyAt: at }, ...run.inbox].slice(0, 30),
     };
-    run = pushNotice(run, who.id, "相談への返事の下書きができました", at);
-    effects.push({ t: "attention", title: "返事の下書きができました", body: clip(d.reply, 80) });
+    run = pushNotice(run, who.id, t("engine.inquiryDraft"), at);
+    effects.push({ t: "attention", title: t("engine.draftReady"), body: clip(d.reply, 80) });
   }
 
   if (d.delegations.length > 0) {
@@ -499,49 +501,49 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
     }
     if (targets.length > 0) {
       for (const x of targets) {
-        run = setStaff(run, x.staff.id, { status: "working", bubble: `${lead.name}さんから仕事を受け取りました`, task: clip(x.text, 28), draft: "", tools: {} });
-        run = pushNotice(run, x.staff.id, `${lead.name}さんが${x.staff.name}さんに仕事を渡しました`, at);
+        run = setStaff(run, x.staff.id, { status: "working", bubble: t("engine.received", { lead: lead.name }), task: clip(x.text, 28), draft: "", tools: {} });
+        run = pushNotice(run, x.staff.id, t("engine.delegated", { lead: lead.name, name: x.staff.name }), at);
         effects.push({ t: "send", staffId: x.staff.id, text: delegationMessage(lead, x.text) });
       }
       run = { ...run, awaiting: targets.map((x) => x.staff.id), reports: [] };
       if (unknown.length > 0) {
         run = { ...run, reports: [{ staffId: NOTE, text: unknownStaffMessage(unknown, office), files: [], failed: true }] };
       }
-      const names = targets.map((x) => x.staff.name).join("・");
-      run = setStaff(run, lead.id, { status: "waiting", bubble: `${names}さんに仕事を渡しました` });
+      const names = targets.map((x) => x.staff.name).join(locale === "en" ? ", " : "・");
+      run = setStaff(run, lead.id, { status: "waiting", bubble: t("engine.handedOff", { names }) });
       return run;
     }
     // 全員見つからなかった：取りまとめ役に言い直してもらう
-    run = setStaff(run, lead.id, { status: "working", bubble: "頼む相手を確かめています", draft: "", tools: {} });
+    run = setStaff(run, lead.id, { status: "working", bubble: t("engine.checkingStaff"), draft: "", tools: {} });
     effects.push({ t: "send", staffId: lead.id, text: unknownStaffMessage(unknown, office) });
     return run;
   }
 
   if (d.approval) {
     run = { ...run, approval: { id: uid("a", at), staffId: who.id, title: d.approval.title, body: d.approval.body, file: d.approval.file, at } };
-    run = setStaff(run, who.id, { status: "waiting", bubble: "社長の確認を待っています" });
-    run = pushNotice(run, who.id, `確認のお願いが届きました：${d.approval.title}`, at);
-    effects.push({ t: "attention", title: "確認のお願いが届きました", body: clip(d.approval.title, 80) });
+    run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.review") });
+    run = pushNotice(run, who.id, t("engine.reviewNotice", { title: d.approval.title }), at);
+    effects.push({ t: "attention", title: t("engine.reviewReady"), body: clip(d.approval.title, 80) });
     return run;
   }
 
   if (d.question) {
     run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: false });
-    run = setStaff(run, who.id, { status: "waiting", bubble: "社長の返事を待っています" });
-    run = pushNotice(run, who.id, `${who.name}さんから質問が届きました`, at);
-    effects.push({ t: "attention", title: `${who.name}さんから質問が届きました`, body: clip(d.question, 80) });
+    run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.answer") });
+    run = pushNotice(run, who.id, t("engine.question", { name: who.name }), at);
+    effects.push({ t: "attention", title: t("engine.question", { name: who.name }), body: clip(d.question, 80) });
     return run;
   }
 
   // 完了、または合図なしの返事（＝社長の番）
-  run = setStaff(run, who.id, { status: d.done ? "done" : "idle", bubble: d.done ? "今回の仕事は終わりです" : null });
+  run = setStaff(run, who.id, { status: d.done ? "done" : "idle", bubble: d.done ? t("engine.jobDone") : null });
   if (d.done) {
-    run = pushNotice(run, who.id, "今回の仕事が終わりました", at);
-    effects.push({ t: "attention", title: "仕事が終わりました", body: clip(d.plain || run.staff[who.id]?.task || "", 80) });
+    run = pushNotice(run, who.id, t("engine.jobFinished"), at);
+    effects.push({ t: "attention", title: t("engine.finished"), body: clip(d.plain || run.staff[who.id]?.task || "", 80) });
     const all = run.deliveries.filter((x) => run.usage.startedAt !== null && x.at >= run.usage.startedAt).map((x) => x.artifact);
     if (all.length > 0) effects.push({ t: "preview", artifacts: all });
   } else if (d.plain) {
-    effects.push({ t: "attention", title: `${who.name}さんから返事が届きました`, body: clip(d.plain, 80) });
+    effects.push({ t: "attention", title: t("engine.reply", { name: who.name }), body: clip(d.plain, 80) });
   }
   return run;
 }

@@ -4,10 +4,12 @@
  * 本物の AI は呼ばない。指示 → 質問 → 依頼 → 報告 → 確認 → 完了 の一連が、数十秒で一通り見られる。
  * 🚨 配布版（Tauri）では使われない（runner.ts が isTauri() で分ける）。
  */
+import type { Locale } from "../i18n";
+import { officeT, type OfficeKey } from "./i18n";
 import type { Office, OfficeAgentEvent, Staff } from "./types";
 
 export interface DemoDriver {
-  send(office: Office, staff: Staff, text: string): void;
+  send(office: Office, staff: Staff, text: string, locale?: Locale): void;
   stop(staffId: string): void;
   dispose(): void;
 }
@@ -40,7 +42,8 @@ export function createDemoDriver(emit: Emit, speed = 1): DemoDriver {
   };
 
   return {
-    send(office, staff, text) {
+    send(office, staff, text, locale = "ja") {
+      const t = (key: OfficeKey, vars?: Record<string, string | number>) => officeT(key, locale, vars);
       if (staff.lead) {
         const members = office.staff.filter((s) => !s.lead);
         const n = leadTurn.get(office.id) ?? 0;
@@ -48,27 +51,27 @@ export function createDemoDriver(emit: Emit, speed = 1): DemoDriver {
         const isApproval = text.includes("は OK です");
         const isReject = text.includes("差し戻し");
         if (text.includes("お客さんからの相談")) {
-          finish(staff.id, 1800, "相談を読みました。返事の下書きを出します。\n[[返事]]\nお問い合わせありがとうございます。ご相談の内容、承りました。\nまずは一度、30分ほどお話を伺えればと思います。ご都合のよい日時を2〜3つ教えてください。\n料金は【要確認】のため、お話のあとにご案内します。\n[[/返事]]");
+          finish(staff.id, 1800, `${t("demo.inquiryIntro")}\n[[返事]]\n${t("demo.inquiryReply")}\n[[/返事]]`);
         } else if (isApproval) {
-          finish(staff.id, 1200, "社長、OK をいただきありがとうございます。今回の仕事はこれで終わりです。\n\nできた物は右の「納品」に並んでいます。外への公開や、お金に関わることはしていません。\n[[完了]]");
+          finish(staff.id, 1200, `${t("demo.approved")}\n[[完了]]`);
         } else if (isReject || isReports) {
           const file = office.workspace ? `${office.workspace.replace(/[\\/]+$/, "")}/index.html` : "index.html";
           tool(staff.id, 400, "Read", { file_path: "index.html" }, 1200);
-          finish(staff.id, 2200, `報告がそろいました。頼んだ通りにできているかを確かめました。\n[[確認:できあがり（第${isReject ? 2 : 1}版）]]\nできあがりました。確認をお願いします。\nファイル: ${file}\n[[/確認]]`);
+          finish(staff.id, 2200, `${t("demo.reports")}\n[[確認:${t("demo.reviewTitle", { n: isReject ? 2 : 1 })}]]\n${t("demo.reviewBody")}\nファイル: ${file}\n[[/確認]]`);
         } else if (n === 0 && members.length > 0) {
-          finish(staff.id, 1500, "[[質問]]\nいちばん前に出したいのは、①任せられる安心感 ②すぐに始められる手軽さ、のどちらですか？\n[[/質問]]");
+          finish(staff.id, 1500, `[[質問]]\n${t("demo.question")}\n[[/質問]]`);
         } else if (members.length > 0) {
           const picks = members.slice(0, Math.min(3, members.length));
           tool(staff.id, 300, "Write", { file_path: "brief.md" }, 1500);
           finish(
             staff.id,
             2400,
-            `承知しました。${picks.map((p) => `${p.name}さん`).join("・")}に頼みます。\n${picks
+            `${t("demo.delegating", { names: picks.map((p) => locale === "ja" ? `${p.name}さん` : p.name).join(locale === "ja" ? "・" : ", ") })}\n${picks
               .map((p) => `[[依頼:${p.name}]]\nbrief.md を読んで、${p.role}として自分の持ち場を仕上げてください。できた物は作業フォルダに置いてください。\n[[/依頼]]`)
               .join("\n")}`,
           );
         } else {
-          finish(staff.id, 1500, "承知しました。いまは社員がいないので、わたしが進めます。\n[[完了]]");
+          finish(staff.id, 1500, `${t("demo.solo")}\n[[完了]]`);
         }
         leadTurn.set(office.id, n + 1);
         return;
@@ -80,7 +83,7 @@ export function createDemoDriver(emit: Emit, speed = 1): DemoDriver {
       tool(staff.id, base, "Read", { file_path: "brief.md" }, 1600);
       tool(staff.id, base + 2200, "Glob", { pattern: "**/*.md" }, 1200);
       tool(staff.id, base + 4000, "Write", { file_path: file }, 2600);
-      finish(staff.id, base + 7200, `①brief.md を読んで、${staff.role}として ${file} を作りました。\n②${file}\n③実物の写真はまだ入れていません（差し替えられる枠にしてあります）。`);
+      finish(staff.id, base + 7200, t("demo.report", { role: staff.role, file }));
     },
     stop(staffId) {
       for (const t of timers.get(staffId) ?? []) clearTimeout(t);

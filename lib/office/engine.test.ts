@@ -12,7 +12,7 @@ function office(): Office {
 function drive(o: Office, run: OfficeRun, inputs: Parameters<typeof step>[2][]): { run: OfficeRun; effects: OfficeEffect[] } {
   const effects: OfficeEffect[] = [];
   for (const i of inputs) {
-    const r = step(run, o, i);
+    const r = step(run, o, i, "ja");
     run = r.run;
     effects.push(...r.effects);
   }
@@ -189,7 +189,7 @@ describe("仕事の流れ", () => {
     const lead = o.staff.find((s) => s.lead)!;
     const ogawa = o.staff.find((s) => s.name.startsWith("小川"))!;
     const { run } = drive(o, emptyRun(o), [{ t: "boss", text: "頼む", at: 1 }, ...say(lead.id, "[[依頼:小川]]\nやって。\n[[/依頼]]", 2)]);
-    const r = step(run, o, { t: "stop", at: 9 });
+    const r = step(run, o, { t: "stop", at: 9 }, "ja");
     expect(r.effects.map((e) => (e as { staffId: string }).staffId).sort()).toEqual([lead.id, ogawa.id].sort());
     expect(r.run.busy).toBe(false);
     expect(r.run.awaiting).toEqual([]);
@@ -232,7 +232,7 @@ describe("仕事の流れ", () => {
     const lead = o.staff.find((s) => s.lead)!;
     let { run } = drive(o, emptyRun(o), [{ t: "boss", text: "1つ目", at: 1 }, ...say(lead.id, "終わりました。\n[[完了]]", 2)]);
     expect(run.usage.leadTurns).toBe(1);
-    run = step(run, o, { t: "boss", text: "2つ目", at: 10 }).run;
+    run = step(run, o, { t: "boss", text: "2つ目", at: 10 }, "ja").run;
     expect(run.usage.leadTurns).toBe(0);
     expect(run.log.filter((m) => m.kind === "boss")).toHaveLength(2);
     expect(run.staff[lead.id].task).toBe("2つ目");
@@ -241,7 +241,7 @@ describe("仕事の流れ", () => {
   it("開き直したあとは、動いていた仕事が止まっていることを社長に伝える", () => {
     const o = office();
     const { run } = drive(o, emptyRun(o), [{ t: "boss", text: "頼む", at: 1 }]);
-    const after = reconcileRun(run, o, { afterRestart: true });
+    const after = reconcileRun(run, o, { afterRestart: true, locale: "ja" });
     expect(after.busy).toBe(false);
     expect(Object.values(after.staff).every((s) => s.status !== "working" && !s.started)).toBe(true);
     expect(after.log[after.log.length - 1].kind).toBe("system");

@@ -4,6 +4,7 @@
  * 置き場所は localStorage。会社の名簿は小さく、「いま」は件数に上限がある（engine.ts）。
  * 🚨 保存が失敗しても画面は止めない（保存できなかったことだけ返す）。
  */
+import type { Locale } from "../i18n";
 import { emptyRun, reconcileRun } from "./engine";
 import type { Office, OfficeRun } from "./types";
 
@@ -64,11 +65,11 @@ export function saveActiveOfficeId(id: string | null): void {
 }
 
 /** 開き直したときに読む。動いていた仕事は「止まっている」状態に直して返す。 */
-export function loadRun(office: Office): OfficeRun {
+export function loadRun(office: Office, locale: Locale = "ja"): OfficeRun {
   const saved = read<OfficeRun>(RUN_PREFIX + office.id);
   if (!saved || typeof saved !== "object" || saved.officeId !== office.id || !saved.staff) return emptyRun(office);
   const base = { ...emptyRun(office), ...saved };
-  return reconcileRun(base, office, { afterRestart: true });
+  return reconcileRun(base, office, { afterRestart: true, locale });
 }
 
 export function saveRun(run: OfficeRun): boolean {

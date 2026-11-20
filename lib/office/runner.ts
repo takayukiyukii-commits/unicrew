@@ -5,6 +5,7 @@
  * - 社員1人＝AI のセッション1本。セッション ID は `office.<会社>.<社員>`
  * - ブラウザだけで開いたとき（Tauri でないとき）は、見本の実況（demo.ts）で動かす
  */
+import type { Locale } from "../i18n";
 import { reportWorkDone } from "../attention";
 import { openPreviewSession } from "../preview-window";
 import { pickPrimary } from "../turn-artifacts";
@@ -43,6 +44,7 @@ export interface RunnerHost {
   getRun(): OfficeRun | null;
   setRun(run: OfficeRun): void;
   getSettings(): AppSettings;
+  getLocale(): Locale;
   /** 自動プレビューを出してよいか・通知を出してよいか は settings から読む */
 }
 
@@ -90,7 +92,7 @@ export class OfficeRunner {
     const office = this.host.getOffice();
     const run = this.host.getRun();
     if (!office || !run) return;
-    const r = step(run, office, input);
+    const r = step(run, office, input, this.host.getLocale());
     this.host.setRun(r.run);
     for (const e of r.effects) this.perform(office, e);
   }
@@ -139,7 +141,7 @@ export class OfficeRunner {
     const staff = office.staff.find((s) => s.id === staffId);
     if (!staff) return;
     if (this.demo) {
-      this.demo.send(office, staff, text);
+      this.demo.send(office, staff, text, this.host.getLocale());
       return;
     }
     const sid = officeSid(office.id, staffId);
