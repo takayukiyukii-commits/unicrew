@@ -190,3 +190,180 @@ The generated image is already displayed to the user. There is no need to render
 
 【最終状態】
 今回13回生成。49ポーズから48枚を採用。再制作2回（aoi4枚、akane着席後ろ1枚）。立ち姿96px、着席68px。全48枚アルファ0/255。_check.pngと_seat_check.pngを開いて確認済み。
+
+
+----- 追加（歩くコマ・横向きの着席・手を挙げる／ガッツポーズ）-----
+IMGREF=202611210357-hbu0
+
+=== A / walk sheet 1 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a production pixel-art WALK CYCLE SPRITE SHEET using the attached original character reference sheet. Reference is 3 rows of people, each with front, back and right profile. Output EXACTLY 18 isolated full-body sprites in a rigid 6-column by 3-row grid, on real transparent background, landscape 1536x1024. Evenly spaced equal cells, large clear transparent gutters, no labels or grid lines.
+Row 1 aoi: black tousled side-part hair, navy open jacket, white shirt, charcoal trousers, brown shoes.
+Row 2 akane: brown hair in high bun, coral open cardigan, white top, beige trousers, brown shoes.
+Row 3 shigeru: elderly man, white hair, round glasses, white shirt, dark green sweater vest, navy trousers, brown shoes.
+For EVERY row the six columns are:
+1 front walk frame 1, character's RIGHT leg advancing (viewer left), LEFT arm swinging forward;
+2 front walk frame 2, character's LEFT leg advancing (viewer right), RIGHT arm forward;
+3 BACK view walk frame 1 with alternating right leg/left arm;
+4 BACK view walk frame 2 with alternating left leg/right arm;
+5 RIGHT PROFILE walk frame 1, legs clearly separated forward and backward in a stride, opposite arms swinging;
+6 RIGHT PROFILE walk frame 2, legs passing close together, one foot slightly lifted, opposite arm swing.
+Front views must be exactly frontal, back views exactly back, side views strictly face RIGHT.
+Preserve EXACT original hairstyle, face, head size relative to torso, clothing colors, accessories, short chibi body proportions, coarse square pixels and dark outline. Heads should be identical between two frames of each direction, perfectly level and centered, feet touch same baseline. About 96 logical pixels tall, visually nearest-neighbor enlarged; no smoothing or thin detailed redraw. Visible arm and leg motion, no idle standing duplicates. Don't make heads smaller or bodies taller. No shadows, floor, props, text, logos, borders, numbers, motion lines, stars, sparkles or other decorations. Actual alpha transparency, no painted checkerboard.
+
+=== A / walk sheet 2 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a production pixel-art WALK CYCLE SPRITE SHEET using the attached original character reference sheet. Reference is 3 rows of people, each with front, back and right profile. Output EXACTLY 18 isolated full-body sprites in a rigid 6-column by 3-row grid, on real transparent background, landscape 1536x1024. Evenly spaced equal cells, large clear transparent gutters, no labels or grid lines.
+Row 1 sumire: black chin-length rounded bob hair, small pale earrings, lavender collared button shirt, dark purple trousers, black shoes.
+Row 2 hinata: short spiky brown hair, mustard yellow sweater with white collar, navy trousers, dark brown shoes.
+Row 3 minato: long dark hair in a high ponytail, teal collared button shirt, beige trousers, brown shoes.
+For EVERY row the six columns are:
+1 front walk frame 1, character's RIGHT leg advancing (viewer left), LEFT arm swinging forward;
+2 front walk frame 2, character's LEFT leg advancing (viewer right), RIGHT arm forward;
+3 BACK view walk frame 1 with alternating right leg/left arm;
+4 BACK view walk frame 2 with alternating left leg/right arm;
+5 RIGHT PROFILE walk frame 1, legs clearly separated forward and backward in a stride, opposite arms swinging;
+6 RIGHT PROFILE walk frame 2, legs passing close together, one foot slightly lifted, opposite arm swing.
+Front views must be exactly frontal, back views exactly back, side views strictly face RIGHT.
+Preserve EXACT original hairstyle, face, head size relative to torso, clothing colors, accessories, short chibi body proportions, coarse square pixels and dark outline. Heads should be identical between two frames of each direction, perfectly level and centered, feet touch same baseline. About 96 logical pixels tall, visually nearest-neighbor enlarged; no smoothing or thin detailed redraw. Visible arm and leg motion, no idle standing duplicates. Don't make heads smaller or bodies taller. No shadows, floor, props, text, logos, borders, numbers, motion lines, stars, sparkles or other decorations. Actual alpha transparency, no painted checkerboard.
+
+=== A / walk sheet 3 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a production pixel-art WALK CYCLE SPRITE SHEET using the attached original character reference sheet. Reference is 3 rows of people, each with front, back and right profile. Output EXACTLY 18 isolated full-body sprites in a rigid 6-column by 3-row grid, on real transparent background, landscape 1536x1024. Evenly spaced equal cells, large clear transparent gutters, no labels or grid lines.
+Row 1 kaede: short gray side-part bob, rust-red cardigan over white top, charcoal trousers, brown shoes, carries a small brown notebook held against chest; preserve notebook when walking.
+Row 2 sora: neat side-part black hair, pale blue shirt, dark necktie, charcoal trousers, black shoes.
+Row 3 chiyo: elderly woman with silver-gray bob, pink scarf, charcoal knee-length dress, bare lower legs, black shoes.
+For EVERY row the six columns are:
+1 front walk frame 1, character's RIGHT leg advancing (viewer left), LEFT arm swinging forward;
+2 front walk frame 2, character's LEFT leg advancing (viewer right), RIGHT arm forward;
+3 BACK view walk frame 1 with alternating right leg/left arm;
+4 BACK view walk frame 2 with alternating left leg/right arm;
+5 RIGHT PROFILE walk frame 1, legs clearly separated forward and backward in a stride, opposite arms swinging;
+6 RIGHT PROFILE walk frame 2, legs passing close together, one foot slightly lifted, opposite arm swing.
+Front views must be exactly frontal, back views exactly back, side views strictly face RIGHT.
+Preserve EXACT original hairstyle, face, head size relative to torso, clothing colors, accessories, short chibi body proportions, coarse square pixels and dark outline. Heads should be identical between two frames of each direction, perfectly level and centered, feet touch same baseline. About 96 logical pixels tall, visually nearest-neighbor enlarged; no smoothing or thin detailed redraw. Visible arm and leg motion, no idle standing duplicates. Don't make heads smaller or bodies taller. No shadows, floor, props, text, logos, borders, numbers, motion lines, stars, sparkles or other decorations. Actual alpha transparency, no painted checkerboard.
+IMPORTANT: In frontal columns 1 and 2 the arm poses MUST SWITCH SIDES. Column 1 viewer-left arm hangs BACK and viewer-right fist comes FORWARD at waist/chest; column 2 viewer-left fist comes FORWARD and viewer-right arm hangs BACK. The two legs must also swap which is forward. Do not copy the same arm pose twice.
+
+=== A / walk sheet 4 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a production pixel-art WALK CYCLE SPRITE SHEET using the attached original character reference sheet. Reference is 3 rows of people, each with front, back and right profile. Output EXACTLY 18 isolated full-body sprites in a rigid 6-column by 3-row grid, on real transparent background, landscape 1536x1024. Evenly spaced equal cells, large clear transparent gutters, no labels or grid lines.
+Row 1 itsuki: young man with curly brown hair and round black glasses, olive sweater, brown trousers, dark shoes.
+Row 2 shiori: woman with long wavy brown hair, white collared blouse, navy knee-length skirt, bare lower legs, black shoes.
+Row 3 haru: young man with short spiky black hair, orange-red short sleeve polo, beige trousers, black shoes.
+For EVERY row the six columns are:
+1 front walk frame 1, character's RIGHT leg advancing (viewer left), LEFT arm swinging forward;
+2 front walk frame 2, character's LEFT leg advancing (viewer right), RIGHT arm forward;
+3 BACK view walk frame 1 with alternating right leg/left arm;
+4 BACK view walk frame 2 with alternating left leg/right arm;
+5 RIGHT PROFILE walk frame 1, legs clearly separated forward and backward in a stride, opposite arms swinging;
+6 RIGHT PROFILE walk frame 2, legs passing close together, one foot slightly lifted, opposite arm swing.
+Front views must be exactly frontal, back views exactly back, side views strictly face RIGHT.
+Preserve EXACT original hairstyle, face, head size relative to torso, clothing colors, accessories, short chibi body proportions, coarse square pixels and dark outline. Heads should be identical between two frames of each direction, perfectly level and centered, feet touch same baseline. About 96 logical pixels tall, visually nearest-neighbor enlarged; no smoothing or thin detailed redraw. Visible arm and leg motion, no idle standing duplicates. Don't make heads smaller or bodies taller. No shadows, floor, props, text, logos, borders, numbers, motion lines, stars, sparkles or other decorations. Actual alpha transparency, no painted checkerboard.
+CRITICAL: Each pair must show visibly OPPOSITE limb positions. Front column 1: viewer-left shoe is LOW on baseline, viewer-right shoe is HIGH; viewer-left hand LOW, viewer-right fist HIGH. Front column 2: viewer-right shoe LOW on baseline, viewer-left shoe HIGH; viewer-right hand LOW, viewer-left fist HIGH. Back column 3: viewer-right shoe LOW, viewer-left shoe HIGH, viewer-right hand LOW, viewer-left fist HIGH. Back column 4: viewer-left shoe LOW, viewer-right shoe HIGH, viewer-left hand LOW, viewer-right fist HIGH. No identical poses across a pair.
+
+=== B / seated right profiles ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create one pixel-art sprite sheet containing exactly TWELVE characters, each SEATED IN RIGHT PROFILE, on actual transparent background. Reference image is the original standing right profiles. Keep precisely these twelve people and their original head size, silhouette, hairstyle, hair colors, faces, clothes and accessories. Output landscape 1536x1024, exactly FOUR columns and THREE rows, each person fully isolated within equal cells, ample gutters, consistent scale.
+Row 1 left to right: aoi (black tousled hair navy jacket white shirt charcoal trousers), akane (brown high bun coral cardigan beige trousers), shigeru (elderly white hair round glasses dark green vest white sleeves navy trousers), sumire (black bob lavender blouse purple trousers).
+Row 2 left to right: hinata (brown spiky hair yellow sweater navy trousers), minato (dark high ponytail teal blouse beige trousers), kaede (gray short side-part hair rust cardigan charcoal trousers brown notebook), sora (neat black side-part hair pale blue shirt dark tie charcoal trousers).
+Row 3 left to right: chiyo (silver bob pink scarf charcoal dress bare lower legs), itsuki (brown curly hair round glasses olive sweater brown trousers), shiori (long wavy brown hair white blouse navy skirt bare lower legs), haru (black spiky hair orange-red polo beige trousers).
+EVERY character is facing RIGHT and sitting upright as if on an invisible office chair, thigh horizontal projecting to RIGHT, knee bent about 90 degrees, shin vertical downward, feet/shoes visible pointing RIGHT and resting flat. Show entire head, torso, hips, bent thighs, knees, shins and shoes. Hands relaxed at lap, kaede retains notebook on lap. Chair and table are NOT drawn; no props except the original notebook. Heads must have the same size as their standing references, body must look compact and seated, about 80 logical pixels high compared to standing reference 96. Coarse square pixel art with hard dark outline and nearest-neighbor appearance. Actual transparent alpha background. NO chair, desk, shadow, floor, text, labels, numbers, logo, border, frame, decorations, sparkle, effects, checkerboard.
+
+=== C / pose sheet 1 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a pixel-art character POSE SPRITE SHEET based precisely on the attached original references. Actual transparent background. Exactly SIX columns by THREE rows, landscape 1536x1024, 18 isolated sprites in evenly spaced equal cells, ample transparent gutters. No labels or lines. The reference has three rows of people; columns show original standing front, seated front waist-up, seated back waist-up.
+Row 1 aoi: black tousled side-part hair, navy open jacket, white shirt, charcoal trousers, brown shoes.
+Row 2 akane: brown hair in high bun, coral open cardigan, white top, beige trousers, brown shoes.
+Row 3 shigeru: elderly man, white hair, round glasses, white shirt, dark green sweater vest, navy trousers, brown shoes.
+For EACH row, output these six DIFFERENT poses in this order:
+COLUMN 1: STANDING FRONT full body, ONE arm straight up vertically, open palm above head, other arm relaxed. Hand signals "done / please". Raised hand on viewer-left. Both feet flat.
+COLUMN 2: STANDING FRONT full body, BOTH FISTS raised high beside/above head in a happy victory pose, elbows bent outward, joyful smiling face, both feet flat.
+COLUMN 3: SEATED FRONT WAIST-UP, ONE arm straight up vertically with open palm above head, other hand resting near waist. Raised hand on viewer-left. Crop at the same waist as reference, no legs.
+COLUMN 4: SEATED FRONT WAIST-UP, BOTH FISTS raised high beside/above head in happy victory pose, elbows bent outward, joyful smiling face. Crop at same waist as reference, no legs.
+COLUMN 5: SEATED BACK WAIST-UP, ONE arm straight up vertically with open palm above head, other arm relaxed, clearly back of head and back of clothing, no face, no legs.
+COLUMN 6: SEATED BACK WAIST-UP, BOTH FISTS raised high beside/above head in victory pose, elbows bent outward, clearly back of head and clothing, no face, no legs.
+All sprites have IDENTICAL head sizes and pixel scale across standing and seated poses. Heads must not shrink in raised-arm poses. Keep every original person's head silhouette, hair color, hairstyle, face, glasses and clothing. Original standing body is 96 logical pixels high and seated waist-up body 68 pixels. Raised arms extend upwards up to 16 extra pixels, for 112 and 84 total height respectively. Keep original feet/waist bottom and centerline. In each output row align the HEAD TOPS across columns, so seated sprites end above standing feet. Keep full raised hands visible with generous margins. Coarse square pixel-art, thick dark outlines, nearest-neighbor appearance, no smoothing.
+NO chairs, tables, floor, cast shadows, text, labels, numbers, logos, borders, decorations, stars, sparkles, effects or checkerboard. Real alpha transparency.
+
+=== C / pose sheet 2 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a pixel-art character POSE SPRITE SHEET based precisely on the attached original references. Actual transparent background. Exactly SIX columns by THREE rows, landscape 1536x1024, 18 isolated sprites in evenly spaced equal cells, ample transparent gutters. No labels or lines. The reference has three rows of people; columns show original standing front, seated front waist-up, seated back waist-up.
+Row 1 sumire: black chin-length rounded bob hair, small pale earrings, lavender collared button shirt, dark purple trousers, black shoes.
+Row 2 hinata: short spiky brown hair, mustard yellow sweater with white collar, navy trousers, dark brown shoes.
+Row 3 minato: long dark hair in a high ponytail, teal collared button shirt, beige trousers, brown shoes.
+For EACH row, output these six DIFFERENT poses in this order:
+COLUMN 1: STANDING FRONT full body, ONE arm straight up vertically, open palm above head, other arm relaxed. Hand signals "done / please". Raised hand on viewer-left. Both feet flat.
+COLUMN 2: STANDING FRONT full body, BOTH FISTS raised high beside/above head in a happy victory pose, elbows bent outward, joyful smiling face, both feet flat.
+COLUMN 3: SEATED FRONT WAIST-UP, ONE arm straight up vertically with open palm above head, other hand resting near waist. Raised hand on viewer-left. Crop at the same waist as reference, no legs.
+COLUMN 4: SEATED FRONT WAIST-UP, BOTH FISTS raised high beside/above head in happy victory pose, elbows bent outward, joyful smiling face. Crop at same waist as reference, no legs.
+COLUMN 5: SEATED BACK WAIST-UP, ONE arm straight up vertically with open palm above head, other arm relaxed, clearly back of head and back of clothing, no face, no legs.
+COLUMN 6: SEATED BACK WAIST-UP, BOTH FISTS raised high beside/above head in victory pose, elbows bent outward, clearly back of head and clothing, no face, no legs.
+All sprites have IDENTICAL head sizes and pixel scale across standing and seated poses. Heads must not shrink in raised-arm poses. Keep every original person's head silhouette, hair color, hairstyle, face, glasses and clothing. Original standing body is 96 logical pixels high and seated waist-up body 68 pixels. Raised arms extend upwards up to 16 extra pixels, for 112 and 84 total height respectively. Keep original feet/waist bottom and centerline. In each output row align the HEAD TOPS across columns, so seated sprites end above standing feet. Keep full raised hands visible with generous margins. Coarse square pixel-art, thick dark outlines, nearest-neighbor appearance, no smoothing.
+NO chairs, tables, floor, cast shadows, text, labels, numbers, logos, borders, decorations, stars, sparkles, effects or checkerboard. Real alpha transparency.
+IMPORTANT: For the one-hand poses the arm must extend STRAIGHT VERTICALLY UPWARD with an unbent elbow. The open palm must be clearly ABOVE THE TOP OF THE HAIR, not merely waving beside the face. Make the forearm tall enough that the open hand is above the crown. For cheers raise the fists to temple level or higher and show an unmistakably happy smile.
+
+=== C / pose sheet 3 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a pixel-art character POSE SPRITE SHEET based precisely on the attached original references. Actual transparent background. Exactly SIX columns by THREE rows, landscape 1536x1024, 18 isolated sprites in evenly spaced equal cells, ample transparent gutters. No labels or lines. The reference has three rows of people; columns show original standing front, seated front waist-up, seated back waist-up.
+Row 1 kaede: short gray side-part bob, rust-red cardigan over white top, charcoal trousers, brown shoes, carries a small brown notebook held against chest; preserve notebook when walking.
+Row 2 sora: neat side-part black hair, pale blue shirt, dark necktie, charcoal trousers, black shoes.
+Row 3 chiyo: elderly woman with silver-gray bob, pink scarf, charcoal knee-length dress, bare lower legs, black shoes.
+For EACH row, output these six DIFFERENT poses in this order:
+COLUMN 1: STANDING FRONT full body, ONE arm straight up vertically, open palm above head, other arm relaxed. Hand signals "done / please". Raised hand on viewer-left. Both feet flat.
+COLUMN 2: STANDING FRONT full body, BOTH FISTS raised high beside/above head in a happy victory pose, elbows bent outward, joyful smiling face, both feet flat.
+COLUMN 3: SEATED FRONT WAIST-UP, ONE arm straight up vertically with open palm above head, other hand resting near waist. Raised hand on viewer-left. Crop at the same waist as reference, no legs.
+COLUMN 4: SEATED FRONT WAIST-UP, BOTH FISTS raised high beside/above head in happy victory pose, elbows bent outward, joyful smiling face. Crop at same waist as reference, no legs.
+COLUMN 5: SEATED BACK WAIST-UP, ONE arm straight up vertically with open palm above head, other arm relaxed, clearly back of head and back of clothing, no face, no legs.
+COLUMN 6: SEATED BACK WAIST-UP, BOTH FISTS raised high beside/above head in victory pose, elbows bent outward, clearly back of head and clothing, no face, no legs.
+All sprites have IDENTICAL head sizes and pixel scale across standing and seated poses. Heads must not shrink in raised-arm poses. Keep every original person's head silhouette, hair color, hairstyle, face, glasses and clothing. Original standing body is 96 logical pixels high and seated waist-up body 68 pixels. Raised arms extend upwards up to 16 extra pixels, for 112 and 84 total height respectively. Keep original feet/waist bottom and centerline. In each output row align the HEAD TOPS across columns, so seated sprites end above standing feet. Keep full raised hands visible with generous margins. Coarse square pixel-art, thick dark outlines, nearest-neighbor appearance, no smoothing.
+NO chairs, tables, floor, cast shadows, text, labels, numbers, logos, borders, decorations, stars, sparkles, effects or checkerboard. Real alpha transparency.
+IMPORTANT: For the one-hand poses the arm must extend STRAIGHT VERTICALLY UPWARD with an unbent elbow. The open palm must be clearly ABOVE THE TOP OF THE HAIR, not merely waving beside the face. Make the forearm tall enough that the open hand is above the crown. For cheers raise the fists to temple level or higher and show an unmistakably happy smile.
+Kaede keeps the original brown notebook: with one hand raised hold it against chest with the other hand; in two-fist cheers tuck it securely at the waist so both fists are clearly empty. Do not add new jewelry.
+
+=== C / pose sheet 4 ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a pixel-art character POSE SPRITE SHEET based precisely on the attached original references. Actual transparent background. Exactly SIX columns by THREE rows, landscape 1536x1024, 18 isolated sprites in evenly spaced equal cells, ample transparent gutters. No labels or lines. The reference has three rows of people; columns show original standing front, seated front waist-up, seated back waist-up.
+Row 1 itsuki: young man with curly brown hair and round black glasses, olive sweater, brown trousers, dark shoes.
+Row 2 shiori: woman with long wavy brown hair, white collared blouse, navy knee-length skirt, bare lower legs, black shoes.
+Row 3 haru: young man with short spiky black hair, orange-red short sleeve polo, beige trousers, black shoes.
+For EACH row, output these six DIFFERENT poses in this order:
+COLUMN 1: STANDING FRONT full body, ONE arm straight up vertically, open palm above head, other arm relaxed. Hand signals "done / please". Raised hand on viewer-left. Both feet flat.
+COLUMN 2: STANDING FRONT full body, BOTH FISTS raised high beside/above head in a happy victory pose, elbows bent outward, joyful smiling face, both feet flat.
+COLUMN 3: SEATED FRONT WAIST-UP, ONE arm straight up vertically with open palm above head, other hand resting near waist. Raised hand on viewer-left. Crop at the same waist as reference, no legs.
+COLUMN 4: SEATED FRONT WAIST-UP, BOTH FISTS raised high beside/above head in happy victory pose, elbows bent outward, joyful smiling face. Crop at same waist as reference, no legs.
+COLUMN 5: SEATED BACK WAIST-UP, ONE arm straight up vertically with open palm above head, other arm relaxed, clearly back of head and back of clothing, no face, no legs.
+COLUMN 6: SEATED BACK WAIST-UP, BOTH FISTS raised high beside/above head in victory pose, elbows bent outward, clearly back of head and clothing, no face, no legs.
+All sprites have IDENTICAL head sizes and pixel scale across standing and seated poses. Heads must not shrink in raised-arm poses. Keep every original person's head silhouette, hair color, hairstyle, face, glasses and clothing. Original standing body is 96 logical pixels high and seated waist-up body 68 pixels. Raised arms extend upwards up to 16 extra pixels, for 112 and 84 total height respectively. Keep original feet/waist bottom and centerline. In each output row align the HEAD TOPS across columns, so seated sprites end above standing feet. Keep full raised hands visible with generous margins. Coarse square pixel-art, thick dark outlines, nearest-neighbor appearance, no smoothing.
+NO chairs, tables, floor, cast shadows, text, labels, numbers, logos, borders, decorations, stars, sparkles, effects or checkerboard. Real alpha transparency.
+IMPORTANT: For the one-hand poses the arm must extend STRAIGHT VERTICALLY UPWARD with an unbent elbow. The open palm must be clearly ABOVE THE TOP OF THE HAIR, not merely waving beside the face. Make the forearm tall enough that the open hand is above the crown. For cheers raise the fists to temple level or higher and show an unmistakably happy smile.
+
+=== C / pose sheet 1 / retry 1: straighten raised arms ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+Create a pixel-art character POSE SPRITE SHEET based precisely on the attached original references. Actual transparent background. Exactly SIX columns by THREE rows, landscape 1536x1024, 18 isolated sprites in evenly spaced equal cells, ample transparent gutters. No labels or lines. The reference has three rows of people; columns show original standing front, seated front waist-up, seated back waist-up.
+Row 1 aoi: black tousled side-part hair, navy open jacket, white shirt, charcoal trousers, brown shoes.
+Row 2 akane: brown hair in high bun, coral open cardigan, white top, beige trousers, brown shoes.
+Row 3 shigeru: elderly man, white hair, round glasses, white shirt, dark green sweater vest, navy trousers, brown shoes.
+For EACH row, output these six DIFFERENT poses in this order:
+COLUMN 1: STANDING FRONT full body, ONE arm straight up vertically, open palm above head, other arm relaxed. Hand signals "done / please". Raised hand on viewer-left. Both feet flat.
+COLUMN 2: STANDING FRONT full body, BOTH FISTS raised high beside/above head in a happy victory pose, elbows bent outward, joyful smiling face, both feet flat.
+COLUMN 3: SEATED FRONT WAIST-UP, ONE arm straight up vertically with open palm above head, other hand resting near waist. Raised hand on viewer-left. Crop at the same waist as reference, no legs.
+COLUMN 4: SEATED FRONT WAIST-UP, BOTH FISTS raised high beside/above head in happy victory pose, elbows bent outward, joyful smiling face. Crop at same waist as reference, no legs.
+COLUMN 5: SEATED BACK WAIST-UP, ONE arm straight up vertically with open palm above head, other arm relaxed, clearly back of head and back of clothing, no face, no legs.
+COLUMN 6: SEATED BACK WAIST-UP, BOTH FISTS raised high beside/above head in victory pose, elbows bent outward, clearly back of head and clothing, no face, no legs.
+All sprites have IDENTICAL head sizes and pixel scale across standing and seated poses. Heads must not shrink in raised-arm poses. Keep every original person's head silhouette, hair color, hairstyle, face, glasses and clothing. Original standing body is 96 logical pixels high and seated waist-up body 68 pixels. Raised arms extend upwards up to 16 extra pixels, for 112 and 84 total height respectively. Keep original feet/waist bottom and centerline. In each output row align the HEAD TOPS across columns, so seated sprites end above standing feet. Keep full raised hands visible with generous margins. Coarse square pixel-art, thick dark outlines, nearest-neighbor appearance, no smoothing.
+NO chairs, tables, floor, cast shadows, text, labels, numbers, logos, borders, decorations, stars, sparkles, effects or checkerboard. Real alpha transparency.
+CRITICAL CORRECTION: For columns 1, 3, 5, do NOT show a casual wave beside the face. The raised arm must be STRAIGHT and VERTICAL with elbow fully extended. Its open palm MUST sit ABOVE THE TOP OF THE HAIR, at least one palm-height higher than the crown. Extend the forearm appropriately. This is an emphatic hand-up request, not waving. Keep every other character identity and required pose unchanged.
+
+=== C / kaede-cheer / retry 1: remove extra hand ===
+IMGREF=202611210357-hbu0
+Use case: identity-preserve. Edit the original pixel-art person kaede into a single full-body front-view happy victory pose. Precisely preserve original gray short side-part bob hairstyle, head size and silhouette, face identity, rust-red open cardigan over white shirt, charcoal trousers, brown shoes, coarse square pixel texture and black outlines. Both elbows bent outward and BOTH FISTS raised beside temples. Joyful smile with happy eyes. EXACTLY TWO ARMS AND EXACTLY TWO HANDS, both hands are raised fists. There must be NO third hand at the waist or chest. The original small brown notebook is tucked into the waistband at the person's left hip, supported by the waistband, with NO hand holding it. Both feet planted flat, original leg stance and same short chibi proportions. Entire sprite isolated and centered, actual transparent background, full raised fists and shoes visible with clear margins. Do not make the head smaller or body taller. No chair, table, floor, shadows, text, logos, frames, effects, decorations, numbers, stars or checkerboard.
