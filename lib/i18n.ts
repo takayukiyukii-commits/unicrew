@@ -137,6 +137,9 @@ const ja: Dict = {
 
   // ----- Sidebar -----
   "sidebar.newConversation": "新しい会話",
+  "sidebar.office": "AIオフィス",
+  "sidebar.pastConversations": "過去の会話",
+  "sidebar.pastConversationsHint": "以前の版で作った会話です。新しい仕事は AIオフィスで頼めます。",
   "sidebar.searchPlaceholder": "全スレッド検索…",
   "sidebar.searchClear": "検索クリア",
   "sidebar.noResults": "該当するスレッドはありません。",
@@ -1442,6 +1445,9 @@ const en: Dict = {
 
   // ----- Sidebar -----
   "sidebar.newConversation": "New conversation",
+  "sidebar.office": "AI Office",
+  "sidebar.pastConversations": "Past conversations",
+  "sidebar.pastConversationsHint": "Conversations from earlier versions. Ask for new work in the AI Office.",
   "sidebar.searchPlaceholder": "Search all threads…",
   "sidebar.searchClear": "Clear search",
   "sidebar.noResults": "No matching threads.",

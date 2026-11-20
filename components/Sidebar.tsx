@@ -14,6 +14,9 @@ import {
   FolderTree,
   Pencil,
   Archive,
+  Building2,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { Thread } from "@/lib/types";
@@ -23,7 +26,7 @@ import { CharacterAvatar } from "./CharacterAvatar";
 import { useTranslation } from "@/lib/i18n";
 import clsx from "clsx";
 
-export type MainView = "chat" | "addons" | "terminal";
+export type MainView = "office" | "chat" | "addons" | "terminal";
 
 interface Props {
   threads: Thread[];
@@ -37,7 +40,8 @@ interface Props {
   streamingThreadIds?: ReadonlySet<string>;
   /** 通常クリック = 主ペインに開く。Ctrl/Cmd+クリック = 並列ペインに開く。 */
   onSelect: (id: string, modifiers?: { intoSplit?: boolean }) => void;
-  onCreate: () => void;
+  /** AIオフィス（既定の画面）を開く */
+  onOpenOffice: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   /** サイドチャット（v0.4.0）を閉じる＝アーカイブ（削除しない）。 */
@@ -70,12 +74,12 @@ export function Sidebar({
   splitThreadIds = [],
   streamingThreadIds,
   onSelect,
-  onCreate,
+  onOpenOffice,
   onDelete,
   onRename,
   onArchive,
   onOpenSettings,
-  mainView = "chat",
+  mainView = "office",
   onOpenAddons,
   onOpenTerminal,
   explorerOpen = false,
@@ -87,6 +91,8 @@ export function Sidebar({
   /** アイデア11: 全スレッド横断検索（最小実装：In-Memoryでタイトル＋メッセージ全文grep） */
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  // 過去の会話（以前の版のチャット）は畳んでおく。開いたときだけ一覧と検索を出す
+  const [showPast, setShowPast] = useState(false);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   // サイドチャット（v0.4.0）: 本線の直下にサイドを置く。アーカイブは既定で隠す
@@ -125,16 +131,21 @@ export function Sidebar({
 
         <button
           type="button"
-          onClick={onCreate}
-          className="mx-2 mt-3 flex items-center justify-center rounded-lg bg-[var(--color-accent)] text-white py-2 hover:opacity-90 transition"
-          title={t("sidebar.newConversation")}
-          aria-label={t("sidebar.newConversation")}
+          onClick={onOpenOffice}
+          className={clsx(
+            "mx-2 mt-3 flex items-center justify-center rounded-lg py-2 transition",
+            mainView === "office"
+              ? "bg-[var(--color-accent)] text-white"
+              : "bg-white text-[var(--color-accent)] border border-[var(--color-border)] hover:opacity-90",
+          )}
+          title={t("sidebar.office")}
+          aria-label={t("sidebar.office")}
         >
-          <Plus size={16} />
+          <Building2 size={16} />
         </button>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-1 py-2 space-y-1 unicrew-scroll">
-          {sorted.map(({ thread: th }) => {
+          {(showPast ? sorted : []).map(({ thread: th }) => {
             const character = getCharacter(th.characterId);
             const isActive = th.id === activeThreadId;
             const isInSplit = splitThreadIds.includes(th.id);
@@ -246,12 +257,45 @@ export function Sidebar({
       </div>
 
       <button
-        onClick={onCreate}
-        className="mx-3 mt-3 flex items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] text-white py-2 text-sm font-medium hover:opacity-90 transition"
+        onClick={onOpenOffice}
+        className={clsx(
+          "mx-3 mt-3 flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition",
+          mainView === "office"
+            ? "bg-[var(--color-accent)] text-white"
+            : "bg-white text-[var(--color-accent)] border border-[var(--color-border)] hover:opacity-90",
+        )}
       >
-        <Plus size={16} />
-        {t("sidebar.newConversation")}
+        <Building2 size={16} />
+        {t("sidebar.office")}
       </button>
+      {onOpenTerminal && (
+        <button
+          onClick={onOpenTerminal}
+          className={clsx(
+            "mx-3 mt-2 flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition border",
+            mainView === "terminal"
+              ? "bg-white text-[var(--color-accent)] border-[var(--color-accent)]"
+              : "bg-white text-[var(--color-text)] border-[var(--color-border)] hover:opacity-90",
+          )}
+        >
+          <SquareTerminal size={16} />
+          {t("sidebar.terminal")}
+        </button>
+      )}
+
+      {threads.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowPast((v) => !v)}
+          aria-expanded={showPast}
+          title={t("sidebar.pastConversationsHint")}
+          className="mx-3 mt-4 flex items-center gap-1 text-[12px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)]"
+        >
+          {showPast ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {t("sidebar.pastConversations")}（{threads.filter((th) => !th.archived).length}）
+        </button>
+      ) : null}
+      {!showPast ? <div className="flex-1 min-h-0" /> : (<>
 
       {/* アイデア11: 全スレッド横断検索バー */}
       <div className="mx-3 mt-2 relative">
@@ -421,6 +465,7 @@ export function Sidebar({
           </button>
         )}
       </div>
+      </>)}
 
       <div className="border-t border-[var(--color-border)] p-2 space-y-0.5">
         {onToggleExplorer && (

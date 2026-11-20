@@ -193,6 +193,7 @@ import type {
   ToolUseBlock,
 } from "@/lib/types";
 import { cliModelFor, PERMISSION_MODE_ORDER, toCliPermissionMode } from "@/lib/types";
+import OfficeView from "@/components/office/OfficeView";
 import { collectArtifacts, pickPrimary } from "@/lib/turn-artifacts";
 import { openPreviewSession } from "@/lib/preview-window";
 import { applyTrayResident, clearUnread, reportWorkDone } from "@/lib/attention";
@@ -515,7 +516,9 @@ export default function Page() {
   const [freeModeOpen, setFreeModeOpen] = useState(false);
   /** フィードバック・サーベイ表示フラグ。たまに会話末尾に差し込む。 */
   const [feedbackVisible, setFeedbackVisible] = useState(false);
-  const [mainView, setMainView] = useState<MainView>("chat");
+  const [mainView, setMainView] = useState<MainView>("office");
+  // AIオフィスで選んでいる会社の作業フォルダ（ターミナルとエクスプローラの作業フォルダに使う）
+  const [officeWorkspace, setOfficeWorkspace] = useState<string | null>(null);
   /**
    * document に張りっぱなしのキーハンドラ（[] 依存）から最新のビューを見るための ref。
    * ターミナル表示中は Ctrl+F / Ctrl+K をターミナル側に譲るために使う。
@@ -1090,6 +1093,8 @@ export default function Page() {
   };
 
   function handleAgentEvent(event: AgentEvent) {
+    // AIオフィスの社員の実況は OfficeView が受け取る（ここでは扱わない。許可の確認もオフィスのカードで出す）
+    if ("session_id" in event && typeof event.session_id === "string" && event.session_id.startsWith("office.")) return;
     // 生きている合図の記録。`ready` / `cli_session_id` / `permission_request` は下で早期 return
     // するため、以前はここを通らず「何も届いていない」扱いになっていた。その結果、考え中や
     // 起動待ちの健康なセッションを自動回復ウォッチドッグが殺していた（2026-09-20 修正）。
@@ -4073,21 +4078,14 @@ ${command}
             setMainView("chat");
             handleSidebarSelect(id, mods);
           }}
-          onCreate={() => {
-            setMainView("chat");
-            handleCreate();
-          }}
+          onOpenOffice={() => setMainView("office")}
           onDelete={handleDelete}
           onRename={handleRenameThread}
           onArchive={handleArchiveThread}
           onOpenSettings={() => setSettingsOpen(true)}
           mainView={mainView}
           onOpenAddons={() => setMainView("addons")}
-          onOpenTerminal={
-            settings.beginnerMode === false
-              ? () => setMainView("terminal")
-              : undefined
-          }
+          onOpenTerminal={() => setMainView("terminal")}
           explorerOpen={explorerOpen}
           onToggleExplorer={() => {
             setExplorerOpen((v) => {
@@ -4097,11 +4095,11 @@ ${command}
               return next;
             });
           }}
-          collapsed={explorerOpen && !sidebarManuallyExpanded}
+          collapsed={(explorerOpen || mainView === "office") && !sidebarManuallyExpanded}
           onExpand={() => setSidebarManuallyExpanded(true)}
         />
         {explorerOpen && (() => {
-          const ws = activeThread?.workspace ?? null;
+          const ws = (mainView === "chat" ? activeThread?.workspace : officeWorkspace) ?? activeThread?.workspace ?? null;
           const restricted = !!ws && restrictedWorkspaces.has(ws);
           return (
             <ExplorerPanel
@@ -4122,7 +4120,11 @@ ${command}
         {/* ターミナル表示中はチャット系UIを display:none で隠す（アンマウントしない）。
             contents ラッパは layout box を作らないので、内部の flex-1 ペインは
             これまで通りメイン行の直接の子として振る舞う。 */}
-        <div className={mainView === "terminal" ? "hidden" : "contents"}>
+        {/* AIオフィス（既定の画面）。隠している間も読み込んだままにする（進行中の仕事を止めない） */}
+        <div className={mainView === "office" ? "relative flex-1 min-w-0 min-h-0" : "hidden"}>
+          <OfficeView active={mainView === "office"} settings={settings} onWorkspaceChange={setOfficeWorkspace} />
+        </div>
+        <div className={mainView === "terminal" || mainView === "office" ? "hidden" : "contents"}>
         {mainView === "addons" ? (
           <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-white">
             <div className="max-w-5xl mx-auto px-6 py-8">
@@ -4476,7 +4478,7 @@ ${command}
           }
         >
           <TerminalPanes
-            workspace={activeThread?.workspace ?? null}
+            workspace={officeWorkspace ?? activeThread?.workspace ?? null}
             onSendToAi={handleTerminalTextToAi}
             onWorkDone={handleTerminalWorkDone}
             worktrees={
