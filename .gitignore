@@ -50,6 +50,8 @@ scripts/*.py
 # 検証スクリプトは追跡する（次に触る人が同じ手順で測り直せないと意味がない）
 !scripts/verify_image_attachment.py
 !scripts/verify_codex_route.py
+# AIオフィスの背景の絵から「手前の家具」と「歩ける床の地図」を作り直す道具（生成物の作り方を残す）
+!scripts/office_scene_front.py
 __pycache__/
 
 # Claude Code のローカル設定（個人環境・共有しない）

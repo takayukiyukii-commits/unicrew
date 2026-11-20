@@ -359,3 +359,28 @@ html, body {
 .office-speech { position: absolute; left: 0; bottom: 78px; transform: translateX(-50%) scale(.9); transform-origin: center bottom; max-width: 190px; width: max-content; padding: 4px 8px; border-radius: 10px; border: 1px solid #C7D2FE; background: #FFFFFF; color: #1E293B; font-size: 11.5px; font-weight: 600; line-height: 1.35; white-space: normal; text-align: left; box-shadow: 0 4px 12px rgba(15,23,42,.08); opacity: 0; transition: opacity .18s ease, transform .18s ease; pointer-events: none; z-index: 200; }
 .office-speech::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 8px; background: #FFFFFF; border-right: 1px solid #C7D2FE; border-bottom: 1px solid #C7D2FE; transform: translateX(-50%) rotate(45deg); }
 .office-speech[data-show="true"] { opacity: 1; transform: translateX(-50%) scale(1); }
+
+/* ───── 前後関係と、向きごとの絵（v0.7.0）─────
+   足元の y が大きい物ほど手前。社員も家具の重ね絵も z-index = y×1000 で並べる。札はその上 */
+.office-front { position: absolute; pointer-events: none; background-image: url("/office/scene/office-day.webp"); background-repeat: no-repeat; image-rendering: pixelated;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.office-scene-tint { z-index: 4000; }
+.office-place-sign, .office-island-sign { z-index: 4500; }
+.office-label-lines { z-index: 4900; }
+.office-root .office-person-label { z-index: 5000; }
+.office-speech { z-index: 5200; }
+/* 社員の絵は部屋の大きさに合わせる（--s＝部屋の幅÷1920）。立ち姿 96、着席 68 が元の高さ */
+.office-person-image { left: 0; bottom: 0; width: 0; height: 0; overflow: visible; }
+/* 絵の下の端の中央＝足元（座っているときは腰）を、いる場所に合わせる */
+.office-person .office-crew-face { position: absolute; left: 0; bottom: 0; transform: translateX(-50%); width: auto !important; height: calc(96px * var(--s, .75)) !important; max-width: none; }
+.office-person[data-pose^="sit"] .office-crew-face { height: calc(68px * var(--s, .75)) !important; }
+.office-person[data-flip="true"] .office-crew-face { transform: translateX(-50%) scaleX(-1); }
+.office-person[data-waiting="true"] .office-crew-face { margin: 0; }
+.office-person .office-crew-custom { height: calc(64px * var(--s, .75)) !important; width: calc(64px * var(--s, .75)) !important; margin-bottom: calc(18px * var(--s, .75)); }
+.office-person-alert { top: calc(-122px * var(--s, .75)); left: calc(12px * var(--s, .75)); }
+.office-person[data-pose^="sit"] .office-person-alert { top: calc(-88px * var(--s, .75)); }
+.office-speech { bottom: calc(104px * var(--s, .75)); }
+.office-person[data-pose^="sit"] .office-speech { bottom: calc(70px * var(--s, .75)); }
+.office-carry-paper { left: calc(14px * var(--s, .75)); bottom: calc(30px * var(--s, .75)); }
+/* 社員の置き場所の印は高さ1px（ボタンの最小の高さ40pxの決まりから外す。外さないと、絵が足元より40px下にずれる） */
+.office-root button.office-person.office-person { min-height: 0; height: 1px; }

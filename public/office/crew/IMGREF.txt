@@ -4,3 +4,189 @@ IMGREF=202611210357-hbu0
 用途: stylized-concept。オリジナルのドット絵ゲーム用、日本の会社の社員12人のスプライトシートを1枚作る。透明背景（本物のアルファ）。4列×3行の均等なグリッド。各セルに1人、全員の全身が独立して収まり、セルの間に広い透明の余白。全員同じサイズ、頭身2.5頭身、正面からやや斜め、両足が見える直立姿勢。ピクセルアート、硬いドット輪郭、アンチエイリアスやぼやけなし、影は描かない。かわいいが子供ではなく成人の会社員。頭の大きさを揃える。参考キャラクターをコピーしない。
 左上から右へ、上の行から順に12人：1 黒い短髪・藍色ジャケット・白シャツの男性。2 茶髪のお団子・珊瑚色カーディガン・ベージュのパンツの女性。3 白髪・丸眼鏡・深緑のベスト・紺パンツの年配男性。4 黒髪ボブ・ラベンダーのブラウス・濃紫パンツの女性。5 茶色くせ毛・山吹色のセーター・紺パンツの男性。6 黒髪ポニーテール・青緑のシャツ・クリーム色パンツの女性。7 灰色の短髪・赤茶色ジャケット・手に小さな無地の手帳を持つ中年女性。8 黒い七三分け・水色シャツ・濃灰ズボン・黒い細いネクタイの男性。9 銀色ボブ・桃色のスカーフ・墨色ワンピースの年配女性。10 短い茶髪・丸眼鏡・オリーブ色のニット・茶色ズボンの男性。11 長いこげ茶髪・白いブラウス・藍色スカートの女性。12 黒い巻き毛・朱色ポロシャツ・生成りパンツの男性。
 文字・数字・ロゴ・透かし・枠・グリッド線は入れない。実在のキャラクターや他社マスコットに似せない。光る回路・ホログラム・未来都市は禁止。
+IMGREF=202611210357-hbu0
+2026-11-21 続き。内蔵画像生成ツール。transparent_background=true
+
+【aoi】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/aoi.png の4倍最近傍拡大。元のオリジナル社員 aoi と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：黒い短髪と斜め前髪。紺ジャケット、白シャツ、チャコールのズボン、暗い茶黒の靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【akane】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/akane.png の4倍最近傍拡大。元のオリジナル社員 akane と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：茶色の髪、頭の右上にお団子。サーモンピンクのカーディガン、白いインナー、ベージュのズボン、茶色の靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【shigeru】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/shigeru.png の4倍最近傍拡大。元のオリジナル社員 shigeru と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：年長男性、白髪の短髪、黒縁の丸眼鏡、灰色眉毛。濃緑のベスト、白シャツ、紺ズボン、暗茶の靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【sumire】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/sumire.png の4倍最近傍拡大。元のオリジナル社員 sumire と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：黒髪のボブ、横分け前髪、白いイヤリング。薄紫の襟付きブラウス、濃紫ズボン、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【hinata】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/hinata.png の4倍最近傍拡大。元のオリジナル社員 hinata と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：ふわっとしたくせ毛の茶色い短髪。白いシャツ襟、からし色のセーター、紺ズボン、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【minato】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/minato.png の4倍最近傍拡大。元のオリジナル社員 minato と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：黒い髪を高いポニーテールに結ぶ。青緑の襟付きシャツ、アイボリーのズボン、茶色の靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【kaede】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/kaede.png の4倍最近傍拡大。元のオリジナル社員 kaede と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：灰色の横分けショートボブ、白い小さなイヤリング。赤茶色のジャケット、白いインナー、チャコールのズボン、暗い茶色の靴。茶色い手帳を左腕に抱える特徴は立ち姿の横向きで維持。着席の両手は作業姿勢で手帳は腰に沿わせて小さく残す。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【sora】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/sora.png の4倍最近傍拡大。元のオリジナル社員 sora と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：黒い横分け短髪。薄い青の長袖シャツ、黒いネクタイ、黒いベルトと白いバックル、チャコールのズボン、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【chiyo】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/chiyo.png の4倍最近傍拡大。元のオリジナル社員 chiyo と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：年長女性、銀灰色の丸いボブ、白いイヤリング。ピンクのマフラー、チャコールの長袖ワンピース、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【itsuki】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/itsuki.png の4倍最近傍拡大。元のオリジナル社員 itsuki と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：茶色の短髪、黒縁丸眼鏡。オリーブ色のリブ襟セーター、茶色ズボン、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【shiori】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/shiori.png の4倍最近傍拡大。元のオリジナル社員 shiori と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：茶色の長いゆるく波打つ髪、横分け前髪、白いイヤリング。白い襟付きブラウス、紺のスカート、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【haru】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像は in/haru.png の4倍最近傍拡大。元のオリジナル社員 haru と完全に同じ人物の別向きスプライトを4ポーズ作る。日本の会社の成人。特徴：黒い短髪、中央寄りの前髪。オレンジの半袖ポロシャツ、ベージュズボン、黒い靴。
+最重要：元絵と同じ大きい頭・同じ約2頭身にする。頭頂から顎までが全身96px中およそ46px、頭幅も約44〜50px。小頭・長身にしない。4ポーズすべてで頭頂〜顎の長さと頭幅を等しく保つ。着席でも絶対に頭を縮めない。参考画像の顔立ち、髪型のシルエット、髪色、服色、ドットの粗さ、1〜2原寸pxの暗い輪郭を忠実に維持。新しい人物に作り替えない。
+透明な背景に4列×1行。左から順に (1) 後ろ向きの直立全身、後頭部と背中で顔は一切見えない (2) はっきり画面右向きの直立全身、顔と胴体とも完全な90度の真横、右に突出する鼻、一つの目、一つの耳、遠い目は見えない、正面や斜め向きにしない (3) 正面向きの着席上半身、頭から腰まで、肘を曲げ両前腕を手前へ出し両手を見えないキーボードへ置く作業姿勢 (4) 後ろ向きの着席上半身、後頭部から背中から腰まで、顔は一切見えない。着席2枚は脚、椅子、机、キーボードを描かない。
+4体はすべて同じ頭頂の高さに上揃えして配置。同一の倍率。立ち姿は96原寸px相当、着席は62〜68原寸px相当。各体のまわりに十分な透明余白を取り互いに重ねない。4等幅の列の中心に各体を置く。
+粗い本物のドット絵の拡大図、塗りは小数色の平塗り。透明アルファ背景。半透明のにじみ、アンチエイリアス、ぼかし、細密な描き込み、グラデーション、白い縁を禁止。影・床・文字・ラベル・番号・ロゴ・透かし・枠・背景・家具を描かない。他社マスコットや実在キャラクターに似せない。
+
+【akane-sit-back お団子位置修正】
+IMGREF=202611210357-hbu0
+Use case: identity-preserve.
+参照画像1はオリジナル社員 akane の正面。参照画像2は完成した正しい後ろ向き立ち姿。参照画像3は修正対象の着席後ろ姿。
+修正対象の着席後ろ姿1体だけを描き直す。最重要の修正：お団子は参照画像2と同じ画面左上にある。今の画面右上のお団子は誤りなので右側には描かない。後頭部の形・髪の房の流れも参照画像2と同じにする。茶色の髪と、サーモンピンクのカーディガン。顔は見えない完全な後ろ向き。頭頂から背中を経て腰まで、着席して両腕を前へ出している上半身のみ。椅子、机、脚、キーボードはない。
+元の頭の大きさを保つ、元寸法で頭は高さ約51px、幅46px、全体高さ68px相当。大きい頭と短い胴体の約2頭身の人物。拡大しても元の粗いドット絵、太さ1〜2原寸pxの暗色輪郭、小数色平塗り。参照画像と同じ人物・服・色・ドットの粗さ。小頭にしない。本物のアルファ透明背景、人物1体だけ中央。文字、影、床、白い縁、ぼかし、半透明のにじみ、グラデーション、ロゴは禁止。
+
+【生成原本の記録】
+aoi
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-f7a53b05-05b5-4b12-a00d-2babfa39eceb.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+akane
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-021e47ae-93c1-44a0-be15-0ede880a32f5.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+shigeru
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-5626b276-585a-4054-9b34-acc8e8654ff3.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+sumire
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-85c3c025-0af0-42b4-824b-7ad3c268cdcf.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+hinata
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-18e36b40-c485-4a3f-b482-ba896a419d95.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+minato
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-4dcfdd8a-dd60-46d3-a648-36bd3155edce.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+kaede
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-1fe59747-262d-495f-b759-e75119f42b31.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+sora
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-8c029c6d-0272-49f9-ba91-64b488cb6108.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+chiyo
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-d4b189c0-f54f-4582-98e9-c046bf622275.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+itsuki
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-0172efea-d35c-455a-9c55-0efea49a8bb1.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+shiori
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-34de4123-172b-49c0-95c5-d88fe78330e0.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+haru
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-62d7237f-83d3-4fed-a5aa-942fed72ee5a.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+akane-sit-back fix
+Generated images are saved to D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2 as D:\company\tmp\codex-home\generated_images\01a1faa1-1eea-7403-a737-74330727aae2\exec-3836715a-b437-4d3f-b8cb-8fd132a24056.png by default.
+If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it.
+The generated image is already displayed to the user. There is no need to render it in the final response as a Markdown image or file link.
+
+【最終状態】
+今回13回生成。49ポーズから48枚を採用。再制作2回（aoi4枚、akane着席後ろ1枚）。立ち姿96px、着席68px。全48枚アルファ0/255。_check.pngと_seat_check.pngを開いて確認済み。

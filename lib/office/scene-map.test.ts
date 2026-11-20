@@ -108,3 +108,43 @@ describe("仕事の出来事と移動予定", () => {
     expect(walkChanges(after, before, office, layout)[0].kind).toBe("home");
   });
 });
+
+describe("通り道と家具（物理）", () => {
+  it("通路は歩ける床の上だけを通る（家具・壁をまたがない）", async () => {
+    const { isWalkable } = await import("./scene-walkable");
+    // 席・会議室の椅子・扉の中は「家具の上」で正しいので、その近く（約45px）は数えない
+    const soft = (id: string) => /^seat-\d+-\d+$|^meeting-\d+$|^lead$|^door$/.test(id);
+    const bad: string[] = [];
+    for (const [a, b] of SCENE.links) {
+      const A = SCENE.points[a], B = SCENE.points[b];
+      const n = Math.max(2, Math.ceil(Math.hypot((A.x - B.x) * SCENE.width, (A.y - B.y) * SCENE.height) / 8));
+      let miss = 0;
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, x = A.x + (B.x - A.x) * t, y = A.y + (B.y - A.y) * t;
+        const nearSoft = (soft(a) && Math.hypot((x - A.x) * SCENE.width, (y - A.y) * SCENE.height) < 46) || (soft(b) && Math.hypot((x - B.x) * SCENE.width, (y - B.y) * SCENE.height) < 46);
+        if (!nearSoft && !isWalkable(x, y)) miss++;
+      }
+      // 机の脚1本ぶん（約16px）までは、床の地図の目の粗さとして許す
+      if (miss > 2) bad.push(`${a} → ${b}（${miss}点）`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("立ち止まる場所（報告・受け渡し口・棚の前・休憩・資料の棚・入口の前）は床の上", async () => {
+    const { isWalkable } = await import("./scene-walkable");
+    const ids = ["report", "boss", "shelf", "break", "door-mat", ...SCENE.books, ...SCENE.waiting.slice(0, 12)];
+    expect(ids.filter((id) => !isWalkable(SCENE.points[id].x, SCENE.points[id].y))).toEqual([]);
+  });
+
+  it("手前に重ねる家具は、席に座る人を正しくはさむ（奥の椅子＜人＜机、机＜人＜手前の椅子）", async () => {
+    const { SCENE_FRONT } = await import("./scene-front");
+    for (let i = 0; i < 6; i++) {
+      const back = SCENE.points[`seat-${i}-0`].y, front = SCENE.points[`seat-${i}-2`].y;
+      const base = (part: string) => SCENE_FRONT.find((p) => p.name === `island${i}-${part}`)!.base;
+      expect(base("back")).toBeLessThan(back);
+      expect(base("desk")).toBeGreaterThan(back);
+      expect(base("desk")).toBeLessThan(front);
+      expect(base("front")).toBeGreaterThan(front);
+    }
+  });
+});

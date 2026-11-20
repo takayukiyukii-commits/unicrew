@@ -8,6 +8,10 @@ import { placeOfficeLabels } from "./office-labels";
 
 interface Actor {
   node: string; point: ScenePoint; route: string[];
+  /** 歩いている向き（止まっているときは、いる場所で決める） */
+  facing: "front" | "back" | "side";
+  /** 横向きのとき、左を向いているか */
+  flip: boolean;
   /** 歩き出すまでの待ち（出社のとき、1人ずつ間をあけて入る） */
   delay: number;
   /** まだ扉の外にいる（描かない） */
@@ -16,6 +20,18 @@ interface Actor {
   pauseUntil: number;
   /** 最後に調べものへ行った時刻（行ったり来たりを繰り返さない） */
   researchAt: number;
+}
+/** 止まっているときの姿。席では座る（奥の席＝こちら向き／手前の席・取りまとめ役＝背中）。会議室では机のほうを向く */
+function restPose(node: string, actor: Actor): { pose: string; flip: boolean } {
+  const seat = /^seat-\d+-(\d)$/.exec(node);
+  if (seat) return { pose: Number(seat[1]) < 2 ? "sit-front" : "sit-back", flip: false };
+  if (node === "lead") return { pose: "sit-back", flip: false };
+  const meeting = /^meeting-(\d)$/.exec(node);
+  if (meeting) return { pose: "side", flip: Number(meeting[1]) >= 4 };
+  if (node === "report") return { pose: "side", flip: true };
+  if (node.startsWith("books-")) return { pose: "back", flip: false };
+  if (node.startsWith("waiting-") || node === "boss" || node === "shelf" || node === "break") return { pose: "front", flip: false };
+  return { pose: actor.facing, flip: actor.flip };
 }
 /** この起動で「出社」を見せた会社（画面を切り替えるたびに入り直さない） */
 const entered = new Set<string>();
@@ -68,12 +84,14 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
       const destinations = restingNodes(latest.current, layout);
       for (const seat of seats) {
         const node = destinations[seat.staff.id];
-        actors.set(seat.staff.id, { node, point: { ...SCENE.points[node] }, route: [], delay: 0, outside: false, pauseUntil: 0, researchAt: 0 });
+        actors.set(seat.staff.id, { node, point: { ...SCENE.points[node] }, route: [], facing: "front", flip: false, delay: 0, outside: false, pauseUntil: 0, researchAt: 0 });
       }
     };
     // 札だけを空いた位置へずらす。足元を動かさず、線で社員との対応を示す。
     const paint = () => {
       const width = surface.clientWidth, height = surface.clientHeight;
+      // 社員の絵・吹き出しは、部屋の大きさに合わせて伸び縮みさせる（席と絵がずれない）
+      surface.style.setProperty("--s", String(width / SCENE.width));
       const boxes = placeOfficeLabels(seats.flatMap((seat) => {
         const actor = actors.get(seat.staff.id), label = labels.get(seat.staff.id);
         return actor && label ? [{ id: seat.staff.id, x: actor.point.x * width, y: actor.point.y * height, w: label.offsetWidth, h: label.offsetHeight }] : [];
@@ -82,10 +100,32 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         const id = seat.staff.id, actor = actors.get(id), node = nodes.get(id), label = labels.get(id);
         if (!actor || !node || !label) continue;
         const x = actor.point.x * width, y = actor.point.y * height;
-        node.style.transform = `translate(${x}px, ${y}px)`;
+        // どの絵を出すか：歩いているときは進む向き、止まっているときは「そこで何をしているか」で決める
+        const moving = actor.route.length > 0 && !actor.delay && !actor.pauseUntil;
+        const pose = moving ? { pose: actor.facing, flip: actor.flip } : restPose(actor.node, actor);
+        if (node.dataset.pose !== pose.pose) {
+          node.dataset.pose = pose.pose;
+          const img = node.querySelector<HTMLImageElement>("img.office-crew-face");
+          const base = node.dataset.sprite;
+          if (img && base) {
+            // 向きの絵が無い見本（あとから足した見本など）は、正面の絵のままにする
+            img.onerror = () => { img.onerror = null; img.src = `${base}.png`; };
+            img.src = pose.pose === "front" ? `${base}.png` : `${base}-${pose.pose}.png`;
+          }
+        }
+        node.dataset.flip = pose.flip ? "true" : "false";
+        // 座っているときは、腰が椅子の座面に来るように絵をずらす（背中向き＝椅子の背もたれから頭と肩が出る／こちら向き＝画面の向こうに体が隠れる）。
+        // 前後関係（z-index）は足元の y のまま＝椅子と机にはさまれる順番は変えない
+        const lift = pose.pose === "sit-back" ? -36 : pose.pose === "sit-front" ? 14 : 0;
+        node.style.transform = `translate(${x}px, ${y + lift * (width / SCENE.width)}px)`;
         node.style.visibility = actor.outside ? "hidden" : "visible";
-        label.style.visibility = actor.outside ? "hidden" : "visible";
-        node.style.zIndex = String(Math.round(actor.point.y * 100));
+        // 歩いている間は名札を出さない（線が部屋じゅうに伸びて見づらくなる）。着いたら出す
+        const walkingNow = actor.route.length > 0 && !actor.pauseUntil;
+        label.style.visibility = actor.outside || walkingNow ? "hidden" : "visible";
+        const lineEl = lines.get(id);
+        if (lineEl) lineEl.style.visibility = actor.outside || walkingNow ? "hidden" : "visible";
+        // 前後関係：足元の y が大きい（手前にいる）ほど上に描く。家具の重ね絵（scene-front.ts）も同じ物差しを使う
+        node.style.zIndex = String(Math.round(actor.point.y * 1000));
         node.dataset.walking = actor.route.length && !actor.delay && !actor.pauseUntil && !reducedNow() ? "true" : "false";
         node.dataset.action = current?.targets[id] ? current.kind : "";
         const atHome = actor.node === seat.node && !actor.route.length;
@@ -154,6 +194,11 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
           }
           const targetId = actor.route[0], target = SCENE.points[targetId];
           const distance = sceneDistance(actor.point, target);
+          const dx = (target.x - actor.point.x) * SCENE.width, dy = (target.y - actor.point.y) * SCENE.height;
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+            if (Math.abs(dx) >= Math.abs(dy)) { actor.facing = "side"; actor.flip = dx < 0; }
+            else { actor.facing = dy > 0 ? "front" : "back"; actor.flip = false; }
+          }
           if (distance <= remaining) { actor.point = { ...target }; actor.node = targetId; actor.route.shift(); remaining -= distance; }
           else {
             const fraction = remaining / distance;

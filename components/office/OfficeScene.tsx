@@ -7,6 +7,7 @@ import { useOfficeWalk } from "./useOfficeWalk";
 import { allSeats, type OfficeLayout } from "@/lib/office/layout";
 import { useOfficeT } from "@/lib/office/i18n";
 import { lookSample } from "@/lib/office/looks";
+import { SCENE_FRONT } from "@/lib/office/scene-front";
 import type { OfficeTheme } from "@/lib/office/themes";
 import type { Office, OfficeRun } from "@/lib/office/types";
 
@@ -30,6 +31,14 @@ export default function OfficeScene(props: Props) {
     <div ref={host} className="office-pixel-scene" data-motion={running && !reduced ? "on" : "off"}>
       <div className="office-scene-background" style={{ filter: theme.filter }} />
       <div className="office-scene-tint" style={{ background: theme.overlay }} />
+      {/* 手前の家具：背景の絵と同じ絵を、家具の形で切り抜いて社員の上に重ねる（机の向こうを歩く・椅子に座る、が正しく見える） */}
+      {SCENE_FRONT.map((piece) => <div key={piece.src} className="office-front" aria-hidden="true" style={{
+        left: `${piece.x * 100}%`, top: `${piece.y * 100}%`, width: `${piece.w * 100}%`, height: `${piece.h * 100}%`,
+        zIndex: Math.round(piece.base * 1000), opacity: piece.alpha, filter: theme.filter,
+        backgroundSize: `${100 / piece.w}% ${100 / piece.h}%`,
+        backgroundPosition: `${piece.w < 1 ? (piece.x / (1 - piece.w)) * 100 : 0}% ${piece.h < 1 ? (piece.y / (1 - piece.h)) * 100 : 0}%`,
+        WebkitMaskImage: `url(${piece.src})`, maskImage: `url(${piece.src})`,
+      }} />)}
       <div className="office-door" aria-hidden="true"><i /><i /></div>
       <div className="office-place-sign" style={{ left: "29.5%", top: "74%" }}><LogIn size={13} />{t("scene.door")}</div>
       <div className="office-place-sign" style={{ left: "49.5%", top: "9.5%" }}><BookOpen size={13} />{t("scene.books")}</div>
@@ -52,6 +61,7 @@ export default function OfficeScene(props: Props) {
         const title = `${staff.name} · ${staff.role}\n${task ?? t("staff.nothing")}`;
         return <div key={staff.id}>
           <button type="button" data-actor={staff.id} data-waiting={needsBoss.has(staff.id)} className="office-person" aria-label={title}
+            data-sprite={staff.look.kind === "builtin" ? sample.image.replace(/\.png$/, "") : undefined}
             onClick={() => onSelectStaff(staff.id)} aria-pressed={selectedStaffId === staff.id}>
             <span className="office-person-image"><LookFace sample={sample.id} size={72}
               image={staff.look.kind === "image" ? avatarUrls[staff.id] : null} status={status} /></span>

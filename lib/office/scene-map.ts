@@ -5,8 +5,9 @@ const links: [string, string][] = [];
 const put = (id: string, x: number, y: number) => { points[id] = { x, y }; return id; };
 const join = (a: string, b: string) => { links.push([a, b]); };
 // 家具の横の縦通路と、机の前後の横通路。
-const columns = [0.222, 0.412, 0.597, 0.779];
-const rows = [0.198, 0.425, 0.666];
+// 🚨 通路は「歩ける床の地図」（scene-walkable.ts）の上だけを通す。値を変えたら scene-map.test.ts が家具との重なりを調べる
+const columns = [0.240, 0.412, 0.597, 0.771];
+const rows = [0.202, 0.425, 0.666];
 rows.forEach((y, r) => columns.forEach((x, c) => {
   const id = put(`hall-${r}-${c}`, x, y);
   if (c) join(id, `hall-${r}-${c - 1}`);
@@ -29,12 +30,15 @@ for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
   islands.push(seats);
 }
 // 会議室へはガラスを横切らず、手前の開いた入口を通る。
-put("meeting-door", 0.145, 0.492); put("meeting-inside", 0.145, 0.475);
-put("meeting-bottom-left", 0.040, 0.475); put("meeting-bottom-right", 0.182, 0.475);
-put("meeting-approach", 0.222, 0.492);
+put("meeting-door", 0.160, 0.508); put("meeting-inside", 0.160, 0.458);
+put("meeting-bottom-left", 0.040, 0.458); put("meeting-bottom-right", 0.182, 0.458);
+put("meeting-approach", 0.240, 0.508);
 join("meeting-approach", "hall-1-0"); join("meeting-approach", "hall-2-0"); join("meeting-approach", "meeting-door");
 join("meeting-door", "meeting-inside");
-join("meeting-inside", "meeting-bottom-left"); join("meeting-inside", "meeting-bottom-right");
+// 左の列の席へは、机の脚をまたがないよう、入口の左寄りから入る
+put("meeting-door-left", 0.0775, 0.508); put("meeting-inside-left", 0.0775, 0.459);
+join("meeting-door", "meeting-door-left"); join("meeting-door-left", "meeting-inside-left");
+join("meeting-inside-left", "meeting-bottom-left"); join("meeting-inside", "meeting-bottom-right");
 const meeting: string[] = [];
 for (let side = 0; side < 2; side++) for (let i = 0; i < 4; i++) {
   const y = 0.300 + i * 0.047;
@@ -55,12 +59,12 @@ join("shelf", "shelf-side"); join("shelf-side", "hall-2-3");
 put("break", 0.860, 0.444); put("break-entry", 0.779, 0.444);
 join("break", "break-entry"); join("break-entry", "hall-1-3");
 // 入口の扉（左手前）。出社のときはここから入り、受付の手前を回って通路へ出る。
-put("door", 0.297, 0.925); put("door-mat", 0.297, 0.972); put("front-low", 0.472, 0.988);
-join("door", "door-mat"); join("door-mat", "front-low"); join("front-low", "boss");
+put("door", 0.297, 0.925); put("door-mat", 0.297, 0.972); put("front-low-left", 0.297, 0.994); put("front-low", 0.472, 0.994);
+join("door", "door-mat"); join("door-mat", "front-low-left"); join("front-low-left", "front-low"); join("front-low", "boss");
 // 資料の棚（奥の壁ぎわ）。調べもののときに見に行く。
 const books: string[] = [];
 [0.300, 0.497, 0.690].forEach((x, i) => {
-  const id = put(`books-${i}`, x, 0.186);
+  const id = put(`books-${i}`, x, rows[0]);
   join(id, `hall-0-${i}`); join(id, `hall-0-${i + 1}`);
   books.push(id);
 });
