@@ -167,7 +167,21 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== "unicrew.offices.v1" || ev.newValue === null) return;
       const list = loadOffices();
-      if (list.length === 0) return;
+      if (list.length === 0) {
+        // 別の窓で最後の会社が消された（保存が「空の一覧」のときだけ。読めなかったときは何もしない）
+        let emptied = false;
+        try { const v: unknown = JSON.parse(ev.newValue); emptied = Array.isArray(v) && v.length === 0; } catch { /* 読めない */ }
+        if (!emptied) return;
+        if (officeRef.current) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
+        officeRef.current = null;
+        runRef.current = null;
+        setRun(null);
+        setOffices([]);
+        setActiveId(null);
+        setSelected(null);
+        setPanel("setup");
+        return;
+      }
       setOffices(list);
       const cur = officeRef.current;
       const same = cur ? list.find((o) => o.id === cur.id) : undefined;
@@ -298,7 +312,11 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       try {
         if (!dir) {
           for (const candidate of RUN_DIR_CANDIDATES) if (await pathExists(candidate)) { dir = candidate; break; }
-          if (!dir) return; // RUNner を使っていないPC
+          if (!dir) {
+            // RUNner を使っていないPC。前に追っていた仕事があれば（フォルダごと無くなった）、時間が経った物から終わりにする
+            if (alive) for (const ev of watcher.expire(now)) publishTerminal(ev);
+            return;
+          }
         }
         // フォルダの一覧は30秒に1回だけ取り直す（数に上限は付けない）。あいだの回は、追っているゴールだけ見る
         const full = round++ % 6 === 0;

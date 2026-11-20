@@ -495,7 +495,7 @@ export default function Page() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={paletteCommands} />
       <LanguagePickerModal open={languagePickerOpen} onClose={() => {
         setLanguagePickerOpen(false);
-        if (!isWalkthroughDone()) setWalkthroughOpen(true);
+        if (!isWalkthroughDone()) { markFirstRunSeen(); setWalkthroughOpen(true); }
         else if (shouldShowWhatsNew()) setWhatsNewOpen(true);
       }} />
       <Walkthrough open={walkthroughOpen} onClose={() => setWalkthroughOpen(false)} onOpenOffice={() => setMainView("office")} />
