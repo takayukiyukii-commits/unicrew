@@ -60,7 +60,8 @@ def top(m): return np.where(m.any(axis=1))[0].min() / Hh
 
 body = obj.copy(); body[: int(0.19 * Hh)] = False
 # ── 机の島（6つ）：奥の椅子／机と画面／手前の椅子 の3つに分ける
-ISL_X = {0: [0.24, 0.40], 1: [0.425, 0.585], 2: [0.61, 0.775]}
+# 島の幅は机の端まで（広く取ると、隣の観葉植物まで島の一部になり、通路を歩く人を隠してしまう）
+ISL_X = {0: [0.24, 0.40], 1: [0.425, 0.585], 2: [0.61, 0.762]}
 ROWS = [dict(y0=0.20, y1=0.425, back=0.230, front=0.403), dict(y0=0.428, y1=0.66, back=0.458, front=0.638)]
 used = np.zeros_like(body)
 for r, row in enumerate(ROWS):

@@ -2,6 +2,8 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { allSeats, type OfficeLayout } from "@/lib/office/layout";
 import { SCENE, sceneDistance, sceneRoute, type ScenePoint } from "@/lib/office/scene-map";
+import { depthFor } from "@/lib/office/scene-depth";
+import { SCENE_FRONT } from "@/lib/office/scene-front";
 import type { Office, OfficeRun } from "@/lib/office/types";
 import { bossStaff, restingNodes, walkChanges, type WalkLines, type WalkStep } from "./office-walk";
 import { placeOfficeLabels } from "./office-labels";
@@ -175,7 +177,8 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         node.dataset.flip = pose.flip ? "true" : "false";
         // 座っているときは、腰が椅子の座面に来るように絵をずらす（背中向き＝椅子の背もたれから頭と肩が出る／こちら向き＝画面の向こうに体が隠れる）。
         // 前後関係（z-index）は足元の y のまま＝椅子と机にはさまれる順番は変えない
-        const lift = pose.pose.startsWith("sit-back") ? -36 : pose.pose.startsWith("sit-front") ? 14 : pose.pose === "sit-side" ? -6 : 0;
+        // 取りまとめ役の椅子は大きいので、座っている間は背もたれに完全に隠れてよい（ずらさない）
+        const lift = actor.node === "lead" ? 0 : pose.pose.startsWith("sit-back") ? -36 : pose.pose.startsWith("sit-front") ? 14 : pose.pose === "sit-side" ? -6 : 0;
         node.style.transform = `translate(${x}px, ${y + lift * (width / SCENE.width)}px)`;
         node.style.visibility = actor.outside ? "hidden" : "visible";
         // 歩いている間は名札を出さない（線が部屋じゅうに伸びて見づらくなる）。着いたら出す
@@ -184,7 +187,7 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         const lineEl = lines.get(id);
         if (lineEl) lineEl.style.visibility = actor.outside || walkingNow ? "hidden" : "visible";
         // 前後関係：足元の y が大きい（手前にいる）ほど上に描く。家具の重ね絵（scene-front.ts）も同じ物差しを使う
-        node.style.zIndex = String(Math.round(actor.point.y * 1000));
+        node.style.zIndex = String(depthFor(actor.point.x, actor.point.y, SCENE_FRONT));
         node.dataset.walking = actor.route.length && !actor.delay && !actor.pauseUntil && !reducedNow() ? "true" : "false";
         node.dataset.action = current?.targets[id] ? current.kind : "";
         const atHome = actor.node === seat.node && !actor.route.length;

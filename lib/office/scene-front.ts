@@ -30,7 +30,7 @@ export const SCENE_FRONT: SceneFront[] = [
     "src": "/office/scene/front/02.png",
     "x": 0.6375,
     "y": 0.20648,
-    "w": 0.13802,
+    "w": 0.09479,
     "h": 0.03333,
     "base": 0.226
   },
@@ -210,7 +210,7 @@ export const SCENE_FRONT: SceneFront[] = [
     "src": "/office/scene/front/20.png",
     "x": 0.62031,
     "y": 0.46759,
-    "w": 0.14896,
+    "w": 0.14219,
     "h": 0.11019,
     "base": 0.608
   },
@@ -240,7 +240,7 @@ export const SCENE_FRONT: SceneFront[] = [
     "src": "/office/scene/front/23.png",
     "x": 0.62187,
     "y": 0.57778,
-    "w": 0.1474,
+    "w": 0.14062,
     "h": 0.07593,
     "base": 0.646
   },
