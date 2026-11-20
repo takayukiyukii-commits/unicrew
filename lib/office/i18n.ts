@@ -8,8 +8,9 @@ import { useCallback } from "react";
 import { useTranslation, type Locale } from "../i18n";
 
 const ja = {
-  "scene.label": "社員が歩くオフィス（左右にスクロールできます）",
+  "scene.label": "社員が歩くオフィス",
   "scene.meeting": "会議室",
+  "scene.lead": "取りまとめ役",
   "scene.break": "休憩コーナー",
   "scene.boss": "社長への受け渡し口",
   "scene.shelf": "納品の棚 · {n}件",
@@ -199,8 +200,9 @@ const ja = {
 export type OfficeKey = keyof typeof ja;
 
 const en: Record<OfficeKey, string> = {
-  "scene.label": "Office with walking staff (scroll horizontally)",
+  "scene.label": "Office with walking staff",
   "scene.meeting": "Meeting room",
+  "scene.lead": "Lead",
   "scene.break": "Break corner",
   "scene.boss": "Boss handoff",
   "scene.shelf": "Delivery shelf · {n} items",

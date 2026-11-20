@@ -30,10 +30,10 @@ export default function OfficeScene(props: Props) {
       <div className="office-scene-tint" style={{ background: theme.overlay }} />
       <div className="office-place-sign" style={{ left: "11%", top: "10%" }}><Presentation size={13} />{t("scene.meeting")}</div>
       <div className="office-place-sign" style={{ left: "88%", top: "13%" }}><Coffee size={13} />{t("scene.break")}</div>
-      <div className="office-place-sign" style={{ left: "51%", top: "67%" }}><Users size={13} />{t("staff.lead")}</div>
+      <div className="office-place-sign" style={{ left: "51%", top: "67%" }}><Users size={13} />{t("scene.lead")}</div>
       <div className="office-place-sign" style={{ left: "35%", top: "77%" }}><DoorOpen size={13} />{t("scene.boss")}</div>
       <div className="office-place-sign" style={{ left: "68%", top: "91%" }}><PackageCheck size={13} />{t("scene.shelf", { n: run.deliveries.length })}</div>
-      {layout.islands.map((island) => <div key={island.index} className="office-island-sign"
+      {layout.islands.filter((island) => island.departments.length > 0 || island.seats.length > 0).map((island) => <div key={island.index} className="office-island-sign"
         title={island.departments.map((d) => d.name).join("・")}
         style={{ left: `${[32, 50.5, 69][island.index % 3]}%`, top: island.index < 3 ? "29%" : "53%",
           borderColor: island.departments[0]?.color ?? "#CBD5E1" }}>

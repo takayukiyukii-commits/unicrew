@@ -333,3 +333,17 @@ html, body {
 
 
 
+
+/* 部屋の全体が1画面に収まるようにする（下が切れて、取りまとめ役の席と社長への受け渡し口が見えなかった）。
+   高さに合わせて幅を決め、中央に置く。古い Safari でも効く書き方（vh）を先に、対応していれば器の大きさで決める */
+.office-scene-scroll { overflow: hidden; }
+.office-pixel-scene { min-width: 0; width: min(100%, calc((100vh - 184px) * 16 / 9)); margin: 0 auto; }
+@supports (width: 1cqh) {
+  .office-scene-scroll { container-type: size; }
+  .office-pixel-scene { width: min(100cqw, calc(100cqh * 16 / 9)); }
+}
+/* 名札は名前だけの小さな札にする（担当名はマウスを合わせると出る）。社員と机を隠さない */
+.office-root .office-person-label { width: auto; max-width: 104px; padding: 1px 5px 1px 3px; line-height: 1.25; }
+.office-person-label strong { font-size: 11.5px; }
+.office-person-label > span:not(.office-person-bubble) { display: none; }
+.office-person-label .office-person-bubble { display: block; max-width: 96px; margin: 2px -2px 1px; font-size: 10.5px; }
