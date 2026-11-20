@@ -13,6 +13,7 @@ import OfficeScene from "@/components/office/OfficeScene";
 import { CompanyPanel, OfficeSetup, StaffPanel, newStaff } from "@/components/office/OfficeDialogs";
 import { BossDesk, OfficeBoard, OfficeSide, OfficeTopBar } from "@/components/office/OfficePanels";
 import { emptyRun, reconcileRun } from "@/lib/office/engine";
+import { registerBossReceiver } from "@/lib/office/boss-bus";
 import { useOfficeT } from "@/lib/office/i18n";
 import { layoutOffice } from "@/lib/office/layout";
 import { OfficeRunner } from "@/lib/office/runner";
@@ -186,6 +187,17 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   }, []);
 
   const dispatch = useCallback((input: Parameters<OfficeRunner["dispatch"]>[0]) => runnerRef.current?.dispatch(input), []);
+
+  useEffect(() => registerBossReceiver((text) => {
+    if (!hydrated || !runnerRef.current) return "notReady";
+    const cur = officeRef.current;
+    if (!cur) return "noOffice";
+    if (!cur.workspace?.trim()) return "noWorkspace";
+    if (!cur.staff.some((s) => s.lead)) return "noLead";
+    if (runRef.current?.officeId !== cur.id) return "notReady";
+    dispatch({ t: "boss", text, at: Date.now() });
+    return "accepted";
+  }), [hydrated, dispatch]);
 
   const openFile = useCallback((file: string) => {
     const target = absPath(file, officeRef.current?.workspace ?? null);

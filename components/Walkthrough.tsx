@@ -30,8 +30,8 @@ import { useTranslation } from "@/lib/i18n";
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** Step 3 の "最初のキャラを選ぶ" 用。Picker を開かせるだけ。 */
-  onPickFirstCharacter: () => void;
+  /** 最後の手順で AIオフィスを開く。 */
+  onOpenOffice: () => void;
 }
 
 type StepId = 1 | 2 | 3;
@@ -52,11 +52,11 @@ const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
  *
  * Step 1: Claude CLI のインストール / ログイン
  * Step 2: Codex CLI（任意。スキップ可）
- * Step 3: 最初のキャラクター選択
+ * Step 3: AIオフィスで最初の指示を出す
  *
  * Claude/Codex 状態は 1.5 秒間隔でポーリングして自動進行する。
  */
-export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
+export function Walkthrough({ open, onClose, onOpenOffice }: Props) {
   const { t } = useTranslation();
   const [step, setStep] = useState<StepId>(1);
   const [claude, setClaude] = useState<StatusSnapshot>(FRESH);
@@ -75,7 +75,7 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ステータスポーリング（open 中、かつ Step 3 到達前のみ）。
-  // Step 3 はキャラクター選択画面でステータスを参照しないため、ポーリングを止めて
+  // Step 3 は AIオフィスの案内画面でステータスを参照しないため、ポーリングを止めて
   // CLI への余計な負荷と画面リレンダーを抑える。
   useEffect(() => {
     if (!open) return;
@@ -331,18 +331,18 @@ export function Walkthrough({ open, onClose, onPickFirstCharacter }: Props) {
                 onClick={() => {
                   markWalkthroughDone();
                   onClose();
-                  onPickFirstCharacter();
+                  onOpenOffice();
                 }}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] text-white py-2.5 text-[13px] font-medium hover:opacity-90 transition"
               >
-                {t("walkthrough.openPicker")}
+                {t("walkthrough.openOffice")}
                 <ArrowRight size={14} />
               </button>
               <button
                 onClick={finish}
                 className="w-full text-[11.5px] text-[var(--color-muted)] hover:text-[var(--color-text)] py-1"
               >
-                {t("walkthrough.skipPicker")}
+                {t("walkthrough.skipOffice")}
               </button>
             </div>
           )}

@@ -312,94 +312,7 @@ export async function defaultWorkspacePath(): Promise<string | null> {
   return invoke<string>("default_workspace_path");
 }
 
-// ---------- worktree 隔離（v0.4.0） ----------
-
-export interface GitProbe {
-  is_repo: boolean;
-  has_head: boolean;
-  toplevel: string | null;
-}
-
-export interface WorktreeInfo {
-  path: string;
-  branch: string;
-  toplevel: string;
-}
-
-export interface IntegrateResult {
-  ok: boolean;
-  message: string;
-  conflicts: string[];
-  patch_path: string | null;
-}
-
-/** workspace が git 管理下か・最初のコミットがあるか。非 Tauri では null。 */
-export async function gitProbe(workspace: string): Promise<GitProbe | null> {
-  if (!isTauri()) return null;
-  const invoke = await loadInvoke();
-  return invoke<GitProbe>("git_probe", { workspace });
-}
-
-/** スロット用の worktree を用意する（冪等）。git 管理外・コミット無しは Error を投げる。 */
-export async function worktreePrepare(
-  workspace: string,
-  threadId: string,
-  slotId: string,
-): Promise<WorktreeInfo> {
-  if (!isTauri()) throw new Error("worktree 隔離は Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<WorktreeInfo>("worktree_prepare", { workspace, threadId, slotId });
-}
-
-/** スロットの worktree を消す（ブランチは残る）。 */
-export async function worktreeRemove(workspace: string, path: string): Promise<void> {
-  if (!isTauri()) return;
-  const invoke = await loadInvoke();
-  await invoke("worktree_remove", { workspace, path });
-}
-
-/** AI のブランチを取り込む（merge = --no-ff --no-commit / patch = 差分ファイル書き出し）。 */
-export async function worktreeIntegrate(
-  workspace: string,
-  branch: string,
-  mode: "merge" | "patch",
-): Promise<IntegrateResult> {
-  if (!isTauri()) throw new Error("取り込みは Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<IntegrateResult>("worktree_integrate", { workspace, branch, mode });
-}
-
-/** git 管理外のフォルダを git 管理下にする（初期コミットまで）。 */
-export async function gitInitWorkspace(workspace: string): Promise<string> {
-  if (!isTauri()) throw new Error("git init は Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<string>("git_init_workspace", { workspace });
-}
-
-// ---------- 変更の差分ビュー（v0.4.0） ----------
-
-export interface ChangedFile {
-  path: string;
-  /** A=追加 M=変更 D=削除 R=改名 T=種別変更 U=不明 */
-  status: string;
-  /** 改名時のみ旧パス */
-  old_path: string | null;
-  additions: number;
-  deletions: number;
-  binary: boolean;
-}
-
-export interface WorkspaceChanges {
-  /** 実際に比べた基準（tree oid か HEAD の commit oid） */
-  base: string;
-  /** turn=ターン開始時の tree / head=最後のコミット / empty=コミット無し（全部が追加扱い） */
-  base_kind: "turn" | "head" | "empty";
-  files: ChangedFile[];
-  additions: number;
-  deletions: number;
-  /** 500件で打ち切ったか */
-  truncated: boolean;
-}
+// ---------- エディタ窓の差分表示 ----------
 
 export interface FileDiff {
   /** 基準側（追加ファイルなら空） */
@@ -408,23 +321,6 @@ export interface FileDiff {
   modified: string;
   binary: boolean;
   too_large: boolean;
-}
-
-/** ターン開始時の作業ツリーを tree として記録し oid を返す（利用者の index/HEAD は動かさない）。非 Tauri では null。 */
-export async function workspaceSnapshot(workspace: string): Promise<string | null> {
-  if (!isTauri()) return null;
-  const invoke = await loadInvoke();
-  return invoke<string>("workspace_snapshot", { workspace });
-}
-
-/** 変更ファイル一覧。sinceRef（tree/commit oid）が無ければ HEAD 比較。git 管理外は Error("NOT_A_REPO")。 */
-export async function workspaceChanges(
-  workspace: string,
-  sinceRef?: string,
-): Promise<WorkspaceChanges> {
-  if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<WorkspaceChanges>("workspace_changes", { workspace, sinceRef: sinceRef ?? null });
 }
 
 /** 1ファイルの基準側・今側の本文（読み取り専用の左右比較用）。 */
@@ -436,79 +332,6 @@ export async function workspaceFileDiff(
   if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
   const invoke = await loadInvoke();
   return invoke<FileDiff>("workspace_file_diff", { workspace, file, sinceRef: sinceRef ?? null });
-}
-
-export interface WorkspacePatch {
-  /** unified diff（`git diff` そのまま） */
-  patch: string;
-  /** max_bytes で打ち切ったか */
-  truncated: boolean;
-  /** 打ち切る前の全体バイト数 */
-  bytes: number;
-  base: string;
-  base_kind: "turn" | "head" | "empty";
-}
-
-/** 変更の差分本文（相互監査で監査役に渡す）。基準は workspaceChanges と同じ。maxBytes 既定 64KB。 */
-export async function workspacePatch(
-  workspace: string,
-  sinceRef?: string,
-  maxBytes?: number,
-): Promise<WorkspacePatch> {
-  if (!isTauri()) throw new Error("差分ビューは Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<WorkspacePatch>("workspace_patch", {
-    workspace,
-    sinceRef: sinceRef ?? null,
-    maxBytes: maxBytes ?? null,
-  });
-}
-
-// ---------- チェックポイント／巻き戻し（v0.4.0） ----------
-
-export interface Checkpoint {
-  /** commit oid（メッセージに持たせ、復元の鍵にする） */
-  oid: string;
-  /** tree oid（差分ビューの「このターン」基準にそのまま使う） */
-  tree: string;
-  seq: number;
-  refname: string;
-  /** 直前の記録と同じ中身だったので新しい参照を作らなかった */
-  reused: boolean;
-}
-
-export interface RestoreResult {
-  /** 記録の内容で書き戻したファイル数 */
-  restored: number;
-  /** 記録に無く今あったので消したファイル数 */
-  deleted: number;
-  /** 戻す直前の状態を記録した commit oid（安全網） */
-  safety_oid: string;
-}
-
-/** ターン開始時の作業ツリーを refs/unicrew/checkpoints に固定する。git 管理外は Error("NOT_A_REPO")。非 Tauri では null。 */
-export async function checkpointCreate(workspace: string, threadId: string): Promise<Checkpoint | null> {
-  if (!isTauri()) return null;
-  const invoke = await loadInvoke();
-  return invoke<Checkpoint>("checkpoint_create", { workspace, threadId });
-}
-
-/** 記録した時点にファイルだけ戻す（HEAD・index・ブランチは動かさない）。 */
-export async function checkpointRestore(
-  workspace: string,
-  threadId: string,
-  oid: string,
-): Promise<RestoreResult> {
-  if (!isTauri()) throw new Error("巻き戻しは Tauri アプリ起動時のみ利用できます");
-  const invoke = await loadInvoke();
-  return invoke<RestoreResult>("checkpoint_restore", { workspace, threadId, oid });
-}
-
-/** スレッド削除時に、そのスレッドの記録（参照）を全部消す。 */
-export async function checkpointRemoveThread(workspace: string, threadId: string): Promise<void> {
-  if (!isTauri()) return;
-  const invoke = await loadInvoke();
-  await invoke("checkpoint_remove_thread", { workspace, threadId });
 }
 
 // ---------- Avatar image ----------
@@ -534,43 +357,6 @@ export async function pickAndSaveAvatar(): Promise<string | null> {
   if (!file || Array.isArray(file)) return null;
   const invoke = await loadInvoke();
   return invoke<string>("save_avatar_image", { sourcePath: file as string });
-}
-
-export async function pickAttachment(): Promise<
-  { path: string; kind: "image" | "file" } | null
-> {
-  if (!isTauri()) {
-    alert("ファイル添付は Tauri アプリ起動時のみ利用できます。");
-    return null;
-  }
-  const dialog = await loadDialog();
-  const IMG = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
-  const DOC = [
-    "pdf", "txt", "md", "markdown", "csv", "tsv", "json",
-    "yaml", "yml", "log", "docx", "xlsx", "pptx", "html", "xml",
-  ];
-  const file = await dialog.open({
-    multiple: false,
-    directory: false,
-    filters: [
-      { name: "画像・書類", extensions: [...IMG, ...DOC] },
-      { name: "すべてのファイル", extensions: ["*"] },
-    ],
-    title: "添付するファイルを選択",
-  });
-  if (!file || Array.isArray(file)) return null;
-  const src = file as string;
-  const dot = src.lastIndexOf(".");
-  const ext = dot >= 0 ? src.slice(dot + 1).toLowerCase() : "";
-  if (IMG.includes(ext)) {
-    const invoke = await loadInvoke();
-    const saved = await invoke<string>("save_avatar_image", {
-      sourcePath: src,
-    });
-    return { path: saved, kind: "image" };
-  }
-  // 書類はコピーせず元パスをそのまま渡す（AI が Read ツールで開く）
-  return { path: src, kind: "file" };
 }
 
 export async function deleteAvatar(path: string): Promise<void> {
@@ -1185,28 +971,6 @@ export async function agentStart(params: AgentStartParams): Promise<void> {
   });
 }
 
-/** CLI に本物の画像として渡せる添付（Anthropic の image ブロックが受け付ける形式）。 */
-const INLINEABLE_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp"];
-
-/**
- * 添付のうち「画像としてそのまま渡せるもの」だけを抜き出す。
- *
- * 🚨 SVG は除く。Anthropic の image ブロックが受け付けないので、渡すと送信ごと
- *    壊れる。除いたものは本文のパス行が残っているので従来どおり AI 自身が開く。
- */
-export function inlineableImages(
-  attachments?: { kind: string; path: string; mime?: string }[],
-): { path: string; mime: string | null }[] {
-  if (!attachments || attachments.length === 0) return [];
-  return attachments
-    .filter((a) => {
-      if (a.kind !== "image") return false;
-      const ext = (a.path.split(".").pop() || "").toLowerCase();
-      return INLINEABLE_IMAGE_EXTS.includes(ext);
-    })
-    .map((a) => ({ path: a.path, mime: a.mime ?? null }));
-}
-
 export async function agentSend(
   sessionId: string,
   text: string,
@@ -1456,16 +1220,6 @@ export interface McpAddRequest {
   env?: Record<string, string> | null;
   /** http/sse 用の HTTP ヘッダ。UNI製品MCP一括接続で Bearer 認証に使う。 */
   headers?: Record<string, string> | null;
-}
-
-/**
- * graphify ナレッジグラフを指定ワークスペースで更新する（アイデア6）。
- * AI が write/edit したらフロントが debounce して呼んでくる。
- */
-export async function graphifyUpdate(workspace: string): Promise<string> {
-  if (!isTauri()) throw new Error("graphify 更新は Tauri 環境のみ対応");
-  const invoke = await loadInvoke();
-  return invoke<string>("graphify_update", { workspace });
 }
 
 export async function addClaudeMcp(req: McpAddRequest): Promise<void> {

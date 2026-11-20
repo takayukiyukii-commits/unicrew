@@ -10,7 +10,7 @@
  *   1. Ollama 本体のインストール（winget Ollama.Ollama、macOS/Linux は手動誘導）
  *   2. qwen2.5-coder:7b モデルの pull（数百MB〜数GB、所要は回線次第）
  *   3. OpenCode CLI のインストール（npm install -g opencode-ai）
- *   4. 完了通知 → 親が OpenCode 単独スレッドを spawn
+ *   4. 完了通知 → 親が AIオフィスを開く
  *
  * 設計指針（AGENTS.md「UI 複雑化を避ける5原則」原則1: モーダルは1つ・1責務）:
  *   - 進捗ログは折りたたみ <details> に押し込む（縦長化防止）
@@ -88,7 +88,7 @@ const DEFAULT_MODEL = "qwen2.5-coder:7b";
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** 4ステップ全成功時に呼ばれる。親側で OpenCode 単独スレッドを spawn する想定。 */
+  /** 4ステップ全成功時に呼ばれる。親側で AIオフィスを開く。 */
   onCompleted: () => void;
 }
 
@@ -252,7 +252,7 @@ export function FreeModeWizard({ open, onClose, onCompleted }: Props) {
       return;
     }
 
-    // Step 4: spawn は親に委譲。
+    // 最後に親へ知らせて AIオフィスを開く。
     updateStep("spawn", { status: "running" });
     try {
       onCompleted();

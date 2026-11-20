@@ -56,7 +56,6 @@ import {
 } from "@/lib/tauri";
 import { InstallFailedFallback } from "@/components/InstallFailedFallback";
 import clsx from "clsx";
-import { CharactersSection } from "./CharactersSection";
 import { UserAvatar } from "./UserAvatar";
 import {
   pickAndSaveAvatar,
@@ -80,7 +79,6 @@ interface Props {
   settings: AppSettings;
   onClose: () => void;
   onSave: (s: AppSettings) => void;
-  onCharactersChanged?: () => void;
   /**
    * 「無料で試す」など特定セットアップに誘導する deep-link。
    * 指定されたカテゴリの CategoryAccordion を自動展開する。
@@ -108,20 +106,13 @@ export function SettingsModal({
   settings,
   onClose,
   onSave,
-  onCharactersChanged,
   forceOpenCategory,
   forceOpenAccordionKey,
 }: Props) {
   const { locale, t: tr, setLocale: applyLocale } = useTranslation();
   const [authMode, setAuthMode] = useState<AuthMode>(settings.authMode);
-  const [showActivity, setShowActivity] = useState<boolean>(
-    settings.showActivity ?? true,
-  );
   const [advancedMode, setAdvancedMode] = useState<boolean>(
     settings.advancedMode ?? false,
-  );
-  const [beginnerMode, setBeginnerMode] = useState<boolean>(
-    settings.beginnerMode ?? true,
   );
   const [appearance, setAppearance] = useState<AppearanceSettings>(
     settings.appearance ?? DEFAULT_APPEARANCE,
@@ -308,16 +299,11 @@ export function SettingsModal({
 
   // モーダルを開くたびに「保存済みの settings」から編集用 state を再同期する。
   // 本コンポーネントはアプリ起動時に常駐マウントされるため、useState 初期値は
-  // 「localStorage 読込前のデフォルト settings」を掴んでいる。ここで beginnerMode /
-  // advancedMode / appearance を同期しないと、保存ボタンで古い値（beginnerMode:true 等）を
-  // 上書きしてしまい、ターミナル等の上級者UIがサイドバーから消える
-  // （ユーザー報告 2026-07-16 の真因）。
+  // 読み込み前の既定値を持つため、開くときに上級者向け設定と外観も同期する。
   useEffect(() => {
     if (open) {
       setAuthMode(settings.authMode);
-      setShowActivity(settings.showActivity ?? true);
       setAdvancedMode(settings.advancedMode ?? false);
-      setBeginnerMode(settings.beginnerMode ?? true);
       setAppearance(settings.appearance ?? DEFAULT_APPEARANCE);
       getApiKey().then((k) => setApiKeyLocal(k ?? ""));
       getOpenAiApiKey()
@@ -479,11 +465,7 @@ export function SettingsModal({
     onSave({
       ...settings,
       authMode,
-      // 初心者モード=クリーン表示 / 解除=ターミナル風のツール実行詳細を表示
-      // （showActivity の独立トグルは無く beginnerMode が唯一のスイッチ）
-      showActivity: !beginnerMode,
       advancedMode,
-      beginnerMode,
       appearance,
     });
     onClose();
@@ -1434,22 +1416,6 @@ export function SettingsModal({
 
           <section className="border border-[var(--color-border)] rounded-xl p-4 space-y-3">
             <h4 className="font-semibold text-[13px]">{tr("settings.display.heading")}</h4>
-            <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={beginnerMode}
-                onChange={(e) => setBeginnerMode(e.target.checked)}
-                className="w-4 h-4 mt-0.5"
-              />
-              <span className="flex-1">
-                <span className="font-medium">
-                  {tr("settings.display.beginnerTitle")}
-                </span>
-                <span className="block text-[var(--color-muted)] text-[11.5px] mt-0.5 leading-relaxed">
-                  {tr("settings.display.beginnerBody1")}<strong>{tr("settings.display.beginnerBodyStrong")}</strong>{tr("settings.display.beginnerBody2")}
-                </span>
-              </span>
-            </label>
 
             <label className="flex items-start gap-2 text-[12.5px] cursor-pointer select-none">
               <input
@@ -1572,9 +1538,6 @@ export function SettingsModal({
 
           <UnicrewSelfUpdateSection currentVersion={UNICREW_VERSION} />
 
-          <div className="border-t border-[var(--color-border)] pt-5">
-            <CharactersSection onCharactersChanged={onCharactersChanged} />
-          </div>
 
           <section className="border-t border-[var(--color-border)] pt-4 text-[12px] text-[var(--color-muted)] leading-relaxed">
             <div className="font-semibold text-[var(--color-text)] mb-1">
@@ -1808,7 +1771,7 @@ function CliUpdateBanner({
  * 「あなた」プロフィール編集セクション。
  *
  * - 表示名 / アバター画像 / 1文字（絵文字 or 漢字）/ 背景色 を編集できる
- * - アバター画像があれば 1文字 / 背景色は無視される（CharacterAvatar と同じ優先度）
+ * - アバター画像があれば 1文字 / 背景色は無視される
  * - onChange はフィールド更新ごとに親へ patch を投げ、settings に即マージ保存される
  */
 const USER_ACCENT_PRESETS = [

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Calendar, X, Plus, Play, Trash2, Power } from "lucide-react";
-import type { Thread } from "@/lib/types";
 import {
   loadRoutines,
   newRoutineId,
@@ -15,23 +14,21 @@ import { useTranslation } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
-  threads: Thread[];
-  /** 任意のスレッドに即実行するためのコールバック（テスト用「今すぐ実行」ボタン）。 */
-  onRunNow?: (threadId: string, prompt: string) => void;
+  /** 取りまとめ役が指示を受け取れたら true。 */
+  onRunNow?: (prompt: string) => boolean;
   onClose: () => void;
 }
 
 /**
  * アイデア14: ルーティーン管理モーダル。
  *
- * 毎日HH:MMに指定スレッドへプロンプトを送るルーティーンの登録・有効化・削除UI。
+ * 毎日HH:MMに AIオフィスの取りまとめ役へ指示を送るルーティーンの登録・有効化・削除UI。
  */
-export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
+export function RoutinesModal({ open, onRunNow, onClose }: Props) {
   const { t: tr } = useTranslation();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [draft, setDraft] = useState({
     label: "",
-    threadId: threads[0]?.id ?? "",
     prompt: "",
     hour: "09",
     minute: "00",
@@ -41,25 +38,18 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
     if (open) setRoutines(loadRoutines());
   }, [open]);
 
-  useEffect(() => {
-    if (!draft.threadId && threads[0]) {
-      setDraft((d) => ({ ...d, threadId: threads[0].id }));
-    }
-  }, [threads, draft.threadId]);
-
   const persist = (next: Routine[]) => {
     setRoutines(next);
     saveRoutines(next);
   };
 
   const add = () => {
-    if (!draft.label.trim() || !draft.prompt.trim() || !draft.threadId) return;
+    if (!draft.label.trim() || !draft.prompt.trim()) return;
     const hh = parseInt(draft.hour, 10);
     const mm = parseInt(draft.minute, 10);
     const r: Routine = {
       id: newRoutineId(),
       label: draft.label.trim(),
-      threadId: draft.threadId,
       prompt: draft.prompt.trim(),
       schedule: {
         type: "daily",
@@ -72,10 +62,9 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
       enabled: true,
       createdAt: Date.now(),
     };
-    persist([r, ...routines]);
+    persist([r, ...loadRoutines()]);
     setDraft({
       label: "",
-      threadId: threads[0]?.id ?? "",
       prompt: "",
       hour: "09",
       minute: "00",
@@ -84,14 +73,14 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
 
   const toggle = (id: string) => {
     persist(
-      routines.map((r) =>
+      loadRoutines().map((r) =>
         r.id === id ? { ...r, enabled: !r.enabled } : r,
       ),
     );
   };
 
   const remove = (id: string) => {
-    persist(routines.filter((r) => r.id !== id));
+    persist(loadRoutines().filter((r) => r.id !== id));
   };
 
   if (!open) return null;
@@ -134,22 +123,6 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
               className="flex-1 border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white outline-none focus:border-[var(--color-accent)]"
             />
             <select
-              value={draft.threadId}
-              onChange={(e) =>
-                setDraft({ ...draft, threadId: e.target.value })
-              }
-              className="border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] bg-white"
-            >
-              {threads.length === 0 && (
-                <option value="">{tr("routines.threadEmpty")}</option>
-              )}
-              {threads.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-            <select
               value={draft.hour}
               onChange={(e) => setDraft({ ...draft, hour: e.target.value })}
               className="border border-[var(--color-border)] rounded-md px-1 py-1 text-[12px] bg-white"
@@ -187,8 +160,7 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
             onClick={add}
             disabled={
               !draft.label.trim() ||
-              !draft.prompt.trim() ||
-              !draft.threadId
+              !draft.prompt.trim()
             }
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-[12px] font-medium disabled:opacity-30"
           >
@@ -204,7 +176,6 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
             </div>
           ) : (
             routines.map((r) => {
-              const thread = threads.find((x) => x.id === r.threadId);
               return (
                 <div
                   key={r.id}
@@ -219,24 +190,23 @@ export function RoutinesModal({ open, threads, onRunNow, onClose }: Props) {
                       {String(r.schedule.hour).padStart(2, "0")}:
                       {String(r.schedule.minute).padStart(2, "0")}
                     </span>
-                    {/* 【2026-08-28 修正】truncate でラベルとスレッド名が切れていた。
-                        折り返して全文見せる（切れて困る、というユーザー報告の根治）。 */}
+                    {/* 【2026-08-28 修正】truncate でラベルと送り先が切れていた。
+                        折り返して全文見せる。 */}
                     <span className="flex-1 min-w-0">
                       <span className="font-medium break-words">{r.label}</span>
                       <span className="ml-2 text-[10.5px] text-[var(--color-muted)] break-words">
-                        {thread?.title ?? tr("routines.deletedThread")}
+                        {tr("routines.destination")}
                       </span>
                     </span>
                     {onRunNow && (
                       <button
                         type="button"
-                        disabled={!thread}
                         onClick={() => {
-                          if (!thread) return;
-                          onRunNow(r.threadId, r.prompt);
+                          const accepted = onRunNow(r.prompt);
                           // 監査R3: 手動実行したら発火済みにして、同日の定期実行との
                           // 二重送信を防ぐ
-                          persist(markFired(routines, r.id, new Date()));
+                          if (accepted) persist(markFired(loadRoutines(), r.id, new Date()));
+                          onClose();
                         }}
                         className="p-0.5 rounded hover:bg-emerald-50 text-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed"
                         title={tr("routines.runNow")}

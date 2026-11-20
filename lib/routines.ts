@@ -31,9 +31,9 @@ export interface Routine {
   id: string;
   /** ボードに表示する短い名前 */
   label: string;
-  /** どのスレッドで実行するか */
-  threadId: string;
-  /** 実行するプロンプト（ユーザー発言扱いで送信される） */
+  /** 旧版の保存との互換用。送り先には使わない。 */
+  threadId?: string;
+  /** 実行するプロンプト（AIオフィスの取りまとめ役へ送る） */
   prompt: string;
   schedule: RoutineSchedule;
   /** false なら一時停止（次回実行をスキップ） */
@@ -50,7 +50,7 @@ export function loadRoutines(): Routine[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     // 監査（ファイルタブR1）: 非配列や schedule 欠落の要素で管理画面・発火判定が
-    // TypeError で落ちるのを防ぐ。要素スキーマ（id/threadId/prompt/enabled/schedule）を検証。
+    // TypeError で落ちるのを防ぐ。要素スキーマ（id/prompt/enabled/schedule）を検証。
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((r): r is Routine => {
       if (!r || typeof r !== "object") return false;
@@ -58,13 +58,14 @@ export function loadRoutines(): Routine[] {
       const sc = o.schedule as Record<string, unknown> | undefined;
       return (
         typeof o.id === "string" &&
-        typeof o.threadId === "string" &&
         typeof o.prompt === "string" &&
         typeof o.enabled === "boolean" &&
         !!sc &&
         typeof sc === "object" &&
         typeof sc.hour === "number" &&
-        typeof sc.minute === "number"
+        Number.isInteger(sc.hour) && sc.hour >= 0 && sc.hour <= 23 &&
+        typeof sc.minute === "number" &&
+        Number.isInteger(sc.minute) && sc.minute >= 0 && sc.minute <= 59
       );
     });
   } catch {
@@ -135,4 +136,13 @@ export function markFired(
       ? { ...r, schedule: { ...r.schedule, lastFiredDay: today } }
       : r,
   );
+}
+
+/** 取りまとめ役が受け取った指示だけを、今日の実行済みにする。 */
+export function fireDueRoutines(routines: Routine[], deliver: (prompt: string) => boolean, now = new Date()): Routine[] {
+  let next = routines;
+  for (const routine of routines) {
+    if (shouldFire(routine, now) && deliver(routine.prompt)) next = markFired(next, routine.id, now);
+  }
+  return next;
 }

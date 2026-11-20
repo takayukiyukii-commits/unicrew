@@ -76,7 +76,7 @@ describe("Walkthrough インストールボタンの多重起動ガード", () =
         React.createElement(Walkthrough, {
           open: true,
           onClose: () => {},
-          onPickFirstCharacter: () => {},
+          onOpenOffice: () => {},
         }),
       );
     });
