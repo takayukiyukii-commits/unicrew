@@ -54,6 +54,16 @@ put("shelf", 0.682, 0.784); put("shelf-side", 0.779, 0.784);
 join("shelf", "shelf-side"); join("shelf-side", "hall-2-3");
 put("break", 0.860, 0.444); put("break-entry", 0.779, 0.444);
 join("break", "break-entry"); join("break-entry", "hall-1-3");
+// 入口の扉（左手前）。出社のときはここから入り、受付の手前を回って通路へ出る。
+put("door", 0.297, 0.925); put("door-mat", 0.297, 0.972); put("front-low", 0.472, 0.988);
+join("door", "door-mat"); join("door-mat", "front-low"); join("front-low", "boss");
+// 資料の棚（奥の壁ぎわ）。調べもののときに見に行く。
+const books: string[] = [];
+[0.300, 0.497, 0.690].forEach((x, i) => {
+  const id = put(`books-${i}`, x, 0.186);
+  join(id, `hall-0-${i}`); join(id, `hall-0-${i + 1}`);
+  books.push(id);
+});
 // 待つ社員が同じ足元に積み重ならないよう、手前の空いた床に並ぶ。
 const waiting: string[] = [];
 for (let i = 0; i < 24; i++) {
@@ -68,7 +78,7 @@ for (let i = 0; i < 24; i++) {
   }
   waiting.push(id);
 }
-export const SCENE = { width: 1920, height: 1080, points, links, islands, meeting, waiting };
+export const SCENE = { width: 1920, height: 1080, points, links, islands, meeting, waiting, books };
 export function sceneDistance(a: ScenePoint, b: ScenePoint): number {
   return Math.hypot((a.x - b.x) * SCENE.width, (a.y - b.y) * SCENE.height);
 }

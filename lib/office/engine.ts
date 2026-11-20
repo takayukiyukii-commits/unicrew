@@ -445,7 +445,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   if (!rt || !lead) return run;
   const arts = collectArtifacts(toolBlocks(rt), office.workspace);
   const draft = rt.draft;
-  run = setStaff(run, who.id, { draft: "", tools: {}, turns: rt.turns + 1, turnIn: 0, turnOut: 0 });
+  run = setStaff(run, who.id, { draft: "", tools: {}, turns: rt.turns + 1, turnIn: 0, turnOut: 0, said: clip(parseLeadDirectives(draft).plain.replace(/[#*`>|_]/g, "").replace(/^[①-⑩\d.．、\s]+/, ""), 38) || null });
   run = {
     ...run,
     usage: { ...run.usage, leadTurns: run.usage.leadTurns + (who.lead ? 1 : 0), staffTurns: run.usage.staffTurns + (who.lead ? 0 : 1) },

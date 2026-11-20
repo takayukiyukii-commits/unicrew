@@ -347,3 +347,15 @@ html, body {
 .office-person-label strong { font-size: 11.5px; }
 .office-person-label > span:not(.office-person-bubble) { display: none; }
 .office-person-label .office-person-bubble { display: block; max-width: 96px; margin: 2px -2px 1px; font-size: 10.5px; }
+
+/* 入口の扉：出社のときだけ、扉の絵の上に「開いた扉」を重ねる（背景の絵は描き直さない） */
+.office-door { position: absolute; left: 25.6%; top: 80.2%; width: 7.8%; height: 13.2%; z-index: 2; opacity: 0; transition: opacity .25s ease; pointer-events: none;
+  background: linear-gradient(#3a2a22, #5a4234 70%, #c9a57a 70%, #b8905f); box-shadow: inset 0 0 0 2px #7a5a3c; }
+.office-door i { position: absolute; top: 0; bottom: 0; width: 16%; background: linear-gradient(90deg, #b9824c, #e0b07a); box-shadow: inset 0 0 0 1px #8a5d33; }
+.office-door i:first-child { left: 0; transform-origin: left center; transform: skewY(-9deg); }
+.office-door i:last-child { right: 0; transform-origin: right center; transform: skewY(9deg); }
+.office-pixel-scene[data-door="open"] .office-door { opacity: 1; }
+/* 会話の吹き出し（頭の上に数秒だけ出る） */
+.office-speech { position: absolute; left: 0; bottom: 78px; transform: translateX(-50%) scale(.9); transform-origin: center bottom; max-width: 190px; width: max-content; padding: 4px 8px; border-radius: 10px; border: 1px solid #C7D2FE; background: #FFFFFF; color: #1E293B; font-size: 11.5px; font-weight: 600; line-height: 1.35; white-space: normal; text-align: left; box-shadow: 0 4px 12px rgba(15,23,42,.08); opacity: 0; transition: opacity .18s ease, transform .18s ease; pointer-events: none; z-index: 200; }
+.office-speech::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 8px; background: #FFFFFF; border-right: 1px solid #C7D2FE; border-bottom: 1px solid #C7D2FE; transform: translateX(-50%) rotate(45deg); }
+.office-speech[data-show="true"] { opacity: 1; transform: translateX(-50%) scale(1); }

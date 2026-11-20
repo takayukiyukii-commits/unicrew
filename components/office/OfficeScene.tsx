@@ -1,6 +1,6 @@
 "use client";
-import { useRef } from "react";
-import { Coffee, DoorOpen, FileText, PackageCheck, Presentation, Users } from "lucide-react";
+import { useMemo, useRef } from "react";
+import { BookOpen, Coffee, DoorOpen, FileText, LogIn, PackageCheck, Presentation, Users } from "lucide-react";
 import { LookFace } from "./OfficeCrew";
 import { useOfficeMotion } from "./useOfficeMotion";
 import { useOfficeWalk } from "./useOfficeWalk";
@@ -21,17 +21,22 @@ export default function OfficeScene(props: Props) {
   const { t } = useOfficeT();
   const host = useRef<HTMLDivElement | null>(null);
   const { running, reduced } = useOfficeMotion(props.active);
-  useOfficeWalk(host, office, run, layout, running, reduced, props.animateIdle);
+  const lines = useMemo(() => ({ ask: (task: string) => (task ? t("talk.ask", { task }) : t("talk.askPlain")), ok: t("talk.ok"), report: t("talk.report"), thanks: t("talk.thanks") }), [t]);
+  const smallTalk = useMemo(() => [t("talk.small1"), t("talk.small2"), t("talk.small3"), t("talk.small4")], [t]);
+  useOfficeWalk(host, office, run, layout, running, reduced, props.animateIdle, lines, smallTalk);
   const seats = allSeats(layout);
   const placed = new Set(seats.map((s) => s.staff.id));
   return <div className="office-scene-scroll" tabIndex={0} aria-label={t("scene.label")}>
     <div ref={host} className="office-pixel-scene" data-motion={running && !reduced ? "on" : "off"}>
       <div className="office-scene-background" style={{ filter: theme.filter }} />
       <div className="office-scene-tint" style={{ background: theme.overlay }} />
+      <div className="office-door" aria-hidden="true"><i /><i /></div>
+      <div className="office-place-sign" style={{ left: "29.5%", top: "74%" }}><LogIn size={13} />{t("scene.door")}</div>
+      <div className="office-place-sign" style={{ left: "49.5%", top: "9.5%" }}><BookOpen size={13} />{t("scene.books")}</div>
       <div className="office-place-sign" style={{ left: "11%", top: "10%" }}><Presentation size={13} />{t("scene.meeting")}</div>
       <div className="office-place-sign" style={{ left: "88%", top: "13%" }}><Coffee size={13} />{t("scene.break")}</div>
       <div className="office-place-sign" style={{ left: "51%", top: "67%" }}><Users size={13} />{t("scene.lead")}</div>
-      <div className="office-place-sign" style={{ left: "35%", top: "77%" }}><DoorOpen size={13} />{t("scene.boss")}</div>
+      <div className="office-place-sign" style={{ left: "47.5%", top: "96%" }}><DoorOpen size={13} />{t("scene.boss")}</div>
       <div className="office-place-sign" style={{ left: "68%", top: "91%" }}><PackageCheck size={13} />{t("scene.shelf", { n: run.deliveries.length })}</div>
       {layout.islands.filter((island) => island.departments.length > 0 || island.seats.length > 0).map((island) => <div key={island.index} className="office-island-sign"
         title={island.departments.map((d) => d.name).join("・")}
@@ -52,6 +57,7 @@ export default function OfficeScene(props: Props) {
               image={staff.look.kind === "image" ? avatarUrls[staff.id] : null} status={status} /></span>
             <span className="office-carry-paper" aria-hidden="true"><FileText size={16} /></span>
             {needsBoss.has(staff.id) ? <span className="office-person-alert" aria-hidden="true">!</span> : null}
+            <span className="office-speech" data-speech={staff.id} data-show="false" />
           </button>
           <button type="button" data-label={staff.id} className="office-person-label" title={title} aria-label={title}
             aria-pressed={selectedStaffId === staff.id} data-status={status}

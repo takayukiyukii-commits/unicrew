@@ -74,6 +74,8 @@ export interface StaffRuntime {
   cliSessionId: string | null;
   /** AI を起動済みか（アプリを開き直すと false に戻る） */
   started: boolean;
+  /** 最後の報告・返事の出だし（部屋の中の会話の吹き出しに出す）。古い保存には無い */
+  said?: string | null;
   /** いまのターンで数え済みのトークン（実況の数字は同じターンの中で増えていくので差分だけ足す） */
   turnIn: number;
   turnOut: number;
