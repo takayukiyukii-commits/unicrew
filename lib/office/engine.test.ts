@@ -211,6 +211,22 @@ describe("仕事の流れ", () => {
     expect(run.usage.outputTokens).toBe(45);
   });
 
+  it("道具を使う前のつぶやきは報告に入れない（最後の道具のあとの文だけを報告にする）", () => {
+    const o = office();
+    const lead = o.staff.find((s) => s.lead)!;
+    const murakami = o.staff.find((s) => s.name.startsWith("村上"))!;
+    const { run } = drive(o, emptyRun(o), [{ t: "boss", text: "頼む", at: 1 }, ...say(lead.id, "[[依頼:村上]]\n組み立てて。\n[[/依頼]]", 2)]);
+    const r = drive(o, run, [
+      { t: "agent", staffId: murakami.id, ev: { kind: "assistant_text", text: "まずファイルを見ます。" }, at: 5 },
+      { t: "agent", staffId: murakami.id, ev: { kind: "tool_use", tool_use_id: "t9", tool_name: "Read", tool_input: { file_path: "a.md" } }, at: 6 },
+      { t: "agent", staffId: murakami.id, ev: { kind: "tool_result", tool_use_id: "t9", is_error: false, content: "ok" }, at: 7 },
+      ...say(murakami.id, "①組み立てました。", 8),
+    ]);
+    const sent = r.effects.find((e) => e.t === "send") as { text: string };
+    expect(sent.text).toContain("①組み立てました。");
+    expect(sent.text).not.toContain("まずファイルを見ます");
+  });
+
   it("新しい仕事を頼むと、前の仕事の印と使った量を数え直す（会話の記録は残す）", () => {
     const o = office();
     const lead = o.staff.find((s) => s.lead)!;

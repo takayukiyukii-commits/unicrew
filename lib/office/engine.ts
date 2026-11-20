@@ -326,7 +326,9 @@ export function step(run0: OfficeRun, office: Office, input: OfficeInput): StepR
             { kind: "tool_use", toolUseId: ev.tool_use_id, toolName: ev.tool_name, input: ev.tool_input ?? {}, status: "pending" },
             false,
           );
-          run = setStaff(run, who.id, { tools, bubble });
+          // 道具を使う前に書いた文は途中のつぶやき。報告・返事には、最後の道具のあとに書いた文だけを使う
+          // （2026-11-21 本物の Claude Code で実測：途中の文が報告の頭に混ざった）
+          run = setStaff(run, who.id, { tools, bubble, draft: "" });
           return { run, effects };
         }
         case "tool_result": {
