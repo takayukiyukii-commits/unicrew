@@ -12,6 +12,16 @@ interface Actor {
   facing: "front" | "back" | "side";
   /** 横向きのとき、左を向いているか */
   flip: boolean;
+  /** 歩きのコマ（1/2 を交互に出す） */
+  step: 1 | 2;
+  stepAt: number;
+  /** しぐさ（手を挙げる・ガッツポーズ）と、その終わりの時刻 */
+  gesture: "hand" | "cheer" | null;
+  gestureUntil: number;
+  /** 次に歩き出す前に、その場でガッツポーズを見せる */
+  cheerFirst: boolean;
+  /** 最後に手を挙げた時刻（何度も続けて挙げない） */
+  handAt: number;
   /** 歩き出すまでの待ち（出社のとき、1人ずつ間をあけて入る） */
   delay: number;
   /** まだ扉の外にいる（描かない） */
@@ -27,11 +37,55 @@ function restPose(node: string, actor: Actor): { pose: string; flip: boolean } {
   if (seat) return { pose: Number(seat[1]) < 2 ? "sit-front" : "sit-back", flip: false };
   if (node === "lead") return { pose: "sit-back", flip: false };
   const meeting = /^meeting-(\d)$/.exec(node);
-  if (meeting) return { pose: "side", flip: Number(meeting[1]) >= 4 };
+  if (meeting) return { pose: "sit-side", flip: Number(meeting[1]) >= 4 };
   if (node === "report") return { pose: "side", flip: true };
   if (node.startsWith("books-")) return { pose: "back", flip: false };
   if (node.startsWith("waiting-") || node === "boss" || node === "shelf" || node === "break") return { pose: "front", flip: false };
   return { pose: actor.facing, flip: actor.flip };
+}
+/** しぐさの絵。席では座ったまま、立っているときは立ったまま。横向き・後ろ向きで立っているときは正面を向いてから */
+function gesturePose(rest: string, gesture: "hand" | "cheer"): string {
+  if (rest === "sit-front" || rest === "sit-back") return `${rest}-${gesture}`;
+  return gesture;
+}
+/** その絵が無いときに、代わりに出す絵（歩きのコマ → 立ち姿 → 正面） */
+function fallbackPose(pose: string): string | null {
+  const walk = /^walk-(front|back|side)-\d$/.exec(pose);
+  if (walk) return walk[1];
+  const sitGesture = /^(sit-front|sit-back)-(hand|cheer)$/.exec(pose);
+  if (sitGesture) return sitGesture[1];
+  if (pose === "sit-side") return "side";
+  if (pose === "front") return null;
+  return "front";
+}
+const spriteUrl = (base: string, pose: string) => (pose === "front" ? `${base}.png` : `${base}-${pose}.png`);
+/** 無いと分かった絵（毎コマ読みに行かない） */
+const missingSprites = new Set<string>();
+function showSprite(img: HTMLImageElement, base: string, pose: string): void {
+  let p: string | null = pose;
+  while (p && missingSprites.has(spriteUrl(base, p))) p = fallbackPose(p);
+  const use = p ?? "front";
+  // 絵は元の大きさのまま、部屋の縮尺（--s）で出す（手を挙げた絵は、そのぶん上に伸びる）
+  img.onload = () => { img.style.setProperty("--h", String(img.naturalHeight)); };
+  img.onerror = () => {
+    missingSprites.add(spriteUrl(base, use));
+    const next = fallbackPose(use);
+    if (next || use !== "front") showSprite(img, base, next ?? "front");
+  };
+  img.src = spriteUrl(base, use);
+}
+const SPRITE_POSES = ["front", "back", "side", "sit-front", "sit-back", "sit-side", "walk-front-1", "walk-front-2", "walk-back-1", "walk-back-2", "walk-side-1", "walk-side-2",
+  "hand", "cheer", "sit-front-hand", "sit-front-cheer", "sit-back-hand", "sit-back-cheer"];
+const preloaded = new Set<string>();
+/** 歩き出した瞬間に絵が出ない（一瞬消える）のを防ぐため、使う絵を先に読んでおく */
+function preloadSprites(base: string): void {
+  if (preloaded.has(base)) return;
+  preloaded.add(base);
+  for (const pose of SPRITE_POSES) {
+    const im = new Image();
+    im.onerror = () => missingSprites.add(spriteUrl(base, pose));
+    im.src = spriteUrl(base, pose);
+  }
 }
 /** この起動で「出社」を見せた会社（画面を切り替えるたびに入り直さない） */
 const entered = new Set<string>();
@@ -60,7 +114,7 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
     const speeches = new Map<string, HTMLElement>();
     const talkTimers = new Set<number>();
     const speechTimers = new Map<string, number>();
-    surface.querySelectorAll<HTMLElement>("[data-actor]").forEach((node) => nodes.set(node.dataset.actor!, node));
+    surface.querySelectorAll<HTMLElement>("[data-actor]").forEach((node) => { nodes.set(node.dataset.actor!, node); if (node.dataset.sprite) preloadSprites(node.dataset.sprite); });
     surface.querySelectorAll<HTMLElement>("[data-label]").forEach((node) => labels.set(node.dataset.label!, node));
     surface.querySelectorAll<SVGLineElement>("[data-line]").forEach((node) => lines.set(node.dataset.line!, node));
     surface.querySelectorAll<HTMLElement>("[data-speech]").forEach((node) => speeches.set(node.dataset.speech!, node));
@@ -84,7 +138,7 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
       const destinations = restingNodes(latest.current, layout);
       for (const seat of seats) {
         const node = destinations[seat.staff.id];
-        actors.set(seat.staff.id, { node, point: { ...SCENE.points[node] }, route: [], facing: "front", flip: false, delay: 0, outside: false, pauseUntil: 0, researchAt: 0 });
+        actors.set(seat.staff.id, { node, point: { ...SCENE.points[node] }, route: [], facing: "front", flip: false, step: 1, stepAt: 0, gesture: null, gestureUntil: 0, cheerFirst: false, handAt: 0, delay: 0, outside: false, pauseUntil: 0, researchAt: 0 });
       }
     };
     // 札だけを空いた位置へずらす。足元を動かさず、線で社員との対応を示す。
@@ -102,21 +156,26 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         const x = actor.point.x * width, y = actor.point.y * height;
         // どの絵を出すか：歩いているときは進む向き、止まっているときは「そこで何をしているか」で決める
         const moving = actor.route.length > 0 && !actor.delay && !actor.pauseUntil;
-        const pose = moving ? { pose: actor.facing, flip: actor.flip } : restPose(actor.node, actor);
+        const rest = restPose(actor.node, actor);
+        const nowT = performance.now();
+        const gesturing = !moving && actor.gesture && nowT < actor.gestureUntil;
+        // 受け渡し口で社長を待つ間は、手を挙げて待つ
+        const waitingHand = !moving && bossStaff(latest.current).has(id) && rest.pose === "front";
+        const pose = moving
+          ? { pose: `walk-${actor.facing}-${actor.step}`, flip: actor.flip }
+          : gesturing || waitingHand
+            ? { pose: gesturePose(rest.pose, gesturing ? (actor.gesture as "hand" | "cheer") : "hand"), flip: false }
+            : rest;
         if (node.dataset.pose !== pose.pose) {
           node.dataset.pose = pose.pose;
           const img = node.querySelector<HTMLImageElement>("img.office-crew-face");
           const base = node.dataset.sprite;
-          if (img && base) {
-            // 向きの絵が無い見本（あとから足した見本など）は、正面の絵のままにする
-            img.onerror = () => { img.onerror = null; img.src = `${base}.png`; };
-            img.src = pose.pose === "front" ? `${base}.png` : `${base}-${pose.pose}.png`;
-          }
+          if (img && base) showSprite(img, base, pose.pose);
         }
         node.dataset.flip = pose.flip ? "true" : "false";
         // 座っているときは、腰が椅子の座面に来るように絵をずらす（背中向き＝椅子の背もたれから頭と肩が出る／こちら向き＝画面の向こうに体が隠れる）。
         // 前後関係（z-index）は足元の y のまま＝椅子と机にはさまれる順番は変えない
-        const lift = pose.pose === "sit-back" ? -36 : pose.pose === "sit-front" ? 14 : 0;
+        const lift = pose.pose.startsWith("sit-back") ? -36 : pose.pose.startsWith("sit-front") ? 14 : pose.pose === "sit-side" ? -6 : 0;
         node.style.transform = `translate(${x}px, ${y + lift * (width / SCENE.width)}px)`;
         node.style.visibility = actor.outside ? "hidden" : "visible";
         // 歩いている間は名札を出さない（線が部屋じゅうに伸びて見づらくなる）。着いたら出す
@@ -159,6 +218,11 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
           const approach = sceneDistance(actor.point, SCENE.points[actor.node]) > .01 ? [actor.node] : [];
           actor.route = [...approach, ...sceneRoute(actor.node, target).slice(1)];
           actor.pauseUntil = 0;
+          if (actor.cheerFirst) {
+            // 仕事が終わった：歩き出す前に、その場でガッツポーズ
+            actor.cheerFirst = false;
+            actor.gesture = "cheer"; actor.gestureUntil = performance.now() + 1500; actor.delay = 1500;
+          }
         }
       }
       if (current.kind === "enter" && !reduced) {
@@ -207,6 +271,10 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
           }
         }
         if (actor.route.length) walking = true;
+        if (actor.route.length && !actor.pauseUntil && now - actor.stepAt > 170) { actor.stepAt = now; actor.step = actor.step === 1 ? 2 : 1; }
+        // しぐさの間は、終わった瞬間に元の姿へ戻すために描き直しを続ける
+        if (actor.gesture && now < actor.gestureUntil) walking = true;
+        else if (actor.gesture) actor.gesture = null;
       }
       paint();
       // 予定に入っている人が着いたら、ほかの人（調べものの途中など）を待たずに会話・次の予定へ進む
@@ -264,6 +332,29 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
           kind: afterBoss.has(seat.staff.id) ? "review" : "home", targets: { [seat.staff.id]: destinations[seat.staff.id] }, hold: 0,
         });
       } else queue.push(...walkChanges(before, after, office, layout, linesRef.current));
+      // しぐさ：仕事が終わったらガッツポーズ（報告に行く前に見せる）。ファイルを1つ書き終えたら、席で手を挙げる
+      if (!reduced) {
+        const nowG = performance.now();
+        for (const seat of seats) {
+          const id = seat.staff.id, actor = actors.get(id);
+          const rt = after.staff[id], old = before.staff[id];
+          if (!actor || !rt) continue;
+          if (old?.status !== "done" && rt.status === "done") {
+            if (queue.some((step) => step.targets[id])) actor.cheerFirst = true;
+            else { actor.gesture = "cheer"; actor.gestureUntil = nowG + 1600; }
+            continue;
+          }
+          if (rt.status !== "working" || nowG - actor.handAt < 7000 || actor.route.length) continue;
+          const wrote = Object.entries(rt.tools).some(([toolId, tool]) => tool.done && !tool.error && !(old?.tools[toolId]?.done) && /write|edit|patch|create/i.test(tool.name));
+          if (wrote) { actor.handAt = nowG; actor.gesture = "hand"; actor.gestureUntil = nowG + 1200; }
+        }
+        // 社長の OK が出た：完了した人と取りまとめ役が、そろってガッツポーズ
+        if (after.cheerAt > before.cheerAt) for (const seat of seats) {
+          const actor = actors.get(seat.staff.id);
+          if (actor && (seat.staff.lead || after.staff[seat.staff.id]?.status === "done")) { actor.gesture = "cheer"; actor.gestureUntil = nowG + 2000; }
+        }
+        if (!frame) { last = nowG; frame = requestAnimationFrame(tick); }
+      }
       // 作業に応じて動く：資料を読む・探す・Web で調べる道具を使い始めたら、いちばん近い資料の棚まで見に行って戻る
       if (!reduced) for (const seat of seats) {
         const id = seat.staff.id, actor = actors.get(id);

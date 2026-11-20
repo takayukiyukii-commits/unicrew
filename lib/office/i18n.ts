@@ -10,6 +10,10 @@ import { useTranslation, type Locale } from "../i18n";
 const ja = {
   "scene.label": "社員が歩くオフィス",
   "scene.meeting": "会議室",
+  "term.working": "ターミナル{n}で作業中",
+  "term.instruction": "ターミナル{n}：{text}",
+  "term.waiting": "ターミナル{n}で許可を待っています",
+  "term.done": "ターミナル{n}の作業が終わりました",
   "scene.door": "入口",
   "scene.books": "資料の棚",
   "talk.ask": "「{task}」をお願いします",
@@ -213,6 +217,10 @@ export type OfficeKey = keyof typeof ja;
 const en: Record<OfficeKey, string> = {
   "scene.label": "Office with walking staff",
   "scene.meeting": "Meeting room",
+  "term.working": "Working in terminal {n}",
+  "term.instruction": "Terminal {n}: {text}",
+  "term.waiting": "Terminal {n} is waiting for permission",
+  "term.done": "Terminal {n} finished",
   "scene.door": "Entrance",
   "scene.books": "Reference shelf",
   "talk.ask": "Please take “{task}”",

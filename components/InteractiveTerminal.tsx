@@ -148,6 +148,7 @@ export function InteractiveTerminal({
   onWorkInput,
   onClaudeStop,
   onClaudeTitleSeen,
+  onClaudeWork,
   onSendToAi,
   initialCwd = null,
   initialInput,
@@ -210,6 +211,8 @@ export function InteractiveTerminal({
   onClaudeStop?: (ev: { workedMs: number; waiting: boolean; instruction: string | null }) => void;
   /** このペインで Claude Code の作業中タイトルを初めて見たとき（以後はタイトルで判定する） */
   onClaudeTitleSeen?: () => void;
+  /** Claude Code が動き出した瞬間（タイトルが作業中になった）。instruction = 最後に送った指示。AIオフィスとの連動に使う */
+  onClaudeWork?: (ev: { instruction: string | null }) => void;
   /**
    * ターミナルで選択したテキストを AI へ渡す（未指定ならボタンを出さない）。
    * 折り返し改行は取り除いた本文を渡す（コピーと同じ整形）。
@@ -395,6 +398,8 @@ export function InteractiveTerminal({
   onClaudeStopRef.current = onClaudeStop;
   const onClaudeTitleSeenRef = useRef(onClaudeTitleSeen);
   onClaudeTitleSeenRef.current = onClaudeTitleSeen;
+  const onClaudeWorkRef = useRef(onClaudeWork);
+  onClaudeWorkRef.current = onClaudeWork;
   /** 非表示期間ごとに 1 回だけ通知するためのフラグ。 */
   const activityFiredRef = useRef(false);
   useEffect(() => {
@@ -896,7 +901,9 @@ export function InteractiveTerminal({
         }
       };
       term.onTitleChange((title: string) => {
+        const wasWorking = titleTracker.isWorking();
         titleTracker.feed(title, Date.now());
+        if (!wasWorking && titleTracker.isWorking()) onClaudeWorkRef.current?.({ instruction: echoRef.current.last });
         if (titleTracker.seen && !titleSeenSent) {
           titleSeenSent = true;
           onClaudeTitleSeenRef.current?.();

@@ -23,6 +23,8 @@ import { openPreviewWindow } from "@/lib/preview-window";
 import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
 import { avatarSrc, isTauri, pickWorkspace, revealInFileManager } from "@/lib/tauri";
 import type { AppSettings } from "@/lib/types";
+import { describeTool } from "@/lib/progress-text";
+import { nextTerminalActivity, publishTerminal, subscribeTerminal, type TerminalActivity } from "@/lib/office/terminal-link";
 
 
 // 保存済みの表示設定を、静かな待機モーションの設定として引き継ぐ。
@@ -40,6 +42,11 @@ interface Props {
 function absPath(file: string, workspace: string | null): string {
   if (/^[a-zA-Z]:[\\/]|^[\\/]|^https?:/.test(file) || !workspace) return file;
   return `${workspace.replace(/[\\/]+$/, "")}/${file.replace(/^\.[\\/]/, "")}`;
+}
+
+/** ターミナルの道具の行（Read(src/a.ts) の括弧の中）を、進捗の文づくりが読める形にする */
+function toolInput(detail: string): Record<string, unknown> {
+  return { file_path: detail, command: detail, pattern: detail, query: detail, url: detail };
 }
 
 export default function OfficeView({ active, settings, onWorkspaceChange }: Props) {
@@ -197,14 +204,59 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
 
   const layout = useMemo(() => (office ? layoutOffice(office) : null), [office]);
   const theme = officeTheme(office?.theme ?? "day");
+  // ── ターミナルとの連動：ターミナルの AI の作業を、席順で対応する社員の動きに重ねる（仕事の進行には書き込まない）
+  const [terminal, setTerminal] = useState<Record<number, TerminalActivity>>({});
+  useEffect(() => {
+    const timers = new Map<number, number>();
+    const off = subscribeTerminal((ev) => {
+      setTerminal((cur) => ({ ...cur, [ev.pane]: nextTerminalActivity(cur[ev.pane], ev) }));
+      window.clearTimeout(timers.get(ev.pane));
+      // 終わったら、報告に行って戻るまでのあいだ「完了」を見せてから消す
+      if (ev.kind === "stop") timers.set(ev.pane, window.setTimeout(() => setTerminal((cur) => { const next = { ...cur }; delete next[ev.pane]; return next; }), 14000));
+    });
+    // ブラウザで開いたとき（見本の動き）だけ、ターミナルの知らせを手で流して動きを確かめられるようにする
+    if (!isTauri()) (window as unknown as { __officeTerminal?: typeof publishTerminal }).__officeTerminal = publishTerminal;
+    return () => { off(); timers.forEach((id) => window.clearTimeout(id)); };
+  }, []);
+  /** 表示用の「いま」：オフィスの仕事で手が空いている社員に、ターミナルの作業を重ねる */
+  const viewRun = useMemo(() => {
+    if (!run || !office) return run;
+    const members = office.staff.filter((member) => !member.lead);
+    const panes = Object.values(terminal);
+    if (members.length === 0 || panes.length === 0) return run;
+    const staff = { ...run.staff };
+    const permissions = [...run.permissions];
+    for (const act of panes) {
+      const who = members[(act.pane - 1) % members.length];
+      const rt = staff[who.id];
+      if (!rt || rt.status === "working" || rt.status === "waiting") continue; // オフィスの仕事の最中は、そちらを優先
+      const doing = act.tool ? describeTool({ kind: "tool_use", toolUseId: act.tool.id, toolName: act.tool.name, input: toolInput(act.tool.detail), status: "pending" }, false) : null;
+      const what = act.instruction ? act.instruction.replace(/\s+/g, " ").slice(0, 26) : "";
+      const tools: OfficeRun["staff"][string]["tools"] = {};
+      if (act.finished) tools[act.finished.id] = { name: act.finished.name, input: {}, done: true, error: false };
+      if (act.tool) tools[act.tool.id] = { name: act.tool.name, input: {}, done: false, error: false };
+      staff[who.id] = {
+        ...rt,
+        status: act.status === "done" ? "done" : act.status === "waiting" ? "waiting" : "working",
+        task: what || t("term.working", { n: act.pane }),
+        bubble: act.status === "waiting" ? t("term.waiting", { n: act.pane }) : act.status === "done" ? t("term.done", { n: act.pane }) : doing ?? (what ? t("term.instruction", { n: act.pane, text: what }) : t("term.working", { n: act.pane })),
+        said: act.status === "done" ? t("term.done", { n: act.pane }) : rt.said,
+        tools,
+      };
+      if (act.status === "waiting") permissions.push({ id: `term-${act.pane}`, staffId: who.id, requestId: "", toolName: "terminal", text: t("term.waiting", { n: act.pane }), at: act.at });
+    }
+    return { ...run, staff, permissions };
+  }, [run, office, terminal, t]);
+
   const needsBoss = useMemo(() => {
     const s = new Set<string>();
     if (!run) return s;
+    for (const p of viewRun?.permissions ?? []) s.add(p.staffId);
     if (run.approval) s.add(run.approval.staffId);
     for (const p of run.permissions) s.add(p.staffId);
     for (const m of run.log) if (m.kind === "question" && !m.answered && m.staffId) s.add(m.staffId);
     return s;
-  }, [run]);
+  }, [run, viewRun]);
 
   if (!hydrated) return <div className="absolute inset-0" style={{ background: theme.sky }} />;
 
@@ -216,11 +268,11 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     <div className="office-root relative h-full w-full overflow-hidden" style={{ background: theme.sky }} data-office-theme={theme.id} data-companies={offices.length > 1}>
       {office && run && layout ? (
         <>
-          <OfficeScene office={office} run={run} layout={layout} theme={theme}
+          <OfficeScene office={office} run={viewRun ?? run} layout={layout} theme={theme}
             avatarUrls={avatarUrls} active={active} animateIdle={chatter} key={office.id}
             needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} />
           <OfficeTopBar office={office} run={run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
-          <OfficeBoard office={office} run={run} onSelectStaff={setSelected} />
+          <OfficeBoard office={office} run={viewRun ?? run} onSelectStaff={setSelected} />
 
           {offices.length > 1 ? <select aria-label={t("list.title")} value={office.id} onChange={(event) => switchOffice(event.target.value)} className="office-company-switch">
             {offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}

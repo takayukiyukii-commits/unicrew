@@ -36,6 +36,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { ptyWriteText, ptyIdForPane } from "@/lib/pty";
 import { WorkDetector } from "@/lib/work-detector";
+import { paneNumberOf, publishTerminal, ToolLineWatcher } from "@/lib/office/terminal-link";
 import { VoiceInputButton } from "./VoiceInputButton";
 import {
   TERMINAL_MODEL_CHOICES,
@@ -429,6 +430,8 @@ export function TerminalPanes({
 
   // ── 作業の終わりの見分け（ペインごと。出力の止まり方で判断する）──────────
   const detectorsRef = useRef<Map<string, WorkDetector>>(new Map());
+  /** AIオフィスとの連動：画面に出た「● Read(…)」の行を、同じ物で何度も知らせないための見張り */
+  const toolLinesRef = useRef(new ToolLineWatcher());
   const onWorkDoneRef = useRef(onWorkDone);
   onWorkDoneRef.current = onWorkDone;
   /** ペインの key → 通知に出す名前（描画のたびに更新。tick から読む） */
@@ -452,6 +455,12 @@ export function TerminalPanes({
     (key: string, text: string) => {
       detectorFor(key).output(Date.now());
       tailsRef.current.set(key, appendTail(tailsRef.current.get(key) ?? "", text));
+      // AIオフィスとの連動：AI が道具を使った行が出たら、そのペインの社員を動かす
+      const pane = paneNumberOf(paneLabelsRef.current.get(key));
+      if (pane !== null) {
+        const hit = toolLinesRef.current.feed(pane, text, Date.now());
+        if (hit) publishTerminal({ pane, kind: "activity", tool: hit.tool, detail: hit.detail, at: Date.now() });
+      }
     },
     [detectorFor],
   );
@@ -1612,9 +1621,18 @@ export function TerminalPanes({
                           : undefined
                       }
                       onClaudeTitleSeen={() => titleAwareRef.current.add(pane.key)}
+                      onClaudeWork={(ev) => {
+                        const n = paneNumberOf(paneLabelsRef.current.get(pane.key));
+                        if (n !== null) publishTerminal({ pane: n, kind: "start", instruction: ev.instruction, at: Date.now() });
+                      }}
                       onClaudeStop={(ev) => {
                         const label = paneLabelsRef.current.get(pane.key);
                         if (label === undefined) return; // 閉じたペイン
+                        const n = paneNumberOf(label);
+                        if (n !== null) {
+                          toolLinesRef.current.forget(n);
+                          publishTerminal({ pane: n, kind: ev.waiting ? "waiting" : "stop", instruction: ev.instruction, at: Date.now() });
+                        }
                         onWorkDoneRef.current?.(label, ev.workedMs, {
                           waiting: ev.waiting,
                           instruction: ev.instruction,

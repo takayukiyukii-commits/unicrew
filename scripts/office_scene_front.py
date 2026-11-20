@@ -95,7 +95,8 @@ used |= mt
 inner = (fx >= 0.035) & (fx <= 0.192) & (fy >= 0.255) & (fy <= 0.452)
 for m in comps(mt & inner, 200):
     if m.sum() > 6000:
-        add("meeting-table", m & (fx >= 0.088) & (fx <= 0.147), bottom(m))
+        # 机は、横に座る人より奥に置く（手前にすると、机のそばに座った人の体の半分が消える。2026-11-21 結城さんの指摘）
+        add("meeting-table", m & (fx >= 0.088) & (fx <= 0.147), top(m))
         add("meeting-chairs-l", m & (fx < 0.088), top(m))
         add("meeting-chairs-r", m & (fx > 0.147), top(m))
     else:

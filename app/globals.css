@@ -309,7 +309,7 @@ html, body {
 .office-person-label .office-person-bubble { margin: 3px -2px 0; padding: 2px 3px; background: #EEF2FF; border-radius: 3px; color: #4F46E5; }
 .office-person-label[data-status="waiting"] .office-person-bubble { color: #92400E; background: #FFFBEB; }
 .office-person-label[data-status="done"] .office-person-bubble { color: #047857; background: #ECFDF5; }
-.office-pixel-scene[data-motion="on"] .office-person[data-walking="true"] .office-person-image { animation: office-walk .28s steps(2,end) infinite; }
+/* 歩きは絵のコマで見せる（体を揺らす動きは重ねない） */
 .office-pixel-scene[data-motion="on"] .office-person[data-working="true"] .office-person-image { animation: office-work 1.4s steps(2,end) infinite; }
 @keyframes office-walk { 50% { transform: translateY(-3px) rotate(2deg); } }
 @keyframes office-work { 50% { transform: translateY(-1px); } }
@@ -372,8 +372,7 @@ html, body {
 /* 社員の絵は部屋の大きさに合わせる（--s＝部屋の幅÷1920）。立ち姿 96、着席 68 が元の高さ */
 .office-person-image { left: 0; bottom: 0; width: 0; height: 0; overflow: visible; }
 /* 絵の下の端の中央＝足元（座っているときは腰）を、いる場所に合わせる */
-.office-person .office-crew-face { position: absolute; left: 0; bottom: 0; transform: translateX(-50%); width: auto !important; height: calc(96px * var(--s, .75)) !important; max-width: none; }
-.office-person[data-pose^="sit"] .office-crew-face { height: calc(68px * var(--s, .75)) !important; }
+.office-person .office-crew-face { position: absolute; left: 0; bottom: 0; transform: translateX(-50%); width: auto !important; height: calc(var(--h, 96) * 1px * var(--s, .75)) !important; max-width: none; }
 .office-person[data-flip="true"] .office-crew-face { transform: translateX(-50%) scaleX(-1); }
 .office-person[data-waiting="true"] .office-crew-face { margin: 0; }
 .office-person .office-crew-custom { height: calc(64px * var(--s, .75)) !important; width: calc(64px * var(--s, .75)) !important; margin-bottom: calc(18px * var(--s, .75)); }

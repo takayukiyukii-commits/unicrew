@@ -55,9 +55,19 @@ export const SCENE_FRONT: SceneFront[] = [
     "base": 0.2556
   },
   {
-    "name": "meeting-item",
+    "name": "meeting-table",
     "alpha": 1.0,
     "src": "/office/scene/front/05.png",
+    "x": 0.08802,
+    "y": 0.25556,
+    "w": 0.05938,
+    "h": 0.19722,
+    "base": 0.2556
+  },
+  {
+    "name": "meeting-item",
+    "alpha": 1.0,
+    "src": "/office/scene/front/06.png",
     "x": 0.03542,
     "y": 0.25556,
     "w": 0.01458,
@@ -67,7 +77,7 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island0-desk",
     "alpha": 1.0,
-    "src": "/office/scene/front/06.png",
+    "src": "/office/scene/front/07.png",
     "x": 0.25208,
     "y": 0.23981,
     "w": 0.13958,
@@ -77,7 +87,7 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island1-desk",
     "alpha": 1.0,
-    "src": "/office/scene/front/07.png",
+    "src": "/office/scene/front/08.png",
     "x": 0.43542,
     "y": 0.23981,
     "w": 0.13854,
@@ -87,7 +97,7 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island2-desk",
     "alpha": 1.0,
-    "src": "/office/scene/front/08.png",
+    "src": "/office/scene/front/09.png",
     "x": 0.61719,
     "y": 0.23981,
     "w": 0.14219,
@@ -97,7 +107,7 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island0-front",
     "alpha": 1.0,
-    "src": "/office/scene/front/09.png",
+    "src": "/office/scene/front/10.png",
     "x": 0.25156,
     "y": 0.34259,
     "w": 0.1401,
@@ -107,7 +117,7 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island1-front",
     "alpha": 1.0,
-    "src": "/office/scene/front/10.png",
+    "src": "/office/scene/front/11.png",
     "x": 0.43594,
     "y": 0.34259,
     "w": 0.13802,
@@ -117,22 +127,12 @@ export const SCENE_FRONT: SceneFront[] = [
   {
     "name": "island2-front",
     "alpha": 1.0,
-    "src": "/office/scene/front/11.png",
+    "src": "/office/scene/front/12.png",
     "x": 0.61875,
     "y": 0.34259,
     "w": 0.14062,
     "h": 0.07593,
     "base": 0.411
-  },
-  {
-    "name": "meeting-table",
-    "alpha": 1.0,
-    "src": "/office/scene/front/12.png",
-    "x": 0.08802,
-    "y": 0.25556,
-    "w": 0.05938,
-    "h": 0.19722,
-    "base": 0.4528
   },
   {
     "name": "island3-back",
