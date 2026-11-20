@@ -192,8 +192,9 @@ export default function Page() {
   }, [explorerOpen, hydrated]);
 
   // ターミナルの選択文字は、準備不足のときも再送できるように画面に保持する。
-  const deliverToOffice = useCallback((text: string): boolean => {
-    setMainView("office");
+  const deliverToOffice = useCallback((text: string, opts: { quiet?: boolean } = {}): boolean => {
+    // 自分で押したときだけ AIオフィスへ切り替える（定期実行の自動の届けでは、見ている画面を変えない）
+    if (!opts.quiet) setMainView("office");
     const result = sendBossInstruction(text);
     setDeliveryError(result === "accepted" ? null : result);
     return result === "accepted";
@@ -209,7 +210,7 @@ export default function Page() {
     if (!hydrated) return;
     const tick = () => {
       const all = loadRoutines();
-      const next = fireDueRoutines(all, deliverToOffice);
+      const next = fireDueRoutines(all, (text) => deliverToOffice(text, { quiet: true }));
       // 受け取れなければ実行済みにしない。準備後の次の確認で再試行する。
       if (next !== all) saveRoutines(next);
     };
@@ -489,7 +490,7 @@ export default function Page() {
       <SettingsModal open={settingsOpen} settings={settings} onClose={() => setSettingsOpen(false)} onSave={(next) => { setSettings(next); saveSettings(next); }} />
       <FreeModeWizard open={freeModeOpen} onClose={() => setFreeModeOpen(false)} onCompleted={() => { setFreeModeOpen(false); setMainView("office"); }} />
       <UniMcpModal open={uniMcpOpen} onClose={() => setUniMcpOpen(false)} />
-      <RoutinesModal open={routinesOpen} onRunNow={deliverToOffice} onClose={() => setRoutinesOpen(false)} />
+      <RoutinesModal open={routinesOpen} onRunNow={(text) => deliverToOffice(text)} onClose={() => setRoutinesOpen(false)} />
       <RemoteControlModal open={rcOpen} onClose={() => setRcOpen(false)} workspace={workspace} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={paletteCommands} />
       <LanguagePickerModal open={languagePickerOpen} onClose={() => {

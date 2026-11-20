@@ -32,6 +32,8 @@ export function shouldShowWhatsNew(): boolean {
   if (typeof window === "undefined") return false;
   const seen = localStorage.getItem(STORAGE_KEY);
   if (!seen) {
+    // 前から使っている人（初回の案内を済ませている）には、記録が無くても出す（更新してすぐの人が、変更の案内を見逃さないように）
+    if (localStorage.getItem("unicrew.walkthroughDone")) return true;
     // 初回起動: 記録だけ残して What's New は出さない
     localStorage.setItem(STORAGE_KEY, UNICREW_VERSION);
     return false;

@@ -187,7 +187,7 @@ export type OfficeInput =
   | { t: "permission"; askId: string; allow: boolean; at: number }
   | { t: "stop"; at: number }
   | { t: "agent"; staffId: string; ev: OfficeAgentEvent; at: number }
-  | { t: "started"; staffId: string; sessionKey?: string }
+  | { t: "started"; staffId: string; sessionKey?: string; /** 前の会話の続きではない（前の会話の番号は捨てる） */ fresh?: boolean }
   /** 社員を消した・設定を変えたあとに、待ち合わせをそろえ直す */
   | { t: "sync"; at: number }
   /** 会社を切り替える・消すとき：動いている AI を全部止める（確認待ちの札は残す） */

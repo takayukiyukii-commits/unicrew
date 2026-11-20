@@ -45,11 +45,28 @@ const FILE_LINE = /(?:^|\n)\s*(?:見せる)?ファイル\s*[:：]\s*(.+?)\s*(?=\
 /** ``` で囲んだ所（説明のために書いた例）を、合図として読まないように隠す。文字数は変えない。 */
 function maskFences(text: string): { masked: string; restore: (s: string) => string } {
   const kept: string[] = [];
-  const masked = text.replace(/(^|\n)(```|~~~)[^\n]*\n[\s\S]*?\n\2[^\n]*(?=\n|$)/g, (m) => {
-    kept.push(m);
-    return `\u0000F${kept.length - 1}\u0000`;
-  });
-  return { masked, restore: (s) => s.replace(/\u0000F(\d+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? "") };
+  const out: string[] = [];
+  let open: { mark: string; lines: string[] } | null = null;
+  const flush = () => {
+    if (!open) return;
+    kept.push(open.lines.join("\n"));
+    out.push(`\u0000F${kept.length - 1}\u0000`);
+    open = null;
+  };
+  // 1行ずつ見る：字下げした囲み・長い囲み（````）も囲みとして扱う。閉じていない囲みは、最後まで囲みと見る
+  for (const line of text.split("\n")) {
+    const m = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (open) {
+      open.lines.push(line);
+      if (m && m[1][0] === open.mark[0] && m[1].length >= open.mark.length && line.trim() === m[1]) flush();
+    } else if (m) {
+      open = { mark: m[1], lines: [line] };
+    } else {
+      out.push(line);
+    }
+  }
+  flush();
+  return { masked: out.join("\n"), restore: (s) => s.replace(/\u0000F(\d+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? "") };
 }
 
 export function parseLeadDirectives(text: string): LeadDirectives {
@@ -73,7 +90,8 @@ function parseMasked(text: string): LeadDirectives {
   rest = rest.replace(block("依頼", true), (_m, to: string | undefined, body: string) => {
     const name = (to ?? "").trim();
     const t = body.trim();
-    if (name && t) delegations.push({ to: name, text: t });
+    // 宛名が空でも捨てない（取りまとめ役に「誰に頼むのか」を言い直してもらう）
+    if (t) delegations.push({ to: name || "（宛名なし）", text: t });
     return "";
   });
 

@@ -35,19 +35,30 @@ function read<T>(key: string): T | null {
   }
 }
 
+/** 控えを書けなかった保存先。ここには上書きしない（元の文字を失わないため。画面は「保存できていない」と知らせる） */
+const guarded = new Set<string>();
+
 function keepBroken(key: string, raw: string): void {
   const backup = `${key}.broken`;
   try {
     // 前に残した控えは上書きしない（最初に壊れたときの中身がいちばん大事）
     if (window.localStorage.getItem(backup) === null) window.localStorage.setItem(backup, raw);
   } catch {
-    /* 控えを書けなくても、読み込みは続ける */
+    guarded.add(key);
+    return;
   }
   if (!broken.includes(backup)) broken.push(backup);
 }
 
+/** 試験用：覚えている控え・守っている保存先を忘れる。 */
+export function __resetStoreForTest(): void {
+  broken.length = 0;
+  guarded.clear();
+}
+
 function write(key: string, value: unknown): boolean {
   if (typeof window === "undefined") return false;
+  if (guarded.has(key)) return false;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
     return true;
@@ -70,8 +81,13 @@ function isOffice(x: unknown): x is Office {
 }
 
 export function loadOffices(): Office[] {
-  const list = read<unknown[]>(OFFICES_KEY);
-  if (!Array.isArray(list)) return [];
+  const list = read<unknown>(OFFICES_KEY);
+  if (list === null) return [];
+  if (!Array.isArray(list)) {
+    // 読めるが会社の一覧の形ではない：これも元の文字を残す
+    keepBroken(OFFICES_KEY, JSON.stringify(list));
+    return [];
+  }
   const good = list.filter(isOffice);
   // 形の違う会社が混ざっていたら、元の記録を残しておく（このあとの保存で、その会社は一覧から消えるため）
   if (good.length !== list.length) {

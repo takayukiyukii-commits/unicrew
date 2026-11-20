@@ -101,10 +101,12 @@ export function reconcileRun(run: OfficeRun, office: Office, opts: { afterRestar
     ...run,
     staff,
     awaiting: opts.afterRestart ? [] : run.awaiting.filter((id) => ids.has(id)),
-    pending: opts.afterRestart ? [] : run.pending ?? [],
+    pending: run.pending ?? [],
     reports: opts.afterRestart ? [] : run.reports,
     permissions: opts.afterRestart ? [] : run.permissions.filter((p) => ids.has(p.staffId)),
   };
+  // 開き直す前に預かっていて渡せなかった指示は、記録に残してから捨てる
+  if (opts.afterRestart) Object.assign(next, dropPending(next, Date.now(), opts.locale ?? "ja"));
   if (opts.afterRestart && run.busy) {
     next.busy = false;
     // 閉じていた間は働いていない。時計は足さずに止める
@@ -206,19 +208,53 @@ export interface StepResult {
   effects: OfficeEffect[];
 }
 
-/** 取りまとめ役が、新しい指示を受け取れる状態か（作業中・報告待ち・確認待ちの間は受け取らない）。 */
+/** 失敗で終わった返事の印（AI の種類ごとに書き方が違う） */
+const FAILED_RESULT = /error|fail|cancel|interrupt/i;
+
+/** 預かれる指示の数（これを超えたら受け付けない。黙って古い物を捨てない） */
+const MAX_PENDING = 30;
+
+/** 取りまとめ役が、新しい指示を受け取れる状態か（作業中・報告待ち・確認待ち・許可待ちの間は受け取らない）。 */
 function leadFree(run: OfficeRun, leadId: string): boolean {
-  return run.staff[leadId]?.status !== "working" && run.awaiting.length === 0 && !run.approval;
+  return run.staff[leadId]?.status !== "working" && run.awaiting.length === 0 && !run.approval && !run.permissions.some((p) => p.staffId === leadId);
+}
+
+/** 前の仕事の印（完了・付箋）を片づけ、使った量を数え直す。 */
+function beginFreshJob(run: OfficeRun): OfficeRun {
+  const staff: Record<string, StaffRuntime> = {};
+  for (const [id, s] of Object.entries(run.staff)) {
+    staff[id] = { ...s, status: "idle", bubble: null, task: null, turns: 0, inputTokens: 0, outputTokens: 0 };
+  }
+  return { ...run, staff, usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null } };
+}
+
+const BOSS_PREFIX = "【社長から】\n";
+
+/** 渡せなかった指示を、記録に残してから捨てる（黙って消さない）。 */
+function dropPending(run: OfficeRun, at: number, locale: Locale): OfficeRun {
+  const pending = run.pending ?? [];
+  if (pending.length === 0) return run;
+  const list = pending.map((p) => `・${clip(p.startsWith(BOSS_PREFIX) ? p.slice(BOSS_PREFIX.length) : p, 80)}`).join("\n");
+  return pushLog({ ...run, pending: [] }, { kind: "system", staffId: null, text: officeT("engine.pendingDropped", locale, { list }), at });
 }
 
 export function step(run0: OfficeRun, office: Office, input: OfficeInput, locale: Locale = "ja"): StepResult {
   const r = stepInner(run0, office, input, locale);
   const lead = leadOf(office);
   const pending = r.run.pending ?? [];
-  // 待たせていた指示：取りまとめ役の手が空いたら、まとめて渡す
-  if (lead && pending.length > 0 && leadFree(r.run, lead.id) && input.t !== "stop" && input.t !== "suspend") {
+  // 預かっていた指示：取りまとめ役の返事が普通に終わって手が空いたら、まとめて渡す。
+  // 失敗で止まった直後には渡さない（同じ返事の「失敗」の知らせが続けて届き、次の仕事まで止めてしまうため。次に指示を送ったとき一緒に渡す）
+  const turnEnded = (input.t === "agent" && input.ev.kind === "result" && !FAILED_RESULT.test(input.ev.subtype ?? "")) || input.t === "sync";
+  const leadRt = lead ? r.run.staff[lead.id] : undefined;
+  if (lead && leadRt && turnEnded && pending.length > 0 && leadFree(r.run, lead.id) && !waitsForBoss(r.run, lead.id) && (leadRt.status === "done" || leadRt.status === "idle")) {
     const at = "at" in input ? input.at : Date.now();
     let run: OfficeRun = { ...r.run, pending: [] };
+    if (leadRt.status === "done") {
+      // 「完了」のあとの指示は、新しい仕事として数え直す
+      run = beginFreshJob(run);
+      const first = pending[0];
+      run = setStaff(run, lead.id, { task: clip(first.startsWith(BOSS_PREFIX) ? first.slice(BOSS_PREFIX.length) : first, 28) });
+    }
     run = setStaff(run, lead.id, { status: "working", bubble: officeT("engine.thinking", locale), draft: "", tools: {} });
     run = { ...run, busy: true, usage: openClock(run.usage, at) };
     return { run, effects: [...r.effects, { t: "send", staffId: lead.id, text: pending.join("\n\n") }] };
@@ -234,9 +270,18 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
   if (!lead) return { run, effects };
 
   /** 取りまとめ役に渡す。手が空いていなければ預かっておき、空いたときに渡す（返事の途中に割り込まない）。 */
-  const sendOrHold = (text: string, at: number) => {
-    if (leadFree(run, lead.id)) return sendToLead(text, at);
-    run = { ...run, pending: [...(run.pending ?? []), text].slice(-20) };
+  const sendOrHold = (text: string, at: number, answersQuestion = false) => {
+    const held = run.pending ?? [];
+    if (leadFree(run, lead.id)) {
+      // 預かったままの指示があれば一緒に渡す（質問への返事は先に、ほかは届いた順に）
+      run = { ...run, pending: [] };
+      return sendToLead((answersQuestion ? [text, ...held] : [...held, text]).join("\n\n"), at);
+    }
+    if (held.length >= MAX_PENDING) {
+      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.queueFull", { n: MAX_PENDING }), at });
+      return;
+    }
+    run = { ...run, pending: [...held, text] };
     run = pushLog(run, { kind: "system", staffId: null, text: t("engine.queued", { name: lead.name }), at });
   };
   const sendToLead = (text: string, at: number) => {
@@ -247,7 +292,9 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
 
   switch (input.t) {
     case "started": {
-      run = setStaff(run, input.staffId, { started: true, sessionKey: input.sessionKey ?? run.staff[input.staffId]?.sessionKey });
+      const prev = run.staff[input.staffId];
+      // 前の会話の続きでない起動なら、前の会話の番号は捨てる（別の AI・別のフォルダの番号で続きから始めない）
+      run = setStaff(run, input.staffId, { started: true, sessionKey: input.sessionKey ?? prev?.sessionKey, cliSessionId: input.fresh ? null : prev?.cliSessionId ?? null });
       return { run, effects };
     }
 
@@ -255,7 +302,7 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       const who = office.staff.find((s) => s.id === input.staffId);
       run = pushNotice(run, input.staffId, t("engine.startFailed", { name: who?.name ?? t("engine.staff") }), input.at);
       // 入っていない AI を選んでいるときは、直し方が分かる文にする（生のエラー文だけを出さない）
-      const missing = /not found|no such file|cannot find|見つかりません|os error 2\b/i.test(input.message);
+      const missing = !/session/i.test(input.message) && /program not found|command not found|no such file|cannot find the (file|path)|見つかりません|os error 2\b/i.test(input.message);
       run = failStaff(run, office, input.staffId, `AI を起動できませんでした（${clip(input.message, 200)}）`, input.at, effects, locale, t(missing ? "engine.cliMissing" : "engine.startError", { message: clip(input.message, 200), name: who?.name ?? t("engine.staff") }));
       return { run: settle(run, input.at), effects };
     }
@@ -268,22 +315,11 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       if (lastQ) run = { ...run, log: run.log.map((m) => (m.id === lastQ.id ? { ...m, answered: true } : m)) };
       // 「完了」と言われたあとの指示だけを新しい仕事として数え直す（途中の相談では数字を消さない）
       const fresh = !run.busy && run.awaiting.length === 0 && !run.approval && !lastQ && run.staff[lead.id]?.status === "done";
-      if (fresh) {
-        // 新しい仕事。前の仕事の印（完了・付箋）を片づけ、使った量を数え直す
-        const staff: Record<string, StaffRuntime> = {};
-        for (const [id, s] of Object.entries(run.staff)) {
-          staff[id] = { ...s, status: "idle", bubble: null, task: null, turns: 0, inputTokens: 0, outputTokens: 0 };
-        }
-        run = {
-          ...run,
-          staff,
-          usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null },
-        };
-      }
+      if (fresh) run = beginFreshJob(run);
       run = pushLog(run, { kind: "boss", staffId: null, text, at: input.at });
       run = setStaff(run, lead.id, { task: fresh ? clip(text, 28) : run.staff[lead.id]?.task ?? clip(text, 28) });
       run = { ...run, briefed: true };
-      sendOrHold(`【社長から】\n${text}`, input.at);
+      sendOrHold(`${BOSS_PREFIX}${text}`, input.at, !!lastQ);
       return { run, effects };
     }
 
@@ -346,7 +382,8 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
         if (rt.started || rt.status === "working" || rt.status === "waiting") effects.push({ t: "stop", staffId: s.id });
         run = setStaff(run, s.id, { started: false, draft: "", tools: {}, turnIn: 0, turnOut: 0, status: rt.status === "working" || (rt.status === "waiting" && !waitsForBoss(run, s.id)) ? "idle" : rt.status, bubble: rt.status === "working" ? null : rt.bubble });
       }
-      run = { ...run, awaiting: [], reports: [], permissions: [], pending: [] };
+      run = { ...run, awaiting: [], reports: [], permissions: [] };
+      run = dropPending(run, input.at, locale);
       return { run: settle(run, input.at), effects };
     }
 
@@ -359,7 +396,8 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           run = setStaff(run, s.id, { status: "idle", bubble: null, draft: "", tools: {}, started: false });
         }
       }
-      run = { ...run, awaiting: [], reports: [], permissions: [], approval: null, pending: [] };
+      run = { ...run, awaiting: [], reports: [], permissions: [], approval: null };
+      run = dropPending(run, input.at, locale);
       run = pushLog(run, { kind: "system", staffId: null, text: t("engine.stopped"), at: input.at });
       return { run: settle(run, input.at), effects };
     }
@@ -435,7 +473,7 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
         case "result": {
           if (rt.status !== "working") return { run, effects };
           // 失敗で終わった返事は、できあがった報告として扱わない（途中の文に書かれた合図も実行しない）
-          if (/error|fail|cancel|interrupt/i.test(ev.subtype ?? "")) {
+          if (FAILED_RESULT.test(ev.subtype ?? "")) {
             run = pushNotice(run, who.id, t("engine.staffStopped", { name: who.name }), input.at);
             run = failStaff(run, office, who.id, `AI が失敗を返して止まりました（${clip(ev.subtype, 60)}）`, input.at, effects, locale, t("engine.resultError", { detail: clip(ev.subtype, 60) }));
             return { run: settle(run, input.at), effects };

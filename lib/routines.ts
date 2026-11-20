@@ -75,7 +75,8 @@ export function loadRoutines(): Routine[] {
 
 export function saveRoutines(list: Routine[]) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  // 0.6.3 以前は threadId が無い定期実行を読み飛ばし、次の保存で消してしまう。前の版に戻しても残るよう、空の値を入れておく
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list.map((r) => ({ ...r, threadId: r.threadId ?? "" }))));
 }
 
 export function newRoutineId(): string {

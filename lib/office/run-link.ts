@@ -169,7 +169,8 @@ export class RunWatcher {
     return t ? modifiedMs > t.modified : now - modifiedMs < RUN_RECENT_MS;
   }
 
-  feed(readings: readonly RunLogReading[], now: number): TerminalEvent[] {
+  /** partial＝追っているゴールだけを読んだ回（読んでいないフォルダを「消えた」と見なさない。追っているのに読めなかった物だけ、消えたと見る） */
+  feed(readings: readonly RunLogReading[], now: number, opts: { partial?: boolean } = {}): TerminalEvent[] {
     const events: TerminalEvent[] = [];
     const seen = new Set<string>();
     for (const r of readings) {
@@ -224,7 +225,9 @@ export class RunWatcher {
     // フォルダや記録が消えたゴール：動いていた・待っていたなら、終わりを知らせてから追うのをやめる
     for (const [key, t] of [...this.tracked.entries()]) {
       if (seen.has(key)) continue;
-      if (t.state === "working" || t.state === "waiting") events.push(this.ev(key, t, "stop", now));
+      const wasActive = t.state === "working" || t.state === "waiting";
+      if (opts.partial && !wasActive) continue;
+      if (wasActive) events.push(this.ev(key, t, "stop", now));
       this.tracked.delete(key);
     }
     return events;

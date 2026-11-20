@@ -28,7 +28,9 @@ import type { Office, OfficeAgentEvent, OfficeEffect, OfficeInput, OfficeRun } f
 const SID_PREFIX = "office.";
 
 /** 起動のときに「会社の決まり（役割・名簿・合図）」を受け取らない AI。最初の伝言の頭に付けて渡す。 */
-const RULES_IN_MESSAGE = new Set(["goose", "opencode", "codex-acp", "kiro", "kimi"]);
+const RULES_IN_MESSAGE = new Set(["goose", "opencode", "codex-acp", "kiro", "kimi", "grok"]);
+/** 前の続きから始めるとき、「会社の決まり」を読み直さない AI。続きのたびに伝言の頭に付けて渡す。 */
+const RULES_ON_RESUME = new Set(["codex", "cursor"]);
 
 /** 前の続きから始めてよいかを決める印（AI か作業フォルダが変わったら、前の会話の続きにはしない）。 */
 export function sessionKeyOf(provider: string, workspace: string | null): string {
@@ -41,11 +43,12 @@ export function sessionKeyOf(provider: string, workspace: string | null): string
  */
 export function planSend(args: { started: boolean; running: { key: string; rules: string } | null; savedKey: string | undefined; key: string; rules: string; provider: string; hasResume: boolean }): { restart: boolean; resume: boolean; prefixRules: boolean } {
   const changed = !!args.running && (args.running.key !== args.key || args.running.rules !== args.rules);
-  const restart = !args.started || changed;
+  // 「起動済み」の印があっても、いま動いているセッションの記録が無ければ起動し直す（止めたあとに遅れて届いた印など）
+  const restart = !args.started || !args.running || changed;
   // 続きから始めるのは、AI と作業フォルダが前と同じときだけ
   const resume = restart && args.hasResume && (args.savedKey === undefined || args.savedKey === args.key) && (!args.running || args.running.key === args.key);
   // 決まりを伝言に付ける：起動で受け取らない AI／続きから始めるのに決まりが変わったとき（続きでは新しい決まりを読まない AI がある）
-  const prefixRules = restart && (RULES_IN_MESSAGE.has(args.provider) || (resume && !!args.running && args.running.rules !== args.rules));
+  const prefixRules = restart && (RULES_IN_MESSAGE.has(args.provider) || (resume && (RULES_ON_RESUME.has(args.provider) || (!!args.running && args.running.rules !== args.rules))));
   return { restart, resume, prefixRules };
 }
 
@@ -77,6 +80,8 @@ export class OfficeRunner {
   private chains = new Map<string, Promise<void>>();
   /** 社員ごとの、いま動いているセッションを起動したときの決まり */
   private running = new Map<string, { key: string; rules: string }>();
+  /** 社員ごとの「止めた回数」。止める前に頼まれた送信は、止めたあとに実行しない */
+  private gens = new Map<string, number>();
   private disposed = false;
 
   constructor(private host: RunnerHost) {}
@@ -123,10 +128,13 @@ export class OfficeRunner {
 
   private perform(office: Office, e: OfficeEffect): void {
     switch (e.t) {
-      case "send":
-        this.enqueue(e.staffId, () => this.send(office, e.staffId, e.text));
+      case "send": {
+        const gen = this.gens.get(officeSid(office.id, e.staffId)) ?? 0;
+        this.enqueue(e.staffId, () => this.send(office, e.staffId, e.text, gen));
         return;
+      }
       case "stop":
+        this.gens.set(officeSid(office.id, e.staffId), (this.gens.get(officeSid(office.id, e.staffId)) ?? 0) + 1);
         this.enqueue(e.staffId, async () => {
           if (this.demo) this.demo.stop(e.staffId);
           else await agentStop(officeSid(office.id, e.staffId)).catch(() => {});
@@ -163,11 +171,17 @@ export class OfficeRunner {
     const prev = this.chains.get(staffId) ?? Promise.resolve();
     const next = prev.then(job, job);
     this.chains.set(staffId, next);
+    // 後ろに続きが無ければ、順番待ちの記録を片づける（消した社員の分をためない）
+    void next.then(() => { if (this.chains.get(staffId) === next) this.chains.delete(staffId); });
   }
 
-  private async send(office: Office, staffId: string, text: string): Promise<void> {
+  private async send(office: Office, staffId: string, text: string, gen: number): Promise<void> {
     const staff = office.staff.find((s) => s.id === staffId);
     if (!staff) return;
+    const sid0 = officeSid(office.id, staffId);
+    /** 頼まれたあとに止められた・別の会社に切り替わった（この送信はもう要らない） */
+    const cancelled = () => (this.gens.get(sid0) ?? 0) !== gen || this.host.getOffice()?.id !== office.id;
+    if (cancelled()) return;
     if (this.demo) {
       this.demo.send(office, staff, text, this.host.getLocale());
       return;
@@ -198,12 +212,20 @@ export class OfficeRunner {
           resumeCliSessionId: plan.resume ? rt?.cliSessionId ?? null : null,
           permissionMode: "acceptEdits",
         });
+        if (cancelled()) {
+          // 起動を待っている間に止められた：起動した物を止めて、何も送らない（切り替え先の会社の状態も書き換えない）
+          await agentStop(sid).catch(() => {});
+          this.running.delete(sid);
+          return;
+        }
         this.running.set(sid, { key, rules });
-        this.dispatch({ t: "started", staffId, sessionKey: key });
+        this.dispatch({ t: "started", staffId, sessionKey: key, fresh: !plan.resume });
         if (plan.prefixRules) body = `【この会社での決まり（必ず守ってください）】\n${systemPrompt}\n\n――――\n\n${text}`;
       }
       await agentSend(sid, body);
     } catch (err) {
+      if (cancelled()) return;
+      this.running.delete(sid);
       const message = err instanceof Error ? err.message : String(err);
       this.dispatch({ t: "start_failed", staffId, message, at: Date.now() });
     }
@@ -211,6 +233,7 @@ export class OfficeRunner {
 
   /** 社員の「仕事のやり方」や AI を変えたとき：次の仕事から新しい決まりで起動し直す。 */
   restartStaff(officeId: string, staffId: string): void {
+    this.gens.set(officeSid(officeId, staffId), (this.gens.get(officeSid(officeId, staffId)) ?? 0) + 1);
     this.enqueue(staffId, async () => {
       if (this.demo) return;
       await agentStop(officeSid(officeId, staffId)).catch(() => {});

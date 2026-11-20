@@ -143,4 +143,14 @@ describe("RUNner の知らせ", () => {
     act = nextTerminalActivity(act, { pane: evs[0].pane, kind: "start", source: "runner", at: 500 });
     expect(act.startedAt).toBe(500);
   });
+  it("追っているゴールだけを読んだ回では、読んでいないフォルダを「消えた」と見なさない", () => {
+    const w = new RunWatcher();
+    const now = 70_000_000;
+    w.feed([{ key: "aaaaaaaa", modifiedMs: now, tail: working("t1") }, { key: "bbbbbbbb", modifiedMs: now - 60_000, tail: [working("t1"), result].join("\n") }], now);
+    expect(w.feed([{ key: "aaaaaaaa", modifiedMs: now, tail: null }], now + 5000, { partial: true })).toEqual([]);
+    // 終わっていた bbbbbbbb は覚えたまま（次に全部読む回で、また末尾を読み直さない）
+    expect(w.wantsTail("bbbbbbbb", now - 60_000, now + 6000)).toBe(false);
+    // 追っていたのに読めなかった物は、消えたと見る
+    expect(w.feed([], now + 10_000, { partial: true }).map((e) => [e.kind, e.key])).toEqual([["stop", "aaaaaaaa"]]);
+  });
 });

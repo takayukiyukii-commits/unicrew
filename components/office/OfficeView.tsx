@@ -163,6 +163,16 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     };
   }, [lookKey]);
 
+  useEffect(() => {
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key !== "unicrew.offices.v1" || ev.newValue === null) return;
+      const list = loadOffices();
+      if (list.length > 0) setOffices(list);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const updateOffice = useCallback((next: Office) => {
     setOffices((list) => list.map((o) => (o.id === next.id ? next : o)));
     officeRef.current = next;
@@ -179,7 +189,8 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     const next = officesRef.current.find((o) => o.id === id);
     if (!next) return;
     if (runRef.current) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
-    if (runRef.current) saveRun(runRef.current);
+    // いまの会社を保存できないまま切り替えると、最後の変更を失う。保存できるまで切り替えない（知らせを出す）
+    if (runRef.current && !saveRun(runRef.current)) { setSaveFailed((cur) => ({ ...cur, run: true })); return; }
     officeRef.current = next;
     const r = loadRun(next, localeRef.current);
     runRef.current = r;
@@ -191,7 +202,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
 
   const createOffice = useCallback((o: Office) => {
     if (runRef.current) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
-    if (runRef.current) saveRun(runRef.current);
+    if (runRef.current && !saveRun(runRef.current)) { setSaveFailed((cur) => ({ ...cur, run: true })); return; }
     setOffices((list) => [...list, o]);
     officeRef.current = o;
     const r = emptyRun(o);
@@ -243,7 +254,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       setTerminal((cur) => (ev.kind === "stop" && !cur[id] ? cur : { ...cur, [id]: nextTerminalActivity(cur[id], ev) }));
       window.clearTimeout(timers.get(id));
       // 終わったら、報告に行って戻るまでのあいだ「完了」を見せてから消す
-      if (ev.kind === "stop") timers.set(id, window.setTimeout(() => setTerminal((cur) => { const next = { ...cur }; delete next[id]; return next; }), 14000));
+      if (ev.kind === "stop") timers.set(id, window.setTimeout(() => { timers.delete(id); setTerminal((cur) => { const next = { ...cur }; delete next[id]; return next; }); }, 14000));
     });
     // ブラウザで開いたとき（見本の動き）だけ、ターミナルの知らせを手で流して動きを確かめられるようにする
     if (!isTauri()) (window as unknown as { __officeTerminal?: typeof publishTerminal }).__officeTerminal = publishTerminal;
@@ -256,30 +267,43 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     let dir: string | null = null;
     const watcher = new RunWatcher();
     let reading = false;
+    let round = 0;
+    /** 前に調べたときの、フォルダごとの記録の場所 */
+    let known: { name: string; log: string }[] = [];
     const tick = async () => {
       // 前の読み込みが終わっていなければ、今回は見送る（重なって、古い結果が新しい状態を上書きしないように）
       if (reading) return;
       reading = true;
+      const now = Date.now();
       try {
         if (!dir) {
           for (const candidate of RUN_DIR_CANDIDATES) if (await pathExists(candidate)) { dir = candidate; break; }
           if (!dir) return; // RUNner を使っていないPC
         }
-        const folders = (await listDirectory(dir)).filter((entry) => entry.is_dir && !entry.name.startsWith("_")).slice(0, 2000);
-        const now = Date.now();
+        // フォルダの一覧は30秒に1回だけ取り直す（数に上限は付けない）。あいだの回は、追っているゴールだけ見る
+        const full = round++ % 6 === 0;
+        if (full) {
+          known = (await listDirectory(dir)).filter((entry) => entry.is_dir && !entry.name.startsWith("_"))
+            .map((entry) => ({ name: entry.name, log: `${entry.path.replace(/[\\/]+$/, "")}/${RUN_LOG_NAME}` }));
+        }
+        const active = new Set(watcher.active().map((g) => g.key));
         const readings = [];
-        for (const folder of folders) {
-          const log = `${folder.path.replace(/[\\/]+$/, "")}/${RUN_LOG_NAME}`;
-          const meta = await fileTail(log, 0);
+        for (const folder of known) {
+          if (!full && !active.has(folder.name)) continue;
+          const meta = await fileTail(folder.log, 0);
           if (!meta) continue;
           // 最近書かれた記録・前回から書き足された記録だけ、末尾を読む
-          const tail = watcher.wantsTail(folder.name, meta.modified_ms, now) ? (await fileTail(log, RUN_TAIL_BYTES))?.text ?? null : null;
+          const tail = watcher.wantsTail(folder.name, meta.modified_ms, now) ? (await fileTail(folder.log, RUN_TAIL_BYTES))?.text ?? null : null;
           readings.push({ key: folder.name, modifiedMs: meta.modified_ms, tail });
         }
         if (!alive) return;
-        for (const ev of watcher.feed(readings, now)) publishTerminal(ev);
+        for (const ev of watcher.feed(readings, now, { partial: !full })) publishTerminal(ev);
       } catch {
-        /* 読めなくても、オフィスは止めない（次の回でまた読む） */
+        // フォルダごと読めなくなった（外した・名前を変えた）：追っていた仕事は終わった扱いにして、次の回で探し直す
+        dir = null;
+        known = [];
+        round = 0;
+        if (alive) for (const ev of watcher.feed([], now)) publishTerminal(ev);
       } finally {
         reading = false;
       }
@@ -290,21 +314,38 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   }, []);
   /** 動いている・返事を待っている RUNner の仕事の数（UNIHUB を開く入口に出す） */
   const runGoals = useMemo(() => Object.values(terminal).filter((act) => act.source === "runner" && act.status !== "done").length, [terminal]);
+  /** RUNner の仕事ごとの、映す社員（仕事が終わるまで同じ人） */
+  const seatsRef = useRef(new Map<string, string>());
   /** 表示用の「いま」：オフィスの仕事で手が空いている社員に、ターミナルの作業を重ねる */
   const viewRun = useMemo(() => {
     if (!run || !office) return run;
     const members = office.staff.filter((member) => !member.lead);
-    const panes = Object.values(terminal);
+    const panes = Object.entries(terminal);
+    const seats = seatsRef.current;
+    for (const id of [...seats.keys()]) if (!terminal[id]) seats.delete(id);
     if (members.length === 0 || panes.length === 0) return run;
     const staff = { ...run.staff };
     const permissions = [...run.permissions];
-    for (const act of panes) {
-      // ターミナルは席の前から順に、RUNner の仕事は後ろの席から順に割り当てる（同じ人に重なりにくくする）
+    const taken = new Set<string>();
+    for (const [id, act] of panes) {
       const runner = act.source === "runner";
-      const who = runner ? members[members.length - 1 - ((act.pane - RUN_PANE_BASE) % members.length)] : members[(act.pane - 1) % members.length];
+      // ターミナルは番号どおりの席（1番＝1人目）。RUNner の仕事は後ろの席から、空いている人に割り当てる。
+      // 一度決めた人は、その仕事が終わるまで変えない（途中で別の人に飛ばない）
+      let who = runner ? members.find((m) => m.id === seats.get(id)) : members[(act.pane - 1) % members.length];
+      if (runner && !who) {
+        const start = (act.pane - RUN_PANE_BASE) % members.length;
+        for (let i = 0; i < members.length && !who; i++) {
+          const m = members[members.length - 1 - ((start + i) % members.length)];
+          const busyHere = run.staff[m.id]?.status === "working" || run.staff[m.id]?.status === "waiting";
+          if (!taken.has(m.id) && ![...seats.values()].includes(m.id) && !busyHere) who = m;
+        }
+        if (who) seats.set(id, who.id);
+      }
+      if (!who || taken.has(who.id)) continue;
       const k = runner ? "run" : "term";
       const rt = staff[who.id];
-      if (!rt || rt.status === "working" || rt.status === "waiting") continue; // オフィスの仕事の最中は、そちらを優先
+      if (!rt || run.staff[who.id]?.status === "working" || run.staff[who.id]?.status === "waiting") continue; // オフィスの仕事の最中は、そちらを優先
+      taken.add(who.id);
       const doing = act.tool ? describeOfficeTool(act.tool.name, toolInput(act.tool.detail), locale) : null;
       const what = act.instruction ? act.instruction.replace(/\s+/g, " ").slice(0, 26) : "";
       const tools: OfficeRun["staff"][string]["tools"] = {};
@@ -347,10 +388,6 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
           <OfficeScene office={office} run={viewRun ?? run} layout={layout} theme={theme}
             avatarUrls={avatarUrls} active={active} animateIdle={chatter} key={office.id}
             needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} />
-          {saveFailed.run || saveFailed.offices || brokenKeys.length > 0 ? <div role="alert" className="office-save-alert">
-            {saveFailed.run || saveFailed.offices ? <p>{t("office.saveFailed")} <button type="button" onClick={() => setSaveTick((n) => n + 1)}>{t("office.retrySave")}</button></p> : null}
-            {brokenKeys.length > 0 ? <p>{t("office.loadBroken", { key: brokenKeys.join(" / ") })} <button type="button" aria-label="×" onClick={() => setBrokenKeys([])}>×</button></p> : null}
-          </div> : null}
           {runGoals > 0 ? <button type="button" className="office-run-chip" onClick={() => void openExternal(RUN_SITE_URL).catch(() => {})} title={t("run.openHint")}>
             {t("run.chip", { n: runGoals })}
           </button> : null}
@@ -445,6 +482,10 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
           ) : null}
         </>
       ) : null}
+      {saveFailed.run || saveFailed.offices || brokenKeys.length > 0 ? <div role="alert" className="office-save-alert">
+            {saveFailed.run || saveFailed.offices ? <p>{t("office.saveFailed")} <button type="button" onClick={() => setSaveTick((n) => n + 1)}>{t("office.retrySave")}</button></p> : null}
+            {brokenKeys.length > 0 ? <p>{t("office.loadBroken", { key: brokenKeys.join(" / ") })} <button type="button" aria-label="×" onClick={() => setBrokenKeys([])}>×</button></p> : null}
+          </div> : null}
       {panel === "setup" ? <OfficeSetup canCancel={offices.length > 0} onCreate={createOffice} onCancel={() => setPanel("none")} /> : null}
     </div>
     </OfficeAvatarContext.Provider>

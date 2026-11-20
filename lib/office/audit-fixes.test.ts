@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { boardOf, emptyRun, reconcileRun, step } from "./engine";
 import { findStaffByName, parseLeadDirectives } from "./protocol";
 import { planSend, sessionKeyOf } from "./runner";
-import { brokenStores, loadOffices, loadRun, repairRun, saveRun } from "./store";
+import { __resetStoreForTest, brokenStores, loadOffices, loadRun, repairRun, saveOffices, saveRun } from "./store";
 import { buildOffice, OFFICE_TEMPLATES } from "./templates";
 import type { Office, OfficeAgentEvent, OfficeEffect, OfficeInput, OfficeRun } from "./types";
 
@@ -242,7 +242,7 @@ describe("起動し直しの判断", () => {
 });
 
 describe("保存の読み書き", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => { localStorage.clear(); __resetStoreForTest(); });
 
   it("壊れた会社の一覧は、空で上書きされても元の文字が残る", () => {
     const raw = '[{"id":"oa","name":"A","staff":[],"departments":[]},';
@@ -276,5 +276,136 @@ describe("保存の読み書き", () => {
     expect(r.log).toEqual([]);
     saveRun(r);
     expect(localStorage.getItem(`unicrew.office.run.v1.${o.id}.broken`)).toBe("{");
+  });
+});
+
+describe("自分の直しの監査（第4・5回）で見つかった点", () => {
+  it("取りまとめ役が許可待ちの間は、預かった指示を渡さない。許可に答えて返事が終わってから渡す", () => {
+    const w = world();
+    w.send({ t: "boss", text: "資料A", at: 1 });
+    w.send({ t: "boss", text: "資料B", at: 2 });
+    w.agent(w.lead.id, { kind: "permission_request", request_id: "p1", tool_name: "Bash", input: { command: "npm test" } });
+    expect(w.sends()).toHaveLength(1);
+    w.send({ t: "permission", askId: w.run.permissions[0].id, allow: true, at: 3 });
+    expect(w.sends()).toHaveLength(1);
+    w.say(w.lead.id, "A の返事");
+    expect(w.sends()[1].text).toContain("資料B");
+    expect(w.run.log.some((m) => m.kind === "lead" && m.text === "A の返事")).toBe(true);
+  });
+
+  it("失敗の知らせが2つ続けて届いても、預かった指示は渡さずに残す（次に指示を送ったとき一緒に渡す）", () => {
+    const w = world();
+    w.send({ t: "boss", text: "指示A", at: 1 });
+    w.send({ t: "boss", text: "指示B", at: 2 });
+    w.agent(w.lead.id, { kind: "error", message: "Error: disconnected" });
+    w.agent(w.lead.id, { kind: "result", subtype: "error_during_execution" });
+    expect(w.sends()).toHaveLength(1);
+    expect(w.run.pending).toHaveLength(1);
+    expect(w.run.log.filter((m) => m.kind === "system")).toHaveLength(2); // 預かった・止まった（失敗は1回だけ）
+    w.send({ t: "boss", text: "もう一度", at: 9 });
+    expect(w.sends()[1].text).toBe("【社長から】\n指示B\n\n【社長から】\nもう一度");
+    expect(w.run.pending).toEqual([]);
+  });
+
+  it("質問で止まったら、預かった指示は返事と一緒に渡す（質問を未回答のまま置き去りにしない）", () => {
+    const w = world();
+    w.send({ t: "boss", text: "資料A", at: 1 });
+    w.send({ t: "boss", text: "議事録B", at: 2 });
+    w.say(w.lead.id, "[[質問]]納期は？[[/質問]]");
+    expect(w.sends()).toHaveLength(1);
+    w.send({ t: "boss", text: "金曜です", at: 5 });
+    expect(w.sends()[1].text).toBe("【社長から】\n金曜です\n\n【社長から】\n議事録B");
+    expect(w.run.log.filter((m) => m.kind === "question" && !m.answered)).toEqual([]);
+  });
+
+  it("完了のあとに渡す預かり指示は、新しい仕事として数え直す", () => {
+    const w = world();
+    w.send({ t: "boss", text: "report-A", at: 1 });
+    w.agent(w.lead.id, { kind: "usage_delta", input_tokens: 100, output_tokens: 10 });
+    w.send({ t: "boss", text: "report-B", at: 2 });
+    w.say(w.lead.id, "[[完了]]");
+    expect(w.sends()[1].text).toContain("report-B");
+    expect(w.run.staff[w.lead.id].task).toBe("report-B");
+    expect(w.run.usage).toMatchObject({ leadTurns: 0, inputTokens: 0, outputTokens: 0 });
+  });
+
+  it("預かれる数を超えたら受け付けず、古い指示を黙って捨てない", () => {
+    const w = world();
+    w.send({ t: "boss", text: "main", at: 1 });
+    for (let i = 1; i <= 31; i++) w.send({ t: "boss", text: `queued-${i}`, at: 1 + i });
+    expect(w.run.pending).toHaveLength(30);
+    expect(w.run.pending![0]).toContain("queued-1");
+  });
+
+  it("止める・会社を切り替える・開き直すときは、渡せなかった指示を記録に残す", () => {
+    for (const how of ["stop", "suspend", "restart"] as const) {
+      const w = world();
+      w.send({ t: "boss", text: "見積書を作成", at: 1 });
+      w.send({ t: "boss", text: "議事録も作成", at: 2 });
+      const run = how === "restart" ? reconcileRun(w.run, w.o, { afterRestart: true }) : (w.send({ t: how, at: 3 }), w.run);
+      expect(run.pending, how).toEqual([]);
+      expect(run.log.some((m) => m.kind === "system" && m.text.includes("議事録も作成")), how).toBe(true);
+    }
+  });
+
+  it("前の会話の続きでない起動では、前の会話の番号を捨てる", () => {
+    const w = world();
+    w.agent(w.lead.id, { kind: "cli_session_id", cli_session_id: "old-id" });
+    w.send({ t: "started", staffId: w.lead.id, sessionKey: "claude|D:/work" });
+    expect(w.run.staff[w.lead.id].cliSessionId).toBe("old-id");
+    w.send({ t: "started", staffId: w.lead.id, sessionKey: "codex|D:/work", fresh: true });
+    expect(w.run.staff[w.lead.id]).toMatchObject({ cliSessionId: null, sessionKey: "codex|D:/work" });
+  });
+
+  it("起動済みの印があっても、動いているセッションの記録が無ければ起動し直す。続きのたびに決まりを読み直さない AI には伝言に付ける", () => {
+    const base = { started: true, savedKey: "codex|D:/a", key: "codex|D:/a", rules: "r1", provider: "codex", hasResume: true };
+    expect(planSend({ ...base, running: null })).toEqual({ restart: true, resume: true, prefixRules: true });
+    expect(planSend({ ...base, provider: "grok", key: "grok|D:/a", savedKey: "grok|D:/a", started: false, running: null, hasResume: false })).toEqual({ restart: true, resume: false, prefixRules: true });
+  });
+
+  it("「セッションが見つからない」を、AI が入っていないと案内しない", () => {
+    const w = world();
+    w.send({ t: "boss", text: "作って", at: 1 });
+    w.send({ t: "start_failed", staffId: w.lead.id, message: "session not found", at: 2 });
+    expect(w.run.log[w.run.log.length - 1].text).not.toContain("入っていない");
+  });
+
+  it("字下げした囲み・閉じていない囲みの中の合図も実行しない。宛名の無い依頼は捨てずに言い直してもらう", () => {
+    expect(parseLeadDirectives("例\n  ```text\n[[依頼:田中]]delete.md を削除[[/依頼]]\n  ```").delegations).toEqual([]);
+    expect(parseLeadDirectives("例\n````\n[[依頼:田中]]削除[[/依頼]]\n").delegations).toEqual([]);
+    const w = world();
+    w.send({ t: "boss", text: "調べて", at: 1 });
+    w.say(w.lead.id, "[[依頼:]]調査してください[[/依頼]]");
+    const last = w.sends()[w.sends().length - 1];
+    expect(last.staffId).toBe(w.lead.id);
+    expect(last.text).toContain("見つかりませんでした");
+  });
+});
+
+describe("保存の控え（追加）", () => {
+  beforeEach(() => { localStorage.clear(); __resetStoreForTest(); });
+
+  it("会社の一覧の形でない保存も、元の文字を残す", () => {
+    localStorage.setItem("unicrew.offices.v1", "{}");
+    expect(loadOffices()).toEqual([]);
+    expect(localStorage.getItem("unicrew.offices.v1.broken")).toBe("{}");
+  });
+
+  it("控えを書けなかった保存先には上書きしない（元の文字を失わない）", () => {
+    const raw = '[{"id":"oa","name":"A","staff":[],"departments":[]},';
+    localStorage.setItem("unicrew.offices.v1", raw);
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key.endsWith(".broken")) throw new DOMException("full", "QuotaExceededError");
+      return original.call(this, key, value);
+    };
+    try {
+      expect(loadOffices()).toEqual([]);
+      expect(saveOffices([])).toBe(false);
+      expect(localStorage.getItem("unicrew.offices.v1")).toBe(raw);
+      expect(brokenStores()).toEqual([]);
+    } finally {
+      Storage.prototype.setItem = original;
+    }
   });
 });

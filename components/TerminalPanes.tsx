@@ -955,6 +955,12 @@ export function TerminalPanes({
         return prev.filter((p) => p.id !== pageId);
       });
       if (closedKeys.length > 0) {
+        // AIオフィスに終わりを知らせる（閉じたページの社員が、作業中・待ちのまま残らないように）
+        for (const key of closedKeys) {
+          const n = paneNumberOf(paneLabelsRef.current.get(key));
+          if (n !== null) publishTerminal({ pane: n, key, kind: "stop", at: Date.now() });
+          paneLabelsRef.current.delete(key);
+        }
         forgetPaneCwds(closedKeys);
         clearPageActivity(pageId);
         // 閉じたページの参照・比率・最大化状態を残さない
