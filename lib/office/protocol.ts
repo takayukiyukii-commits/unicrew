@@ -42,7 +42,32 @@ function block(name: string, withArg: boolean): RegExp {
 
 const FILE_LINE = /(?:^|\n)\s*(?:見せる)?ファイル\s*[:：]\s*(.+?)\s*(?=\n|$)/;
 
+/** ``` で囲んだ所（説明のために書いた例）を、合図として読まないように隠す。文字数は変えない。 */
+function maskFences(text: string): { masked: string; restore: (s: string) => string } {
+  const kept: string[] = [];
+  const masked = text.replace(/(^|\n)(```|~~~)[^\n]*\n[\s\S]*?\n\2[^\n]*(?=\n|$)/g, (m) => {
+    kept.push(m);
+    return `\u0000F${kept.length - 1}\u0000`;
+  });
+  return { masked, restore: (s) => s.replace(/\u0000F(\d+)\u0000/g, (_m, i: string) => kept[Number(i)] ?? "") };
+}
+
 export function parseLeadDirectives(text: string): LeadDirectives {
+  // 囲みの外の合図だけを読む。合図の中に囲みがあるとき（確認の中身など）は、読んだあとで元に戻す
+  const fences = maskFences(text);
+  const d = parseMasked(fences.masked);
+  const back = fences.restore;
+  return {
+    plain: back(d.plain),
+    delegations: d.delegations.map((g) => ({ to: g.to, text: back(g.text) })),
+    question: d.question === null ? null : back(d.question),
+    approval: d.approval ? { ...d.approval, body: back(d.approval.body) } : null,
+    reply: d.reply === null ? null : back(d.reply),
+    done: d.done,
+  };
+}
+
+function parseMasked(text: string): LeadDirectives {
   let rest = text;
   const delegations: Delegation[] = [];
   rest = rest.replace(block("依頼", true), (_m, to: string | undefined, body: string) => {
@@ -89,8 +114,12 @@ export function findStaffByName(office: Office, raw: string): Staff | null {
   const q = norm(raw);
   if (!q) return null;
   const members = office.staff.filter((s) => !s.lead);
-  const exact = members.find((s) => norm(s.name) === q || s.id === raw.trim());
-  if (exact) return exact;
+  const byId = members.find((s) => s.id === raw.trim());
+  if (byId) return byId;
+  const exact = members.filter((s) => norm(s.name) === q);
+  if (exact.length === 1) return exact[0];
+  // 同じ名前が2人いるときは決めない（取りまとめ役に、役割で言い直してもらう）
+  if (exact.length > 1) return null;
   const byPart = members.filter((s) => norm(s.name).startsWith(q) || norm(s.name).endsWith(q) || norm(s.role) === q);
   if (byPart.length === 1) return byPart[0];
   const loose = members.filter((s) => norm(s.name).includes(q) || q.includes(norm(s.name)) || norm(s.role).includes(q));

@@ -17,16 +17,16 @@ import { registerBossReceiver } from "@/lib/office/boss-bus";
 import { useOfficeT } from "@/lib/office/i18n";
 import { layoutOffice } from "@/lib/office/layout";
 import { OfficeRunner } from "@/lib/office/runner";
-import { deleteRun, loadActiveOfficeId, loadOffices, loadRun, saveActiveOfficeId, saveOffices, saveRun } from "@/lib/office/store";
+import { brokenStores, deleteRun, loadActiveOfficeId, loadOffices, loadRun, saveActiveOfficeId, saveOffices, saveRun } from "@/lib/office/store";
 import { officeTheme } from "@/lib/office/themes";
 import type { Office, OfficeRun, Staff } from "@/lib/office/types";
 import { openExternal, openPreviewWindow } from "@/lib/preview-window";
 import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
 import { avatarSrc, fileTail, isTauri, listDirectory, pathExists, pickWorkspace, revealInFileManager } from "@/lib/tauri";
 import type { AppSettings } from "@/lib/types";
-import { describeTool } from "@/lib/progress-text";
+import { describeOfficeTool } from "@/lib/office/tool-text";
 import { nextTerminalActivity, publishTerminal, subscribeTerminal, type TerminalActivity } from "@/lib/office/terminal-link";
-import { RUN_DIR_CANDIDATES, RUN_LIVE_MS, RUN_LOG_NAME, RUN_PANE_BASE, RUN_SITE_URL, RUN_TAIL_BYTES, RunWatcher } from "@/lib/office/run-link";
+import { RUN_DIR_CANDIDATES, RUN_LOG_NAME, RUN_PANE_BASE, RUN_SITE_URL, RUN_TAIL_BYTES, RunWatcher } from "@/lib/office/run-link";
 
 
 // 保存済みの表示設定を、静かな待機モーションの設定として引き継ぐ。
@@ -63,10 +63,16 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   const [panel, setPanel] = useState<"none" | "company" | "setup">("none");
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const [chatter, setChatter] = useState(true);
+  /** 保存に失敗している物（画面で知らせて、自動でやり直す） */
+  const [saveFailed, setSaveFailed] = useState({ run: false, offices: false });
+  const [saveTick, setSaveTick] = useState(0);
+  const [brokenKeys, setBrokenKeys] = useState<string[]>([]);
 
   const office = useMemo(() => offices.find((o) => o.id === activeId) ?? null, [offices, activeId]);
   const officeRef = useRef(office);
   officeRef.current = office;
+  const officesRef = useRef(offices);
+  officesRef.current = offices;
   const runRef = useRef(run);
   runRef.current = run;
   const settingsRef = useRef(settings);
@@ -82,6 +88,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     setActiveId(cur?.id ?? null);
     setRun(cur ? loadRun(cur, localeRef.current) : null);
     if (list.length === 0) setPanel("setup");
+    setBrokenKeys(brokenStores());
     try {
       setChatter(window.localStorage.getItem(CHATTER_KEY) !== "0");
     } catch {
@@ -113,12 +120,18 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   // 保存（「いま」は細かく変わるので、少しまとめて書く）
   useEffect(() => {
     if (!hydrated || !run) return;
-    const id = setTimeout(() => saveRun(run), 400);
+    const id = setTimeout(() => setSaveFailed((cur) => ({ ...cur, run: !saveRun(run) })), 400);
     return () => clearTimeout(id);
-  }, [run, hydrated]);
+  }, [run, hydrated, saveTick]);
   useEffect(() => {
-    if (hydrated) saveOffices(offices);
-  }, [offices, hydrated]);
+    if (hydrated) setSaveFailed((cur) => ({ ...cur, offices: !saveOffices(offices) }));
+  }, [offices, hydrated, saveTick]);
+  // 保存できていない間は、ときどき自動でやり直す（空きができたら、何もしなくても保存される）
+  useEffect(() => {
+    if (!saveFailed.run && !saveFailed.offices) return;
+    const id = window.setInterval(() => setSaveTick((n) => n + 1), 15000);
+    return () => window.clearInterval(id);
+  }, [saveFailed.run, saveFailed.offices]);
   useEffect(() => {
     if (hydrated) saveActiveOfficeId(activeId);
   }, [activeId, hydrated]);
@@ -162,23 +175,22 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   }, []);
 
   const switchOffice = useCallback((id: string) => {
-    const cur = runRef.current;
-    if (cur?.busy) runnerRef.current?.dispatch({ t: "stop", at: Date.now() });
-    if (cur) saveRun(runRef.current ?? cur);
-    const next = loadOffices().find((o) => o.id === id);
+    // 切り替え先は、画面が持っている一覧から選ぶ（保存に失敗していても、会社と「いま」を必ず一組で替える）
+    const next = officesRef.current.find((o) => o.id === id);
+    if (!next) return;
+    if (runRef.current) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
+    if (runRef.current) saveRun(runRef.current);
+    officeRef.current = next;
+    const r = loadRun(next, localeRef.current);
+    runRef.current = r;
+    setRun(r);
     setActiveId(id);
     setSelected(null);
     setPanel("none");
-    if (next) {
-      const r = loadRun(next, localeRef.current);
-      runRef.current = r;
-      setRun(r);
-    }
   }, []);
 
   const createOffice = useCallback((o: Office) => {
-    const cur = runRef.current;
-    if (cur?.busy) runnerRef.current?.dispatch({ t: "stop", at: Date.now() });
+    if (runRef.current) runnerRef.current?.dispatch({ t: "suspend", at: Date.now() });
     if (runRef.current) saveRun(runRef.current);
     setOffices((list) => [...list, o]);
     officeRef.current = o;
@@ -221,14 +233,17 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
   const layout = useMemo(() => (office ? layoutOffice(office) : null), [office]);
   const theme = officeTheme(office?.theme ?? "day");
   // ── ターミナルとの連動：ターミナルの AI の作業を、席順で対応する社員の動きに重ねる（仕事の進行には書き込まない）
-  const [terminal, setTerminal] = useState<Record<number, TerminalActivity>>({});
+  const [terminal, setTerminal] = useState<Record<string, TerminalActivity>>({});
   useEffect(() => {
-    const timers = new Map<number, number>();
+    const timers = new Map<string, number>();
     const off = subscribeTerminal((ev) => {
-      setTerminal((cur) => ({ ...cur, [ev.pane]: nextTerminalActivity(cur[ev.pane], ev) }));
-      window.clearTimeout(timers.get(ev.pane));
+      // 持ち主の印：ペインごとの名前（別のページの同じ番号と混ぜない）。無ければ番号
+      const id = `${ev.source ?? "terminal"}:${ev.key ?? ev.pane}`;
+      // 始まっていない物の「終わり」は持たない（閉じたペインの後始末など）
+      setTerminal((cur) => (ev.kind === "stop" && !cur[id] ? cur : { ...cur, [id]: nextTerminalActivity(cur[id], ev) }));
+      window.clearTimeout(timers.get(id));
       // 終わったら、報告に行って戻るまでのあいだ「完了」を見せてから消す
-      if (ev.kind === "stop") timers.set(ev.pane, window.setTimeout(() => setTerminal((cur) => { const next = { ...cur }; delete next[ev.pane]; return next; }), 14000));
+      if (ev.kind === "stop") timers.set(id, window.setTimeout(() => setTerminal((cur) => { const next = { ...cur }; delete next[id]; return next; }), 14000));
     });
     // ブラウザで開いたとき（見本の動き）だけ、ターミナルの知らせを手で流して動きを確かめられるようにする
     if (!isTauri()) (window as unknown as { __officeTerminal?: typeof publishTerminal }).__officeTerminal = publishTerminal;
@@ -240,27 +255,33 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
     let alive = true;
     let dir: string | null = null;
     const watcher = new RunWatcher();
+    let reading = false;
     const tick = async () => {
+      // 前の読み込みが終わっていなければ、今回は見送る（重なって、古い結果が新しい状態を上書きしないように）
+      if (reading) return;
+      reading = true;
       try {
         if (!dir) {
           for (const candidate of RUN_DIR_CANDIDATES) if (await pathExists(candidate)) { dir = candidate; break; }
           if (!dir) return; // RUNner を使っていないPC
         }
-        const folders = (await listDirectory(dir)).filter((entry) => entry.is_dir && !entry.name.startsWith("_")).slice(0, 80);
+        const folders = (await listDirectory(dir)).filter((entry) => entry.is_dir && !entry.name.startsWith("_")).slice(0, 2000);
         const now = Date.now();
         const readings = [];
         for (const folder of folders) {
           const log = `${folder.path.replace(/[\\/]+$/, "")}/${RUN_LOG_NAME}`;
           const meta = await fileTail(log, 0);
           if (!meta) continue;
-          // 動いている記録だけ、末尾を読む
-          const tail = now - meta.modified_ms < RUN_LIVE_MS ? (await fileTail(log, RUN_TAIL_BYTES))?.text ?? null : null;
+          // 最近書かれた記録・前回から書き足された記録だけ、末尾を読む
+          const tail = watcher.wantsTail(folder.name, meta.modified_ms, now) ? (await fileTail(log, RUN_TAIL_BYTES))?.text ?? null : null;
           readings.push({ key: folder.name, modifiedMs: meta.modified_ms, tail });
         }
         if (!alive) return;
         for (const ev of watcher.feed(readings, now)) publishTerminal(ev);
       } catch {
         /* 読めなくても、オフィスは止めない（次の回でまた読む） */
+      } finally {
+        reading = false;
       }
     };
     void tick();
@@ -284,7 +305,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       const k = runner ? "run" : "term";
       const rt = staff[who.id];
       if (!rt || rt.status === "working" || rt.status === "waiting") continue; // オフィスの仕事の最中は、そちらを優先
-      const doing = act.tool ? describeTool({ kind: "tool_use", toolUseId: act.tool.id, toolName: act.tool.name, input: toolInput(act.tool.detail), status: "pending" }, false) : null;
+      const doing = act.tool ? describeOfficeTool(act.tool.name, toolInput(act.tool.detail), locale) : null;
       const what = act.instruction ? act.instruction.replace(/\s+/g, " ").slice(0, 26) : "";
       const tools: OfficeRun["staff"][string]["tools"] = {};
       if (act.finished) tools[act.finished.id] = { name: act.finished.name, input: {}, done: true, error: false };
@@ -301,7 +322,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       if (act.status === "waiting") permissions.push({ id: `term-${act.pane}`, staffId: who.id, requestId: "", toolName: "terminal", text: t(`${k}.waiting`, { n: act.pane }), at: act.at });
     }
     return { ...run, staff, permissions };
-  }, [run, office, terminal, t]);
+  }, [run, office, terminal, t, locale]);
 
   const needsBoss = useMemo(() => {
     const s = new Set<string>();
@@ -326,10 +347,14 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
           <OfficeScene office={office} run={viewRun ?? run} layout={layout} theme={theme}
             avatarUrls={avatarUrls} active={active} animateIdle={chatter} key={office.id}
             needsBoss={needsBoss} selectedStaffId={selected} onSelectStaff={setSelected} />
+          {saveFailed.run || saveFailed.offices || brokenKeys.length > 0 ? <div role="alert" className="office-save-alert">
+            {saveFailed.run || saveFailed.offices ? <p>{t("office.saveFailed")} <button type="button" onClick={() => setSaveTick((n) => n + 1)}>{t("office.retrySave")}</button></p> : null}
+            {brokenKeys.length > 0 ? <p>{t("office.loadBroken", { key: brokenKeys.join(" / ") })} <button type="button" aria-label="×" onClick={() => setBrokenKeys([])}>×</button></p> : null}
+          </div> : null}
           {runGoals > 0 ? <button type="button" className="office-run-chip" onClick={() => void openExternal(RUN_SITE_URL).catch(() => {})} title={t("run.openHint")}>
             {t("run.chip", { n: runGoals })}
           </button> : null}
-          <OfficeTopBar office={office} run={run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
+          <OfficeTopBar office={office} run={viewRun ?? run} theme={theme} onEditCompany={() => { setSelected(null); setPanel("company"); }} demo={!isTauri()} />
           <OfficeBoard office={office} run={viewRun ?? run} onSelectStaff={setSelected} />
 
           {offices.length > 1 ? <select aria-label={t("list.title")} value={office.id} onChange={(event) => switchOffice(event.target.value)} className="office-company-switch">
@@ -365,25 +390,19 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
           {selectedStaff ? (
             <StaffPanel
               office={office}
-              run={run}
+              run={viewRun ?? run}
               staff={selectedStaff}
               avatarUrl={avatarUrls[selectedStaff.id] ?? null}
               onSave={(next) => {
                 updateOffice({ ...office, staff: office.staff.map((s) => (s.id === next.id ? next : s)), updatedAt: Date.now() });
-                // 仕事のやり方や AI を変えたら、次の仕事から新しい決まりで起動し直す
-                if (run.staff[next.id]?.status !== "working") {
-                  runnerRef.current?.restartStaff(office.id, next.id);
-                  const r = runRef.current;
-                  if (r) {
-                    const patched = { ...r, staff: { ...r.staff, [next.id]: { ...r.staff[next.id], started: false, cliSessionId: next.provider === selectedStaff.provider ? r.staff[next.id]?.cliSessionId ?? null : null } } };
-                    runRef.current = patched;
-                    setRun(patched);
-                  }
-                }
+                // 仕事のやり方や AI を変えたら、次に仕事を渡すときに、新しい決まりで起動し直す（lib/office/runner.ts の planSend が決める。
+                // 作業の途中でも、いまの返事が終わって次に渡すときに切り替わる）
               }}
               onDelete={(id) => {
                 runnerRef.current?.restartStaff(office.id, id);
                 updateOffice({ ...office, staff: office.staff.filter((s) => s.id !== id), updatedAt: Date.now() });
+                // その人の報告を待っていたら、待つのをやめて先へ進める
+                dispatch({ t: "sync", at: Date.now() });
                 setSelected(null);
               }}
               onClose={() => setSelected(null)}
@@ -408,7 +427,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
                 setSelected(s.id);
               }}
               onDeleteOffice={() => {
-                if (run.busy) dispatch({ t: "stop", at: Date.now() });
+                dispatch({ t: "suspend", at: Date.now() });
                 deleteRun(office.id);
                 const rest = offices.filter((o) => o.id !== office.id);
                 setOffices(rest);

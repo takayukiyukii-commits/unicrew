@@ -19,7 +19,7 @@ export interface TerminalEvent {
   kind: TerminalEventKind;
   /** どこから来た知らせか（無ければターミナル） */
   source?: "terminal" | "runner";
-  /** RUNner のゴールの番号（8桁） */
+  /** 持ち主を見分ける印：ターミナルはペインごとの名前（別のページの同じ番号と混ぜない）、RUNner はゴールの番号（8桁） */
   key?: string;
   /** 最後に送った指示（分かるときだけ） */
   instruction?: string | null;

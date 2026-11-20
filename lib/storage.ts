@@ -1,8 +1,30 @@
 "use client";
 
-import type { AppSettings, Thread } from "./types";
+import { normalizeModelId, type AppSettings, type Thread } from "./types";
 
 const THREADS_KEY = "unicrew.threads.v2";
+/** 0.6.3 が残した「ファイルへ移した会話」の印（id:中身の印）。読むだけ */
+const MIGRATED_KEY = "unicrew.threads.migratedIds.v1";
+
+/** 0.6.3 と同じ作り方の「中身の印」。 */
+function shortHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/** 0.6.3 で「ファイルへ移した」と記録されている古い保存か。移したあとに消した会話を、残っていた古い保存から戻さないために使う。 */
+function migratedBefore(entry: Thread, done: Set<string>): boolean {
+  if (done.size === 0) return false;
+  try {
+    return done.has(`${entry.id}:${shortHash(JSON.stringify({ ...entry, model: normalizeModelId(entry.model) }))}`);
+  } catch {
+    return false;
+  }
+}
 const SETTINGS_KEY = "unicrew.settings.v2";
 const LAST_WORKSPACE_KEY = "unicrew.lastWorkspace.v1";
 
@@ -79,8 +101,12 @@ async function doLoad(isTauriEnv: boolean): Promise<LoadThreadsResult> {
       try {
         const legacy: unknown = JSON.parse(raw);
         if (!Array.isArray(legacy)) throw new Error();
+        let done = new Set<string>();
+        try { done = new Set(JSON.parse(localStorage.getItem(MIGRATED_KEY) ?? "[]") as string[]); } catch { /* 印が読めなければ、全部見せる */ }
         for (const entry of legacy) {
           if (!isThread(entry)) { broken.push(THREADS_KEY); continue; }
+          // 0.6.3 がファイルへ移し終えた会話で、いまファイルに無い物＝そのあと利用者が消した会話。古い保存から戻さない
+          if (!threads.has(entry.id) && migratedBefore(entry, done)) continue;
           const json = JSON.stringify(entry);
           const existing = threads.get(entry.id);
           if (existing && JSON.stringify(existing) === json) {
@@ -120,6 +146,8 @@ export async function deletePastThread(id: string): Promise<void> {
       if (!Array.isArray(entries)) throw new Error("古い会話の保存を読み取れませんでした");
       // 読んだ後に別の画面が変更した内容は消さない。
       const next = entries.filter((entry) => !origin.legacy!.includes(JSON.stringify(entry)));
+      // 読んだあとに中身が変わっていて消せなかったら、消えたことにしない（次に開くと、また一覧に出るため）
+      if (next.length === entries.length && !origin.fileId) throw new Error("この会話は、読み込んだあとに内容が変わっていたため消していません。アプリを開き直して、もう一度確かめてから消してください");
       if (next.length !== entries.length) localStorage.setItem(THREADS_KEY, JSON.stringify(next));
     }
   }

@@ -105,4 +105,26 @@ describe("確認された会話だけ削除する", () => {
     await deletePastThread("a");
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual([thread("b")]);
   });
+  it("0.6.3 がファイルへ移したあとに消した会話を、残っていた古い保存から戻さない", async () => {
+    fakeTauri();
+    // 0.6.3 と同じ作り方の印（id:中身の印。中身は model を短い名前に直してから数える）
+    const hash = (text: string) => { let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); };
+    const gone = thread("a", "消した会話");
+    const kept = thread("b", "移していない会話");
+    localStorage.setItem(KEY, JSON.stringify([gone, kept]));
+    localStorage.setItem("unicrew.threads.migratedIds.v1", JSON.stringify([`a:${hash(JSON.stringify({ ...gone, model: "opus" }))}`]));
+    const result = await loadThreadsAsync(true);
+    expect(result.threads.map((t) => t.title)).toEqual(["移していない会話"]);
+    // 元の保存は変えない
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toHaveLength(2);
+  });
+  it("読んだあとに中身が変わった古い会話は、消えたことにしない", async () => {
+    fakeTauri();
+    localStorage.setItem(KEY, JSON.stringify([thread("a", "Before")]));
+    await loadThreadsAsync(true);
+    localStorage.setItem(KEY, JSON.stringify([thread("a", "After")]));
+    await expect(deletePastThread("a")).rejects.toThrow("消していません");
+    expect(localStorage.getItem(KEY)).toContain("After");
+    expect((await loadThreadsAsync(true)).threads).toHaveLength(1);
+  });
 });

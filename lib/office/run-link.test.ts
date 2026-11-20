@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRunLog, RUN_LIVE_MS, RUN_PANE_BASE, RunWatcher } from "./run-link";
+import { parseRunLog, RUN_PANE_BASE, RUN_RECENT_MS, RUN_WAIT_MAX_MS, RUN_WORK_IDLE_MS, RunWatcher } from "./run-link";
 import { nextTerminalActivity } from "./terminal-link";
 
 const claudeTool = (id: string, name: string, input: Record<string, unknown>) =>
@@ -49,11 +49,25 @@ describe("RUNner の記録を読む", () => {
 describe("RUNner の知らせ", () => {
   const working = (id: string, name = "Read") => claudeTool(id, name, { file_path: "a.md" });
 
-  it("昔の記録（もう動いていないフォルダ）では、社員を動かさない", () => {
+  it("昔の記録（もう動いていないフォルダ）は読まない＝社員を動かさない", () => {
     const w = new RunWatcher();
-    const now = 10_000_000;
-    expect(w.feed([{ key: "aaaaaaaa", modifiedMs: now - RUN_LIVE_MS - 1, tail: null }], now)).toEqual([]);
+    const now = 100_000_000;
+    expect(w.wantsTail("aaaaaaaa", now - RUN_RECENT_MS - 1, now)).toBe(false);
+    expect(w.wantsTail("aaaaaaaa", now - 60_000, now)).toBe(true);
+    expect(w.feed([{ key: "aaaaaaaa", modifiedMs: now - RUN_RECENT_MS - 1, tail: null }], now)).toEqual([]);
     expect(w.active()).toEqual([]);
+    // 最近終わった記録は、読んでも社員を動かさない。次からは書き足されるまで読まない
+    expect(w.feed([{ key: "bbbbbbbb", modifiedMs: now - 60_000, tail: [working("t1"), result].join("\n") }], now)).toEqual([]);
+    expect(w.wantsTail("bbbbbbbb", now - 60_000, now)).toBe(false);
+    expect(w.wantsTail("bbbbbbbb", now, now)).toBe(true);
+  });
+
+  it("承認待ちで止まってしばらくしてから開いても、待ちとして拾う。だいぶ前から書かれていない作業中は拾わない", () => {
+    const w = new RunWatcher();
+    const now = 100_000_000;
+    const wait = [claudeTool("t2", "mcp__run__request_approval", { title: "投稿してよいですか" }), result].join("\n");
+    expect(w.feed([{ key: "cccccccc", modifiedMs: now - 20 * 60_000, tail: wait }], now).map((e) => e.kind)).toEqual(["waiting"]);
+    expect(w.feed([{ key: "dddddddd", modifiedMs: now - RUN_WORK_IDLE_MS - 1, tail: working("t1") }, { key: "cccccccc", modifiedMs: now - 20 * 60_000, tail: null }], now)).toEqual([]);
   });
 
   it("動き出す → 道具 → 同じ道具では知らせない → 別の道具 → 終わり、を1回ずつ知らせる", () => {
@@ -92,12 +106,27 @@ describe("RUNner の知らせ", () => {
     expect(evs.map((e) => e.kind)).toEqual(["start", "activity"]);
   });
 
-  it("動いていたのに、書き足されないまま長く経ったら、終わった扱いにする（受け取り役が落ちたとき）", () => {
+  it("時間のかかるコマンドの最中（しばらく書き足されない）は、終わりにしない。長く経ったら終わった扱いにする", () => {
     const w = new RunWatcher();
     const now = 30_000_000;
     w.feed([{ key: "bff1577c", modifiedMs: now, tail: working("t1") }], now);
-    const later = now + RUN_LIVE_MS + 1000;
-    expect(w.feed([{ key: "bff1577c", modifiedMs: now, tail: null }], later).map((e) => e.kind)).toEqual(["stop"]);
+    expect(w.feed([{ key: "bff1577c", modifiedMs: now, tail: null }], now + 200_000)).toEqual([]);
+    expect(w.feed([{ key: "bff1577c", modifiedMs: now, tail: null }], now + RUN_WORK_IDLE_MS + 1000).map((e) => e.kind)).toEqual(["stop"]);
+  });
+
+  it("待ちのまま長く放置されたら手を下ろす。記録が消えたら終わりを知らせる。遅れて届いた古い読み込みは捨てる", () => {
+    const w = new RunWatcher();
+    const now = 50_000_000;
+    const wait = [claudeTool("t2", "mcp__run__report_run_status", { status: "waiting_human" }), result].join("\n");
+    w.feed([{ key: "11111111", modifiedMs: now, tail: wait }, { key: "22222222", modifiedMs: now, tail: wait }, { key: "33333333", modifiedMs: now, tail: working("t1") }], now);
+    // 33333333 が終わった（新しい読み込み）あとに、古い読み込み（待ち）が遅れて届いても戻らない
+    expect(w.feed([{ key: "11111111", modifiedMs: now, tail: null }, { key: "22222222", modifiedMs: now, tail: null }, { key: "33333333", modifiedMs: now + 3000, tail: [working("t1"), result].join("\n") }], now + 3000).map((e) => e.kind)).toEqual(["stop"]);
+    expect(w.feed([{ key: "11111111", modifiedMs: now, tail: null }, { key: "22222222", modifiedMs: now, tail: null }, { key: "33333333", modifiedMs: now + 2000, tail: wait }], now + 4000)).toEqual([]);
+    // 22222222 のフォルダが消えた
+    const gone = w.feed([{ key: "11111111", modifiedMs: now, tail: null }], now + 5000);
+    expect(gone.map((e) => [e.kind, e.key])).toEqual([["stop", "22222222"]]);
+    expect(w.feed([{ key: "11111111", modifiedMs: now, tail: null }], now + RUN_WAIT_MAX_MS + 1000).map((e) => e.kind)).toEqual(["stop"]);
+    expect(w.active()).toEqual([]);
   });
 
   it("2つのゴールは別々の番号になる。始まりの時刻は、動き出したときだけ新しくなる（扉から入るのは受け取ったとき1回）", () => {

@@ -76,6 +76,8 @@ export interface StaffRuntime {
   started: boolean;
   /** 最後の報告・返事の出だし（部屋の中の会話の吹き出しに出す）。古い保存には無い */
   said?: string | null;
+  /** いまのセッションを起動したときの AI と作業フォルダ（変わったら、前の続きからは始めない） */
+  sessionKey?: string;
   /** この時刻に「出社」した（表示だけ。RUNner の仕事を受け取った社員が扉から入ってくる）。保存しない */
   arrive?: number;
   /** いまのターンで数え済みのトークン（実況の数字は同じターンの中で増えていくので差分だけ足す） */
@@ -171,6 +173,8 @@ export interface OfficeRun {
   reports: { staffId: string; text: string; files: string[]; failed: boolean }[];
   /** 仕事が進行中か（社長の番でない） */
   busy: boolean;
+  /** 取りまとめ役の手が空くのを待っている指示（作業中・確認待ちの間に届いたもの） */
+  pending?: string[];
   /** 取りまとめ役への初回の指示を送ったか（社員名簿の案内を1回だけ添える） */
   briefed: boolean;
 }
@@ -183,7 +187,11 @@ export type OfficeInput =
   | { t: "permission"; askId: string; allow: boolean; at: number }
   | { t: "stop"; at: number }
   | { t: "agent"; staffId: string; ev: OfficeAgentEvent; at: number }
-  | { t: "started"; staffId: string }
+  | { t: "started"; staffId: string; sessionKey?: string }
+  /** 社員を消した・設定を変えたあとに、待ち合わせをそろえ直す */
+  | { t: "sync"; at: number }
+  /** 会社を切り替える・消すとき：動いている AI を全部止める（確認待ちの札は残す） */
+  | { t: "suspend"; at: number }
   | { t: "start_failed"; staffId: string; message: string; at: number };
 
 /** lib/tauri.ts の AgentEvent から session_id を外したもの（誰のものかは staffId で渡す）。 */

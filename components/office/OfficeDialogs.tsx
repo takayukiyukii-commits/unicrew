@@ -197,6 +197,11 @@ export function StaffPanel({
           type="button"
           disabled={!dirty || !draft.name.trim()}
           onClick={() => {
+            const sameName = (a: string, b: string) => a.replace(/[\s　]/g, "") === b.replace(/[\s　]/g, "");
+            if (office.staff.some((s) => s.id !== staff.id && sameName(s.name, draft.name))) {
+              showToast(t("staff.nameTaken"));
+              return;
+            }
             onSave({ ...draft, name: draft.name.trim(), role: draft.role.trim() || staff.role });
             showToast(t("staff.saved"));
           }}

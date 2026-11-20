@@ -322,8 +322,8 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
       if (waitingChanged) {
         // 確認待ちを優先。現在地を飛ばさず、近いほうの中継点から通路をたどる。
         for (const actor of actors.values()) {
-          const nextNode = actor.route[0];
-          if (nextNode && sceneDistance(actor.point, SCENE.points[nextNode]) < sceneDistance(actor.point, SCENE.points[actor.node])) actor.node = nextNode;
+          const nextNode = actor.route.find((n) => !n.startsWith("@"));
+          if (nextNode && SCENE.points[nextNode] && sceneDistance(actor.point, SCENE.points[nextNode]) < sceneDistance(actor.point, SCENE.points[actor.node])) actor.node = nextNode;
         }
         cancel();
         const destinations = restingNodes(after, layout);

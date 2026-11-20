@@ -27,6 +27,28 @@ import type { Office, OfficeAgentEvent, OfficeEffect, OfficeInput, OfficeRun } f
 
 const SID_PREFIX = "office.";
 
+/** 起動のときに「会社の決まり（役割・名簿・合図）」を受け取らない AI。最初の伝言の頭に付けて渡す。 */
+const RULES_IN_MESSAGE = new Set(["goose", "opencode", "codex-acp", "kiro", "kimi"]);
+
+/** 前の続きから始めてよいかを決める印（AI か作業フォルダが変わったら、前の会話の続きにはしない）。 */
+export function sessionKeyOf(provider: string, workspace: string | null): string {
+  return `${provider}|${workspace ?? ""}`;
+}
+
+/**
+ * 次の送信の前に、起動し直しが要るか・伝言の頭に決まりを付けるかを決める。
+ * running＝いま動いているセッションを起動したときの決まり（無ければ、このアプリを開いてからは起動していない）。
+ */
+export function planSend(args: { started: boolean; running: { key: string; rules: string } | null; savedKey: string | undefined; key: string; rules: string; provider: string; hasResume: boolean }): { restart: boolean; resume: boolean; prefixRules: boolean } {
+  const changed = !!args.running && (args.running.key !== args.key || args.running.rules !== args.rules);
+  const restart = !args.started || changed;
+  // 続きから始めるのは、AI と作業フォルダが前と同じときだけ
+  const resume = restart && args.hasResume && (args.savedKey === undefined || args.savedKey === args.key) && (!args.running || args.running.key === args.key);
+  // 決まりを伝言に付ける：起動で受け取らない AI／続きから始めるのに決まりが変わったとき（続きでは新しい決まりを読まない AI がある）
+  const prefixRules = restart && (RULES_IN_MESSAGE.has(args.provider) || (resume && !!args.running && args.running.rules !== args.rules));
+  return { restart, resume, prefixRules };
+}
+
 export function officeSid(officeId: string, staffId: string): string {
   return `${SID_PREFIX}${officeId}.${staffId}`;
 }
@@ -53,6 +75,8 @@ export class OfficeRunner {
   private demo: DemoDriver | null = null;
   /** 社員ごとの「起動→送信」を順番に流す（起動が終わる前に送らない） */
   private chains = new Map<string, Promise<void>>();
+  /** 社員ごとの、いま動いているセッションを起動したときの決まり */
+  private running = new Map<string, { key: string; rules: string }>();
   private disposed = false;
 
   constructor(private host: RunnerHost) {}
@@ -106,11 +130,15 @@ export class OfficeRunner {
         this.enqueue(e.staffId, async () => {
           if (this.demo) this.demo.stop(e.staffId);
           else await agentStop(officeSid(office.id, e.staffId)).catch(() => {});
+          this.running.delete(officeSid(office.id, e.staffId));
         });
         return;
       case "permission":
         if (!this.demo) {
-          void agentPermissionResponse(officeSid(office.id, e.staffId), e.requestId, e.allow ? "allow" : "deny").catch(() => {});
+          // 答えが届かなかったら（AI がもう止まっている等）、動いているふりをさせない
+          void agentPermissionResponse(officeSid(office.id, e.staffId), e.requestId, e.allow ? "allow" : "deny").catch((err) => {
+            this.dispatch({ t: "agent", staffId: e.staffId, ev: { kind: "error", message: err instanceof Error ? err.message : String(err) }, at: Date.now() });
+          });
         }
         return;
       case "attention": {
@@ -147,24 +175,34 @@ export class OfficeRunner {
     const sid = officeSid(office.id, staffId);
     try {
       const rt = this.host.getRun()?.staff[staffId];
-      if (!rt?.started) {
+      const lead = office.staff.find((s) => s.lead) ?? null;
+      const systemPrompt = staff.lead ? leadSystemPrompt(office, staff) : memberSystemPrompt(office, staff, lead);
+      const model = cliModelFor(staff.provider, staff.model);
+      const key = sessionKeyOf(staff.provider, office.workspace);
+      const rules = `${model ?? ""}\n${systemPrompt}`;
+      // 作業フォルダ・AI・仕事のやり方・名簿が変わっていたら、いまのセッションを止めて新しい決まりで起動し直す
+      const plan = planSend({ started: !!rt?.started, running: this.running.get(sid) ?? null, savedKey: rt?.sessionKey, key, rules, provider: staff.provider, hasResume: !!rt?.cliSessionId });
+      let body = text;
+      if (plan.restart) {
+        if (rt?.started) await agentStop(sid).catch(() => {});
         const settings = this.host.getSettings();
-        const lead = office.staff.find((s) => s.lead) ?? null;
         const apiKey = settings.authMode === "apikey" ? await getApiKey() : null;
         await agentStart({
           sessionId: sid,
           workspace: office.workspace,
-          systemPrompt: staff.lead ? leadSystemPrompt(office, staff) : memberSystemPrompt(office, staff, lead),
-          model: cliModelFor(staff.provider, staff.model),
+          systemPrompt,
+          model,
           authMode: settings.authMode,
           apiKey,
           provider: staff.provider,
-          resumeCliSessionId: rt?.cliSessionId ?? null,
+          resumeCliSessionId: plan.resume ? rt?.cliSessionId ?? null : null,
           permissionMode: "acceptEdits",
         });
-        this.dispatch({ t: "started", staffId });
+        this.running.set(sid, { key, rules });
+        this.dispatch({ t: "started", staffId, sessionKey: key });
+        if (plan.prefixRules) body = `【この会社での決まり（必ず守ってください）】\n${systemPrompt}\n\n――――\n\n${text}`;
       }
-      await agentSend(sid, text);
+      await agentSend(sid, body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.dispatch({ t: "start_failed", staffId, message, at: Date.now() });
@@ -176,6 +214,7 @@ export class OfficeRunner {
     this.enqueue(staffId, async () => {
       if (this.demo) return;
       await agentStop(officeSid(officeId, staffId)).catch(() => {});
+      this.running.delete(officeSid(officeId, staffId));
     });
   }
 }

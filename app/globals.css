@@ -387,3 +387,8 @@ html, body {
 /* RUNner の仕事が動いているときに出す入口（UNIHUB をブラウザで開く） */
 .office-root button.office-run-chip { position: absolute; right: 12px; top: 150px; z-index: 30; min-height: 0; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #C7D2FE; background: #EEF2FF; color: #4F46E5; font-size: 12px; font-weight: 600; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
 .office-root button.office-run-chip:hover { background: #E0E7FF; }
+
+/* 保存できなかった・保存を読めなかったときの知らせ */
+.office-save-alert { position: absolute; left: 50%; top: 172px; z-index: 40; transform: translateX(-50%); max-width: min(720px, 80%); padding: 10px 14px; border-radius: 10px; border: 1px solid #FECACA; background: #FEF2F2; color: #B91C1C; font-size: 12.5px; line-height: 1.6; box-shadow: 0 8px 20px rgba(15,23,42,.12); }
+.office-save-alert p + p { margin-top: 6px; }
+.office-root .office-save-alert button { min-height: 0; height: 26px; margin-left: 6px; padding: 0 10px; border-radius: 6px; border: 1px solid #FCA5A5; background: #fff; color: #B91C1C; font-weight: 600; }

@@ -11,8 +11,12 @@
 import type { TerminalEvent } from "./terminal-link";
 
 export const RUN_LOG_NAME = ".run-runner.log";
-/** この時間、記録が書き足されなければ「動いていない」と見る */
-export const RUN_LIVE_MS = 150_000;
+/** 初めて見る記録は、この時間のうちに書かれた物だけ読む（承認待ちで止まってから開いた場合も拾えるように長め） */
+export const RUN_RECENT_MS = 30 * 60_000;
+/** 作業中のまま、この時間なにも書き足されなければ「止まった」と見る（時間のかかるコマンドの最中は書かれないので長め） */
+export const RUN_WORK_IDLE_MS = 10 * 60_000;
+/** あなた待ちのまま、この時間なにも書き足されなければ、手を下ろす */
+export const RUN_WAIT_MAX_MS = 6 * 60 * 60_000;
 /** 末尾から読む量 */
 export const RUN_TAIL_BYTES = 64 * 1024;
 
@@ -128,12 +132,13 @@ export function parseRunLog(tail: string): RunSnapshot {
 }
 
 interface Tracked {
+  /** 席の割り当てに使う番号。動き出したときに決める（まだなら -1） */
   slot: number;
   state: RunState | "idle";
   toolKey: string | null;
   message: string | null;
   goalId: string | null;
-  /** 最後に見た記録の更新時刻 */
+  /** 最後に読んだ記録の更新時刻 */
   modified: number;
 }
 
@@ -141,7 +146,7 @@ export interface RunLogReading {
   /** ゴールのフォルダ名（番号8桁） */
   key: string;
   modifiedMs: number;
-  /** 末尾の文字。動いていないフォルダは読まずに null でよい */
+  /** 末尾の文字。読まなかったときは null */
   tail: string | null;
 }
 
@@ -153,9 +158,15 @@ export class RunWatcher {
   private tracked = new Map<string, Tracked>();
   private nextSlot = 0;
 
-  /** いま追っているゴール（動いている・待っている）の数と、その番号 */
+  /** いま追っているゴール（動いている・待っている） */
   active(): { key: string; goalId: string | null; state: RunState | "idle" }[] {
     return [...this.tracked.entries()].filter(([, t]) => t.state === "working" || t.state === "waiting").map(([key, t]) => ({ key, goalId: t.goalId, state: t.state }));
+  }
+
+  /** この記録の末尾を読む必要があるか（初めて見る物は最近書かれた物だけ。追っている物は書き足されたときだけ）。 */
+  wantsTail(key: string, modifiedMs: number, now: number): boolean {
+    const t = this.tracked.get(key);
+    return t ? modifiedMs > t.modified : now - modifiedMs < RUN_RECENT_MS;
   }
 
   feed(readings: readonly RunLogReading[], now: number): TerminalEvent[] {
@@ -164,16 +175,18 @@ export class RunWatcher {
     for (const r of readings) {
       seen.add(r.key);
       let t = this.tracked.get(r.key);
-      const live = now - r.modifiedMs < RUN_LIVE_MS;
       if (!t) {
-        // 初めて見るフォルダ：いま動いているものだけ追い始める（昔の記録で社員を動かさない）
-        if (!live || r.tail === null) continue;
-        t = { slot: this.nextSlot++, state: "idle", toolKey: null, message: null, goalId: null, modified: 0 };
+        // 初めて見るフォルダ：末尾を読めた物だけ覚える（昔の記録は読まない＝社員を動かさない）
+        if (r.tail === null) continue;
+        t = { slot: -1, state: "idle", toolKey: null, message: null, goalId: null, modified: 0 };
         this.tracked.set(r.key, t);
       }
-      if (r.tail === null || r.modifiedMs === t.modified) {
-        // 書き足されていない。動いていたのに長く止まったままなら、終わった扱いにする（受け取り役が落ちた等）
-        if (t.state === "working" && !live) {
+      if (r.tail === null || r.modifiedMs <= t.modified) {
+        // 書き足されていない（遅れて届いた古い読み込みも、ここで捨てる）
+        const quiet = now - t.modified;
+        // 動いていたのに長く何も書かれない＝受け取り役が止まった等。時間のかかるコマンドの最中は書かれないので、長めに待つ
+        // 待ちのまま長く放置された物も、手を下ろす
+        if ((t.state === "working" && quiet > RUN_WORK_IDLE_MS) || (t.state === "waiting" && quiet > RUN_WAIT_MAX_MS)) {
           t.state = "done";
           events.push(this.ev(r.key, t, "stop", now));
         }
@@ -183,7 +196,9 @@ export class RunWatcher {
       const snap = parseRunLog(r.tail);
       if (snap.goalId) t.goalId = snap.goalId;
       const label = snap.message ?? t.message;
-      if (snap.state === "working") {
+      // 初めて見た記録が、だいぶ前から書かれていない「作業中」なら、もう動いていないと見る
+      const state: RunState = snap.state === "working" && now - r.modifiedMs > RUN_WORK_IDLE_MS ? "done" : snap.state;
+      if (state === "working") {
         if (t.state !== "working") {
           t.state = "working";
           t.toolKey = null;
@@ -195,7 +210,7 @@ export class RunWatcher {
         } else if (snap.message && snap.message !== t.message) {
           events.push({ ...this.ev(r.key, t, "start", now), instruction: snap.message });
         }
-      } else if (snap.state === "waiting") {
+      } else if (state === "waiting") {
         if (t.state !== "waiting") {
           t.state = "waiting";
           events.push({ ...this.ev(r.key, t, "waiting", now), instruction: label });
@@ -206,12 +221,17 @@ export class RunWatcher {
       }
       t.message = label;
     }
-    // フォルダが消えたゴールは追うのをやめる
-    for (const key of [...this.tracked.keys()]) if (!seen.has(key)) this.tracked.delete(key);
+    // フォルダや記録が消えたゴール：動いていた・待っていたなら、終わりを知らせてから追うのをやめる
+    for (const [key, t] of [...this.tracked.entries()]) {
+      if (seen.has(key)) continue;
+      if (t.state === "working" || t.state === "waiting") events.push(this.ev(key, t, "stop", now));
+      this.tracked.delete(key);
+    }
     return events;
   }
 
   private ev(key: string, t: Tracked, kind: TerminalEvent["kind"], at: number): TerminalEvent {
+    if (t.slot < 0) t.slot = this.nextSlot++;
     return { pane: RUN_PANE_BASE + t.slot, kind, source: "runner", key, at };
   }
 }

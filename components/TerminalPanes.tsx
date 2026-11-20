@@ -459,7 +459,7 @@ export function TerminalPanes({
       const pane = paneNumberOf(paneLabelsRef.current.get(key));
       if (pane !== null) {
         const hit = toolLinesRef.current.feed(pane, text, Date.now());
-        if (hit) publishTerminal({ pane, kind: "activity", tool: hit.tool, detail: hit.detail, at: Date.now() });
+        if (hit) publishTerminal({ pane, key, kind: "activity", tool: hit.tool, detail: hit.detail, at: Date.now() });
       }
     },
     [detectorFor],
@@ -888,6 +888,9 @@ export function TerminalPanes({
   const handleClosePane = useCallback(
     (pageId: string, key: string) => {
       // 閉じたペインの作業見分けを止める（閉じた後に「終わりました」と鳴らさない）
+      // AIオフィスには終わりを知らせる（閉じたペインの社員が、作業中・待ちのまま残らないように）
+      const closedNumber = paneNumberOf(paneLabelsRef.current.get(key));
+      if (closedNumber !== null) publishTerminal({ pane: closedNumber, key, kind: "stop", at: Date.now() });
       paneLabelsRef.current.delete(key);
       detectorsRef.current.delete(key);
       tailsRef.current.delete(key);
@@ -1623,7 +1626,7 @@ export function TerminalPanes({
                       onClaudeTitleSeen={() => titleAwareRef.current.add(pane.key)}
                       onClaudeWork={(ev) => {
                         const n = paneNumberOf(paneLabelsRef.current.get(pane.key));
-                        if (n !== null) publishTerminal({ pane: n, kind: "start", instruction: ev.instruction, at: Date.now() });
+                        if (n !== null) publishTerminal({ pane: n, key: pane.key, kind: "start", instruction: ev.instruction, at: Date.now() });
                       }}
                       onClaudeStop={(ev) => {
                         const label = paneLabelsRef.current.get(pane.key);
@@ -1631,7 +1634,7 @@ export function TerminalPanes({
                         const n = paneNumberOf(label);
                         if (n !== null) {
                           toolLinesRef.current.forget(n);
-                          publishTerminal({ pane: n, kind: ev.waiting ? "waiting" : "stop", instruction: ev.instruction, at: Date.now() });
+                          publishTerminal({ pane: n, key: pane.key, kind: ev.waiting ? "waiting" : "stop", instruction: ev.instruction, at: Date.now() });
                         }
                         onWorkDoneRef.current?.(label, ev.workedMs, {
                           waiting: ev.waiting,
