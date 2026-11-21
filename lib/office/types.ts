@@ -50,6 +50,8 @@ export interface Office {
   theme: string;
   /** 部屋の絵の出し方。fill＝窓いっぱい（端が少し切れる・既定）／whole＝絵を全部見せる（まわりに余白） */
   sceneFit?: "fill" | "whole";
+  /** true＝最後まで自動で進める（道具の許可・できあがりの確認・質問で社長を待たない）。既定は false */
+  autoMode?: boolean;
   departments: Department[];
   staff: Staff[];
   createdAt: number;
@@ -179,15 +181,19 @@ export interface OfficeRun {
   pending?: string[];
   /** 取りまとめ役への初回の指示を送ったか（社員名簿の案内を1回だけ添える） */
   briefed: boolean;
+  /** この仕事で、質問に「おすすめで進めて」と自動で返した回数（多すぎたら社長に聞く）。古い保存には無い */
+  autoAnswers?: number;
 }
 
 /** 画面や AI から届く出来事。engine.step に渡す。 */
 export type OfficeInput =
   | { t: "boss"; text: string; at: number }
   | { t: "inquiry"; text: string; at: number }
-  | { t: "approve"; ok: boolean; comment: string; at: number }
+  | { t: "approve"; ok: boolean; comment: string; at: number; /** 通知のボタンから届いたとき：どの確認への答えか（いまの確認と違えば何もしない） */ approvalId?: string }
   | { t: "permission"; askId: string; allow: boolean; at: number }
   | { t: "stop"; at: number }
+  /** 「最後まで自動で進める」に切り替えた：いま待っている許可・確認・質問を自動で進める */
+  | { t: "auto"; at: number }
   | { t: "agent"; staffId: string; ev: OfficeAgentEvent; at: number }
   | { t: "started"; staffId: string; sessionKey?: string; /** 前の会話の続きではない（前の会話の番号は捨てる） */ fresh?: boolean }
   /** 社員を消した・設定を変えたあとに、待ち合わせをそろえ直す */
@@ -208,10 +214,16 @@ export type OfficeAgentEvent =
   | { kind: "result"; subtype: string }
   | { kind: "error"; message: string };
 
+/** 通知に付けるボタン。tag＝何への答えか（`perm:<許可の id>`／`approval:<確認の id>`）。 */
+export interface AttentionAsk {
+  tag: string;
+  actions: { id: string; label: string }[];
+}
+
 /** engine.step が「外でやってほしいこと」として返すもの。 */
 export type OfficeEffect =
   | { t: "send"; staffId: string; text: string }
   | { t: "stop"; staffId: string }
   | { t: "permission"; staffId: string; requestId: string; allow: boolean }
-  | { t: "attention"; title: string; body: string }
+  | { t: "attention"; title: string; body: string; /** 通知に付けるボタン（押されたら tag と id が戻ってくる）。無ければ知らせるだけ */ ask?: AttentionAsk }
   | { t: "preview"; artifacts: Artifact[] };

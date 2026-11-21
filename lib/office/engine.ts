@@ -211,6 +211,12 @@ export interface StepResult {
 /** 失敗で終わった返事の印（AI の種類ごとに書き方が違う） */
 const FAILED_RESULT = /error|fail|cancel|interrupt/i;
 
+/** 自動で進める設定のとき、1つの仕事で質問に自動で返す回数の上限（同じ質問の繰り返しで回り続けないように。超えたら社長に聞く） */
+export const MAX_AUTO_ANSWERS = 8;
+
+const AUTO_OK = (title: string) => `【社長から】「${title}」は OK です（社長は「最後まで自動で進める」設定にしています。中身はあとで見ます）。\n続きを進めてください。`;
+const AUTO_ANSWER = "【社長から】いまは「最後まで自動で進める」設定で、質問にすぐ答えられません。あなたのおすすめの案で進めてください。あとで戻せるやり方を選び、決めたことと理由を報告に書いてください。外への公開・送信・支払い・消す操作だけは、進めずに報告に「社長の判断待ち」と書いてください。";
+
 /** 預かれる指示の数（これを超えたら受け付けない。黙って古い物を捨てない） */
 const MAX_PENDING = 30;
 
@@ -232,7 +238,7 @@ function beginFreshJob(run: OfficeRun): OfficeRun {
   for (const [id, s] of Object.entries(run.staff)) {
     staff[id] = { ...s, status: "idle", bubble: null, task: null, turns: 0, inputTokens: 0, outputTokens: 0 };
   }
-  return { ...run, staff, usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null } };
+  return { ...run, staff, autoAnswers: 0, usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null } };
 }
 
 const BOSS_PREFIX = "【社長から】\n";
@@ -344,6 +350,8 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
     case "approve": {
       const ap = run.approval;
       if (!ap) return { run, effects };
+      // 通知のボタンからの答え：もう別の確認に変わっていたら何もしない（古い通知で新しい確認を通さない）
+      if (input.approvalId !== undefined && input.approvalId !== ap.id) return { run, effects };
       run = { ...run, approval: null, cheerAt: input.ok ? input.at : run.cheerAt };
       const comment = input.comment.trim();
       run = pushLog(run, {
@@ -368,6 +376,31 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: input.allow });
       const stillAsked = run.permissions.some((p) => p.staffId === ask.staffId);
       if (!stillAsked) run = setStaff(run, ask.staffId, { status: "working", bubble: input.allow ? t("engine.continuing") : t("engine.alternative") });
+      return { run: settle(run, input.at), effects };
+    }
+
+    case "auto": {
+      // 切り替えたことを記録に残す（いつから自動で進めたかが、あとで分かるように）
+      run = pushLog(run, { kind: "system", staffId: null, text: t(office.autoMode ? "auto.turnedOn" : "auto.turnedOff"), at: input.at });
+      if (!office.autoMode) return { run, effects };
+      // いま待っている許可は全部通す
+      for (const ask of run.permissions) {
+        effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: true });
+        run = setStaff(run, ask.staffId, { status: "working", bubble: t("engine.continuing") });
+      }
+      if (run.permissions.length > 0) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAllowedAll", { n: run.permissions.length }), at: input.at });
+      run = { ...run, permissions: [] };
+      const ap = run.approval;
+      const openQ = [...run.log].reverse().find((m) => m.kind === "question" && !m.answered);
+      if (ap) {
+        run = { ...run, approval: null, cheerAt: input.at };
+        run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: ap.title }), at: input.at });
+        sendToLead(AUTO_OK(ap.title), input.at);
+      } else if (openQ && run.staff[lead.id]?.status === "waiting" && (run.autoAnswers ?? 0) < MAX_AUTO_ANSWERS) {
+        run = { ...run, autoAnswers: (run.autoAnswers ?? 0) + 1, log: run.log.map((m) => (m.id === openQ.id ? { ...m, answered: true } : m)) };
+        run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAnswered"), at: input.at });
+        sendToLead(AUTO_ANSWER, input.at);
+      }
       return { run: settle(run, input.at), effects };
     }
 
@@ -461,16 +494,28 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           // 止めたあと・終わったあとに遅れて届いた許可の求めは受けない（答える相手がもういない）
           if (rt.status !== "working" && rt.status !== "waiting") return { run, effects };
           const at = input.at;
+          if (office.autoMode) {
+            // 最後まで自動で進める設定：聞かずに通す（何を通したかは記録に残す）
+            effects.push({ t: "permission", staffId: who.id, requestId: ev.request_id, allow: true });
+            run = pushNotice(run, who.id, t("engine.autoAllowed", { name: who.name, text: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80) }), at);
+            return { run, effects };
+          }
+          const askId = uid("p", at);
           run = {
             ...run,
             permissions: [
               ...run.permissions,
-              { id: uid("p", at), staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: describeAsk(ev.tool_name, ev.input ?? {}, locale), at },
+              { id: askId, staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: describeAsk(ev.tool_name, ev.input ?? {}, locale), at },
             ],
           };
           run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.permission") });
           run = pushNotice(run, who.id, t("engine.permissionNotice", { name: who.name }), at);
-          effects.push({ t: "attention", title: t("engine.permissionNotice", { name: who.name }), body: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80) });
+          effects.push({
+            t: "attention",
+            title: t("engine.permissionNotice", { name: who.name }),
+            body: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80),
+            ask: { tag: `perm:${askId}`, actions: [{ id: "allow", label: t("perm.allow") }, { id: "deny", label: t("perm.deny") }] },
+          });
           return { run: settle(run, at), effects };
         }
         case "error": {
@@ -636,14 +681,37 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   }
 
   if (d.approval) {
-    run = { ...run, approval: { id: uid("a", at), staffId: who.id, title: d.approval.title, body: d.approval.body, file: d.approval.file, at } };
+    if (office.autoMode) {
+      // 最後まで自動で進める設定：確認を待たずに OK として続ける（記録に残す。中身は納品の棚から見られる）
+      run = { ...run, cheerAt: at };
+      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: d.approval.title }), at });
+      run = setStaff(run, who.id, { status: "working", bubble: t("engine.thinking"), draft: "", tools: {} });
+      effects.push({ t: "send", staffId: who.id, text: AUTO_OK(d.approval.title) });
+      return run;
+    }
+    const approvalId = uid("a", at);
+    run = { ...run, approval: { id: approvalId, staffId: who.id, title: d.approval.title, body: d.approval.body, file: d.approval.file, at } };
     run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.review") });
     run = pushNotice(run, who.id, t("engine.reviewNotice", { title: d.approval.title }), at);
-    effects.push({ t: "attention", title: t("engine.reviewReady"), body: clip(d.approval.title, 80) });
+    effects.push({
+      t: "attention",
+      title: t("engine.reviewReady"),
+      body: clip(d.approval.title, 80),
+      ask: { tag: `approval:${approvalId}`, actions: [{ id: "ok", label: t("approval.ok") }, { id: "open", label: t("notify.open") }] },
+    });
     return run;
   }
 
   if (d.question) {
+    if (office.autoMode && (run.autoAnswers ?? 0) < MAX_AUTO_ANSWERS) {
+      // 最後まで自動で進める設定：質問は記録に残し、おすすめの案で進めてもらう
+      run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: true });
+      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAnswered"), at });
+      run = { ...run, autoAnswers: (run.autoAnswers ?? 0) + 1 };
+      run = setStaff(run, who.id, { status: "working", bubble: t("engine.thinking"), draft: "", tools: {} });
+      effects.push({ t: "send", staffId: who.id, text: AUTO_ANSWER });
+      return run;
+    }
     run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: false });
     run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.answer") });
     run = pushNotice(run, who.id, t("engine.question", { name: who.name }), at);

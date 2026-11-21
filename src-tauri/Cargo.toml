@@ -55,6 +55,11 @@ agent-client-protocol = "0.11"
 portable-pty = "0.8"
 tauri-plugin-clipboard-manager = "2"
 
+# 通知にボタン（許可する／許可しない／OKを出す）を付ける（src/attention.rs）。
+# tauri-plugin-notification が中で使っている物と同じ版を、Windows のときだけ直接呼ぶ（プラグインはボタンを出せない）。
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

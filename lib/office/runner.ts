@@ -6,7 +6,7 @@
  * - ブラウザだけで開いたとき（Tauri でないとき）は、見本の実況（demo.ts）で動かす
  */
 import type { Locale } from "../i18n";
-import { reportWorkDone } from "../attention";
+import { listenAttentionActions, reportWorkDone, type AttentionAction } from "../attention";
 import { openPreviewSession } from "../preview-window";
 import { pickPrimary } from "../turn-artifacts";
 import {
@@ -52,6 +52,22 @@ export function planSend(args: { started: boolean; running: { key: string; rules
   return { restart, resume, prefixRules };
 }
 
+/**
+ * 通知のボタンの知らせを、進行役への出来事に直す。
+ * 知らない札・知らないボタン・本文を押しただけ（窓が前に出るだけ）は null。
+ * どの許可・どの確認への答えかは id で運ぶので、もう無い物への答えは進行役が捨てる。
+ */
+export function attentionInput(a: AttentionAction, at: number): OfficeInput | null {
+  const i = a.tag.indexOf(":");
+  if (i <= 0) return null;
+  const kind = a.tag.slice(0, i);
+  const id = a.tag.slice(i + 1);
+  if (!id) return null;
+  if (kind === "perm" && (a.action === "allow" || a.action === "deny")) return { t: "permission", askId: id, allow: a.action === "allow", at };
+  if (kind === "approval" && a.action === "ok") return { t: "approve", ok: true, comment: "", at, approvalId: id };
+  return null;
+}
+
 export function officeSid(officeId: string, staffId: string): string {
   return `${SID_PREFIX}${officeId}.${staffId}`;
 }
@@ -75,6 +91,7 @@ export interface RunnerHost {
 
 export class OfficeRunner {
   private unlisten: (() => void) | null = null;
+  private unlistenActions: (() => void) | null = null;
   private demo: DemoDriver | null = null;
   /** 社員ごとの「起動→送信」を順番に流す（起動が終わる前に送らない） */
   private chains = new Map<string, Promise<void>>();
@@ -91,6 +108,10 @@ export class OfficeRunner {
       const un = await listenAgentEvents((ev) => this.onAgentEvent(ev));
       if (this.disposed) un();
       else this.unlisten = un;
+      // 通知のボタン（許可する／許可しない／OKを出す）が押されたら、画面で押したのと同じ扱いにする
+      const unA = await listenAttentionActions((a) => this.onAttentionAction(a)).catch(() => () => {});
+      if (this.disposed) unA();
+      else this.unlistenActions = unA;
     } else {
       this.demo = createDemoDriver((staffId, ev) => {
         this.dispatch({ t: "agent", staffId, ev, at: Date.now() });
@@ -102,6 +123,8 @@ export class OfficeRunner {
     this.disposed = true;
     this.unlisten?.();
     this.unlisten = null;
+    this.unlistenActions?.();
+    this.unlistenActions = null;
     this.demo?.dispose();
     this.demo = null;
   }
@@ -115,6 +138,11 @@ export class OfficeRunner {
     const { session_id: _drop, ...rest } = ev as AgentEvent & { session_id?: string };
     void _drop;
     this.dispatch({ t: "agent", staffId: parsed.staffId, ev: rest as OfficeAgentEvent, at: Date.now() });
+  }
+
+  private onAttentionAction(a: AttentionAction): void {
+    const input = attentionInput(a, Date.now());
+    if (input) this.dispatch(input);
   }
 
   dispatch(input: OfficeInput): void {
@@ -151,7 +179,7 @@ export class OfficeRunner {
         return;
       case "attention": {
         const s = this.host.getSettings();
-        void reportWorkDone({ title: e.title, body: e.body, notify: s.notifyOnDone !== false }).catch(() => {});
+        void reportWorkDone({ title: e.title, body: e.body, notify: s.notifyOnDone !== false, ask: e.ask }).catch(() => {});
         return;
       }
       case "preview": {

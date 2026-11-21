@@ -446,6 +446,11 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
               onApprove={(ok, comment) => dispatch({ t: "approve", ok, comment, at: Date.now() })}
               onPermission={(askId, allow) => dispatch({ t: "permission", askId, allow, at: Date.now() })}
               onStop={() => dispatch({ t: "stop", at: Date.now() })}
+              onAutoMode={(on) => {
+                updateOffice({ ...office, autoMode: on, updatedAt: Date.now() });
+                // 入れたときは、いま待っている許可・確認・質問もその場で進める
+                dispatch({ t: "auto", at: Date.now() });
+              }}
               onOpenFile={openFile}
               onPickWorkspace={pickFolder}
             />

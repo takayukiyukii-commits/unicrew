@@ -185,10 +185,13 @@ export function BossDesk({
   onStop,
   onOpenFile,
   onPickWorkspace,
+  onAutoMode,
 }: {
   office: Office;
   run: OfficeRun;
   theme: OfficeTheme;
+  /** 「最後まで自動で進める」の切り替え */
+  onAutoMode: (on: boolean) => void;
   onSend: (text: string) => void;
   onApprove: (ok: boolean, comment: string) => void;
   onPermission: (askId: string, allow: boolean) => void;
@@ -243,6 +246,20 @@ export function BossDesk({
         <h2 className="flex-1 text-[14px] font-extrabold">{t("boss.title")}</h2>
         {waiting > 0 ? <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[12px] font-bold text-amber-900">{waiting}</span> : null}
       </header>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!!office.autoMode}
+        title={t(office.autoMode ? "auto.hintOn" : "auto.hintOff")}
+        onClick={() => onAutoMode(!office.autoMode)}
+        className={`office-auto-switch flex items-center gap-2 border-b px-4 py-2 text-left text-[12.5px] font-bold ${theme.dark ? "border-white/10" : "border-slate-200"} ${office.autoMode ? (theme.dark ? "bg-emerald-400/15" : "bg-emerald-50") : ""}`}
+      >
+        <span aria-hidden="true" className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${office.autoMode ? "bg-emerald-500" : "bg-slate-400"}`}>
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${office.autoMode ? "left-[18px]" : "left-0.5"}`} />
+        </span>
+        <span className="flex-1">{t("auto.label")}</span>
+        <span className={office.autoMode ? "text-emerald-600" : sub(theme.dark)}>{t(office.autoMode ? "auto.on" : "auto.off")}</span>
+      </button>
 
       <div ref={logRef} className="unipilot-scroll min-h-[120px] flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {!office.workspace ? (

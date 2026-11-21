@@ -227,6 +227,99 @@ pub fn notify_work_done(app: AppHandle, title: String, body: String) -> Result<(
     notify(&app, &title, &body)
 }
 
+/// 通知に付けるボタン1つ（id＝押されたときに画面へ返す名前／label＝ボタンの文）。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AskAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// 通知のボタンが押されたときに画面へ送る中身（イベント名 `attention:action`）。
+/// action はボタンの id。通知の本文を押したときは空。
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct ActionPayload {
+    pub tag: String,
+    pub action: String,
+}
+
+/// 通知に出せるボタンの数（Windows のトーストは5つまで。多すぎる頼みは先頭だけ使う）。
+pub const MAX_ASK_ACTIONS: usize = 3;
+
+/// 押されたボタンから、画面へ送る中身と「窓を前に出すか」を決める。
+/// 本文を押した（ボタンでない）・「開いて確かめる」は窓を前に出す。許可・OK などは窓を出さずに答えだけ送る。
+pub fn action_outcome(tag: &str, action: Option<String>) -> (ActionPayload, bool) {
+    let action = action.unwrap_or_default();
+    let show = action.is_empty() || action == "open";
+    (ActionPayload { tag: tag.to_string(), action }, show)
+}
+
+#[cfg(target_os = "windows")]
+fn toast_app_id<R: Runtime>(app: &AppHandle<R>) -> String {
+    // 開発版（target\debug・target\release から動かしたとき）は、登録済みの名前を借りないと通知が出ない
+    // （tauri-plugin-notification と同じ見分け方）
+    let dev = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.display().to_string()))
+        .map(|d| d.ends_with("\\target\\debug") || d.ends_with("\\target\\release"))
+        .unwrap_or(false);
+    if dev {
+        tauri_winrt_notification::Toast::POWERSHELL_APP_ID.to_string()
+    } else {
+        app.config().identifier.clone()
+    }
+}
+
+/// ボタン付きの通知の中身を組み立てる（出すのは呼び出し側）。
+#[cfg(target_os = "windows")]
+fn build_ask_toast(
+    app_id: &str,
+    title: &str,
+    body: &str,
+    actions: &[AskAction],
+) -> tauri_winrt_notification::Toast {
+    let mut toast = tauri_winrt_notification::Toast::new(app_id)
+        .title(title)
+        .text1(body);
+    for a in actions.iter().take(MAX_ASK_ACTIONS) {
+        toast = toast.add_button(&a.label, &a.id);
+    }
+    toast
+}
+
+/// ボタン付きの通知を出す。押されたら `attention:action` を画面へ送る。
+/// 🚨 ボタンが出るのは Windows だけ。macOS・Linux はふつうの通知になる（押すと窓が前に出るだけ）。
+#[tauri::command]
+pub fn notify_with_actions(
+    app: AppHandle,
+    title: String,
+    body: String,
+    tag: String,
+    actions: Vec<AskAction>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::Emitter;
+        let toast = build_ask_toast(&toast_app_id(&app), &title, &body, &actions);
+        let handle = app.clone();
+        toast
+            .on_activated(move |action| {
+                let (payload, show) = action_outcome(&tag, action);
+                if show {
+                    show_main(&handle);
+                }
+                let _ = handle.emit("attention:action", payload);
+                Ok(())
+            })
+            .show()
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (&tag, &actions);
+        notify(&app, &title, &body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +367,52 @@ mod tests {
         std::fs::write(format!("{dir}/dot.rgba"), dot_icon()).unwrap();
         let src = vec![0x40u8; 64 * 64 * 4];
         std::fs::write(format!("{dir}/badge64.rgba"), with_badge(&src, 64, 64)).unwrap();
+    }
+
+    #[test]
+    fn button_sends_answer_without_showing_window() {
+        let (p, show) = action_outcome("perm:p-1", Some("allow".into()));
+        assert_eq!(p, ActionPayload { tag: "perm:p-1".into(), action: "allow".into() });
+        assert!(!show, "許可のボタンでは窓を前に出さない");
+    }
+
+    #[test]
+    fn body_click_and_open_button_show_window() {
+        let (p, show) = action_outcome("approval:a-1", None);
+        assert_eq!(p.action, "");
+        assert!(show, "本文を押したら窓を前に出す");
+        let (_, show) = action_outcome("approval:a-1", Some("open".into()));
+        assert!(show, "「開いて確かめる」は窓を前に出す");
+    }
+
+    /// 本物の通知を1つ出して、Windows が受け付けるかを確かめる（通常のテストでは走らない）。
+    /// `UNICREW_TOAST_SMOKE` に書き出し先のファイルを入れて `--ignored` で回す。
+    /// 20秒のあいだにボタンを押すと、押されたボタンの id がそのファイルに書かれる。
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore]
+    fn toast_smoke() {
+        let out = std::env::var("UNICREW_TOAST_SMOKE").expect("UNICREW_TOAST_SMOKE");
+        let actions = vec![
+            AskAction { id: "allow".into(), label: "許可する".into() },
+            AskAction { id: "deny".into(), label: "許可しない".into() },
+        ];
+        let out2 = out.clone();
+        build_ask_toast(
+            tauri_winrt_notification::Toast::POWERSHELL_APP_ID,
+            "UNICREW 通知の試験",
+            "ボタンが2つ出ていれば OK です（押さなくても構いません）",
+            &actions,
+        )
+        .on_activated(move |action| {
+            let (p, show) = action_outcome("perm:smoke", action);
+            let _ = std::fs::write(&out2, format!("clicked action={:?} show={}", p.action, show));
+            Ok(())
+        })
+        .show()
+        .expect("通知を出せなかった");
+        std::fs::write(&out, "shown").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(20));
     }
 
     #[test]

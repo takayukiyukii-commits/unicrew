@@ -22,12 +22,35 @@ function isLooking(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
 }
 
+/** 通知に付けるボタン。押されると `attention:action` で { tag, action } が戻ってくる（action はボタンの id。通知の本文を押したときは空）。 */
+export interface AttentionAsk {
+  tag: string;
+  actions: { id: string; label: string }[];
+}
+
+export interface AttentionAction {
+  tag: string;
+  action: string;
+}
+
+/** 通知のボタンが押された知らせを受け取る（Tauri のときだけ。ブラウザでは何もしない）。 */
+export async function listenAttentionActions(onAction: (a: AttentionAction) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const ev = await import("@tauri-apps/api/event");
+  return ev.listen<AttentionAction>("attention:action", (e) => {
+    const p = e.payload;
+    if (p && typeof p.tag === "string" && typeof p.action === "string") onAction(p);
+  });
+}
+
 export async function reportWorkDone(
-  opts: { title: string; body: string; notify: boolean },
+  opts: { title: string; body: string; notify: boolean; ask?: AttentionAsk },
 ): Promise<void> {
   try {
     if (opts.notify) {
-      await invoke("notify_work_done", { title: opts.title, body: opts.body });
+      // ボタン付きの通知（いまは Windows だけ。ほかの OS は Rust 側でふつうの通知になる）
+      if (opts.ask) await invoke("notify_with_actions", { title: opts.title, body: opts.body, tag: opts.ask.tag, actions: opts.ask.actions });
+      else await invoke("notify_work_done", { title: opts.title, body: opts.body });
     }
     if (!isLooking()) {
       unread += 1;

@@ -6328,6 +6328,7 @@ pub fn run() {
             attention::set_tray_resident,
             attention::set_unread_badge,
             attention::notify_work_done,
+            attention::notify_with_actions,
             voice::start_voice_typing,
         ])
         .build(tauri::generate_context!())
