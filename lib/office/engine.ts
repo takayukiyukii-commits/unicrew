@@ -7,6 +7,7 @@
 import type { Locale } from "../i18n";
 import { officeT, type OfficeKey } from "./i18n";
 import { describeOfficeTool } from "./tool-text";
+import { askDetail } from "./ask-text";
 import { collectArtifacts } from "../turn-artifacts";
 import type { ToolUseBlock } from "../types";
 import {
@@ -30,7 +31,9 @@ const MAX_LOG = 200;
 const MAX_NOTICES = 60;
 const MAX_DELIVERIES = 100;
 /** 自動で通した許可の記録の上限（これより古いものは消える） */
-export const MAX_AUTO_LOG = 300;
+export const MAX_AUTO_LOG = 200;
+/** 自動で通した許可の記録1件に残す中身の上限（字） */
+export const AUTO_LOG_TEXT_MAX = 2000;
 /** 通知の本文に出す長さ（これより長い説明は切って出す） */
 const NOTIFY_BODY = 80;
 /** 報告の束に添える連絡（社員の報告ではないもの）の印 */
@@ -194,8 +197,10 @@ function resultText(content: unknown): string {
 /** 道具の許可を求められたとき、何をしようとしているかを人の言葉にする。 */
 function describeAsk(toolName: string, input: Record<string, unknown>, locale: Locale): string {
   const doing = describeOfficeTool(toolName, input, locale);
-  // コマンドは省略しない（後ろに危ない操作が続いていても、許可の札で全部読めるように）。とても長いものだけ端を切る
-  const cmd = typeof input.command === "string" ? `\n${input.command.trim().slice(0, 4000)}` : "";
+  // 道具に渡す中身は、コマンドに限らず全部出す（書き込む中身・送り先を隠したまま許可させない）。
+  // 大量の空行や見えない文字は目に見える印に置き換え、長すぎて切ったときは切ったと書く（lib/office/ask-text.ts）
+  const detail = askDetail(input, locale).text;
+  const cmd = detail ? `\n${detail}` : "";
   const action = locale === "en" ? officeT("engine.askTool", locale, { action: doing })
     : doing.replace(/(しています|ています)$/, (m) => (m === "しています" ? "しようとしています" : "ようとしています"));
   return `${action}${cmd}`;
@@ -207,8 +212,15 @@ function fitsNotification(text: string): boolean {
 }
 
 /** 自動で通した許可を、省略せずに記録に残す。 */
-function pushAutoLog(run: OfficeRun, staffId: string, text: string, at: number): OfficeRun {
-  return { ...run, autoLog: [{ id: uid("g", at), staffId, text, at }, ...(run.autoLog ?? [])].slice(0, MAX_AUTO_LOG) };
+function pushAutoLog(run: OfficeRun, staffId: string, text: string, at: number, locale: Locale): OfficeRun {
+  const kept = text.length > AUTO_LOG_TEXT_MAX ? `${text.slice(0, AUTO_LOG_TEXT_MAX)}\n${officeT("engine.autoLogCut", locale, { n: text.length - AUTO_LOG_TEXT_MAX })}` : text;
+  return { ...run, autoLog: [{ id: uid("g", at), staffId, text: kept, at }, ...(run.autoLog ?? [])].slice(0, MAX_AUTO_LOG) };
+}
+
+/** 自動で進めた回数が上限に届いたことを、1つの仕事で1回だけ記録に残す（届いた回に、数を上限の1つ上へ進めて印にする）。 */
+function noteAutoLimit(run: OfficeRun, key: "autoAnswers" | "autoApprovals", max: number, at: number, locale: Locale): OfficeRun {
+  if ((run[key] ?? 0) !== max) return run;
+  return pushLog({ ...run, [key]: max + 1 }, { kind: "system", staffId: null, text: officeT("engine.autoLimit", locale), at });
 }
 
 /** 確認を待たずに OK にしたとき、記録に残す中身（題だけでなく、書かれていた内容と見せるはずだったファイルも）。 */
@@ -412,7 +424,7 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       for (const ask of run.permissions) {
         effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: true });
         run = setStaff(run, ask.staffId, { status: "working", bubble: t("engine.continuing") });
-        run = pushAutoLog(run, ask.staffId, ask.text, input.at);
+        run = pushAutoLog(run, ask.staffId, ask.text, input.at, locale);
       }
       if (run.permissions.length > 0) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAllowedAll", { n: run.permissions.length }), at: input.at });
       run = { ...run, permissions: [] };
@@ -524,7 +536,7 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
             // 最後まで自動で進める設定：聞かずに通す（何を通したかは記録に残す）
             const what = describeAsk(ev.tool_name, ev.input ?? {}, locale);
             effects.push({ t: "permission", staffId: who.id, requestId: ev.request_id, allow: true });
-            run = pushAutoLog(run, who.id, what, at);
+            run = pushAutoLog(run, who.id, what, at, locale);
             run = pushNotice(run, who.id, t("engine.autoAllowed", { name: who.name, text: clip(what, NOTIFY_BODY) }), at);
             return { run, effects };
           }
@@ -711,7 +723,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   }
 
   if (d.approval) {
-    if (office.autoMode && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoLimit"), at });
+    if (office.autoMode && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) run = noteAutoLimit(run, "autoApprovals", MAX_AUTO_APPROVALS, at, locale);
     else if (office.autoMode) {
       // 最後まで自動で進める設定：確認を待たずに OK として続ける（題・書かれていた内容・見せるはずだったファイルを記録に残す）
       run = { ...run, cheerAt: at, autoApprovals: (run.autoApprovals ?? 0) + 1 };
@@ -743,7 +755,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
       effects.push({ t: "send", staffId: who.id, text: AUTO_ANSWER });
       return run;
     }
-    if (office.autoMode) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoLimit"), at });
+    if (office.autoMode) run = noteAutoLimit(run, "autoAnswers", MAX_AUTO_ANSWERS, at, locale);
     run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: false });
     run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.answer") });
     run = pushNotice(run, who.id, t("engine.question", { name: who.name }), at);
