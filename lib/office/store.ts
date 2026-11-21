@@ -6,7 +6,8 @@
  * 🚨 読めなかった保存は、消さずに `<キー>.broken` に残す（空の内容で上書きして、直す手がかりを失わないため）。
  */
 import type { Locale } from "../i18n";
-import { AUTO_LOG_TEXT_MAX, emptyRun, emptyStaffRuntime, MAX_AUTO_LOG, reconcileRun } from "./engine";
+import { ASK_DETAIL_MAX } from "./ask-text";
+import { emptyRun, emptyStaffRuntime, MAX_AUTO_LOG, reconcileRun } from "./engine";
 import type { Office, OfficeRun } from "./types";
 
 const OFFICES_KEY = "unicrew.offices.v1";
@@ -126,6 +127,21 @@ function count(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
 }
 
+/** 自動で通した操作の記録を読み戻す（形の合う物だけ・id が重なったら先の物だけ・上限の件数まで）。 */
+function autoLogOf(v: unknown): NonNullable<OfficeRun["autoLog"]> {
+  const out: NonNullable<OfficeRun["autoLog"]> = [];
+  if (!Array.isArray(v)) return out;
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (out.length >= MAX_AUTO_LOG) break;
+    if (!isRecord(x) || typeof x.id !== "string" || x.id === "" || seen.has(x.id)) continue;
+    if (typeof x.text !== "string" || typeof x.staffId !== "string" || typeof x.at !== "number" || !Number.isFinite(x.at)) continue;
+    seen.add(x.id);
+    out.push({ id: x.id, staffId: x.staffId, at: x.at, text: x.text.slice(0, ASK_DETAIL_MAX + 400) });
+  }
+  return out;
+}
+
 /** 保存されていた「いま」を、欠けている所を既定の値で埋めて使える形にする。直せない形なら null。 */
 export function repairRun(saved: unknown, office: Office): OfficeRun | null {
   if (!isRecord(saved) || saved.officeId !== office.id || !isRecord(saved.staff)) return null;
@@ -164,11 +180,7 @@ export function repairRun(saved: unknown, office: Office): OfficeRun | null {
     // 自動で進めた回数と、自動で通した許可の記録（開き直しても上限と記録を引き継ぐ）
     autoAnswers: count(s.autoAnswers),
     autoApprovals: count(s.autoApprovals),
-    autoLog: arr<NonNullable<OfficeRun["autoLog"]>[number]>(s.autoLog, [])
-      .filter((x) => typeof x.id === "string" && x.id !== "" && typeof x.text === "string" && typeof x.staffId === "string" && typeof x.at === "number" && Number.isFinite(x.at))
-      .filter((x, i, all) => all.findIndex((y) => y.id === x.id) === i)
-      .slice(0, MAX_AUTO_LOG)
-      .map((x) => ({ id: x.id, staffId: x.staffId, at: x.at, text: x.text.slice(0, AUTO_LOG_TEXT_MAX + 200) })),
+    autoLog: autoLogOf(s.autoLog),
   };
 }
 

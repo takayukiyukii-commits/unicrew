@@ -22,8 +22,9 @@ export function visibleText(s: string, locale: Locale = "ja"): string {
   return s
     .replace(/\r\n?/g, "\n")
     .replace(/\t/g, "→")
-    // 制御文字・幅の無い文字・文字の向きを変える文字（表示をだませる）
-    .replace(/[\u0000-\u0008\u000b-\u001f\u007f\u0085\u00a0\u00ad\u061c\u180e\u2000-\u200f\u2028-\u202f\u205f-\u206f\ufeff]/g, "\ufffd")
+    // 制御文字・幅の無い文字・文字の向きを変える文字・ふつうの空白と改行以外の空白・空白にしか見えない文字（表示をだませる）。
+    // 種類で指定する（個別の番号を並べると、並べ忘れた空白で後ろを隠せる）
+    .replace(/(?![ \n\u3000])[\p{Cc}\p{Cf}\p{Zs}\p{Zl}\p{Zp}\u2800\u3164\u115f\u1160\uffa0]/gu, "\ufffd")
     .replace(/[ \u3000]{9,}/g, (run) => m.spaces(run.length))
     .replace(/\n(?:[ \u3000\ufffd→]*\n){2,}/g, (run) => `\n${m.blank(run.split("\n").length - 2)}\n`);
 }
@@ -53,6 +54,8 @@ export function askDetail(input: Record<string, unknown>, locale: Locale = "ja",
   }
   const full = visibleText(lines.join("\n"), locale).trim();
   if (full.length <= max) return { text: full, cut: 0 };
-  const cut = full.length - max;
-  return { text: `${full.slice(0, max)}\n${m.cut(cut)}`, cut };
+  // 文字の途中（2つで1文字になる組の前半）では切らない
+  const end = /[\ud800-\udbff]/.test(full[max - 1] ?? "") ? max - 1 : max;
+  const cut = full.length - end;
+  return { text: `${full.slice(0, end)}\n${m.cut(cut)}`, cut };
 }

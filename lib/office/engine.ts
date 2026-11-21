@@ -194,30 +194,31 @@ function resultText(content: unknown): string {
   return "";
 }
 
-/** 道具の許可を求められたとき、何をしようとしているかを人の言葉にする。 */
-function describeAsk(toolName: string, input: Record<string, unknown>, locale: Locale): string {
+/**
+ * 道具の許可を求められたとき、何をしようとしているかを人の言葉にする。
+ * text＝1行目に何をするか、2行目から道具に渡す中身（max 字まで）。cut＝長すぎて出せなかった字数（0 なら全部出ている）。
+ */
+function describeAsk(toolName: string, input: Record<string, unknown>, locale: Locale, max?: number): { text: string; cut: number } {
   const doing = describeOfficeTool(toolName, input, locale);
   // 道具に渡す中身は、コマンドに限らず全部出す（書き込む中身・送り先を隠したまま許可させない）。
   // 大量の空行や見えない文字は目に見える印に置き換え、長すぎて切ったときは切ったと書く（lib/office/ask-text.ts）
-  const detail = askDetail(input, locale).text;
-  const cmd = detail ? `\n${detail}` : "";
+  const detail = askDetail(input, locale, max);
   const action = locale === "en" ? officeT("engine.askTool", locale, { action: doing })
     : doing.replace(/(しています|ています)$/, (m) => (m === "しています" ? "しようとしています" : "ようとしています"));
-  return `${action}${cmd}`;
+  return { text: detail.text ? `${action}\n${detail.text}` : action, cut: detail.cut };
 }
 
-/** 通知の本文に入りきるか（入りきらない説明には、通知から直接「許可する」を出さない）。 */
-function fitsNotification(text: string): boolean {
-  return text.replace(/\s+/g, " ").trim().length <= NOTIFY_BODY;
+/** 通知の本文に全部入りきるか（切られた中身がある・入りきらない説明には、通知から直接「許可する」を出さない）。 */
+function fitsNotification(ask: { text: string; cut: number }): boolean {
+  return ask.cut === 0 && clip(ask.text, NOTIFY_BODY) === ask.text.replace(/\s+/g, " ").trim();
 }
 
-/** 自動で通した許可を、省略せずに記録に残す。 */
-function pushAutoLog(run: OfficeRun, staffId: string, text: string, at: number, locale: Locale): OfficeRun {
-  const kept = text.length > AUTO_LOG_TEXT_MAX ? `${text.slice(0, AUTO_LOG_TEXT_MAX)}\n${officeT("engine.autoLogCut", locale, { n: text.length - AUTO_LOG_TEXT_MAX })}` : text;
-  return { ...run, autoLog: [{ id: uid("g", at), staffId, text: kept, at }, ...(run.autoLog ?? [])].slice(0, MAX_AUTO_LOG) };
+/** 自動で通した許可を記録に残す（text は呼び出し側で長さを決めた物。ここでは切らない＝切った字数を数え間違えない）。 */
+function pushAutoLog(run: OfficeRun, staffId: string, text: string, at: number): OfficeRun {
+  return { ...run, autoLog: [{ id: uid("g", at), staffId, text, at }, ...(run.autoLog ?? [])].slice(0, MAX_AUTO_LOG) };
 }
 
-/** 自動で進めた回数が上限に届いたことを、1つの仕事で1回だけ記録に残す（届いた回に、数を上限の1つ上へ進めて印にする）。 */
+/** 自動で進めた回数が上限に届いたことを、質問・確認それぞれ1つの仕事で1回だけ記録に残す（届いた回に、数を上限の1つ上へ進めて印にする）。 */
 function noteAutoLimit(run: OfficeRun, key: "autoAnswers" | "autoApprovals", max: number, at: number, locale: Locale): OfficeRun {
   if ((run[key] ?? 0) !== max) return run;
   return pushLog({ ...run, [key]: max + 1 }, { kind: "system", staffId: null, text: officeT("engine.autoLimit", locale), at });
@@ -424,13 +425,16 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       for (const ask of run.permissions) {
         effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: true });
         run = setStaff(run, ask.staffId, { status: "working", bubble: t("engine.continuing") });
-        run = pushAutoLog(run, ask.staffId, ask.text, input.at, locale);
+        // 札に出していた文（4000字まで・切った字数つき）をそのまま残す
+        run = pushAutoLog(run, ask.staffId, ask.text, input.at);
       }
       if (run.permissions.length > 0) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAllowedAll", { n: run.permissions.length }), at: input.at });
       run = { ...run, permissions: [] };
       const ap = run.approval;
       const openQ = [...run.log].reverse().find((m) => m.kind === "question" && !m.answered);
-      if (ap) {
+      if (ap && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) {
+        // 上限に届いた仕事の確認は、切り替え直しでは通さない（社長が「OKを出す」を押す）
+      } else if (ap) {
         run = { ...run, approval: null, cheerAt: input.at, autoApprovals: (run.autoApprovals ?? 0) + 1 };
         run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: ap.title, detail: approvalDetail(ap.body, ap.file, locale) }), at: input.at });
         sendToLead(AUTO_OK(ap.title), input.at);
@@ -534,29 +538,29 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           const at = input.at;
           if (office.autoMode) {
             // 最後まで自動で進める設定：聞かずに通す（何を通したかは記録に残す）
-            const what = describeAsk(ev.tool_name, ev.input ?? {}, locale);
+            const what = describeAsk(ev.tool_name, ev.input ?? {}, locale, AUTO_LOG_TEXT_MAX).text;
             effects.push({ t: "permission", staffId: who.id, requestId: ev.request_id, allow: true });
-            run = pushAutoLog(run, who.id, what, at, locale);
+            run = pushAutoLog(run, who.id, what, at);
             run = pushNotice(run, who.id, t("engine.autoAllowed", { name: who.name, text: clip(what, NOTIFY_BODY) }), at);
             return { run, effects };
           }
           const askId = uid("p", at);
+          const asked = describeAsk(ev.tool_name, ev.input ?? {}, locale);
           run = {
             ...run,
             permissions: [
               ...run.permissions,
-              { id: askId, staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: describeAsk(ev.tool_name, ev.input ?? {}, locale), at },
+              { id: askId, staffId: who.id, requestId: ev.request_id, toolName: ev.tool_name, text: asked.text, at },
             ],
           };
           run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.permission") });
           run = pushNotice(run, who.id, t("engine.permissionNotice", { name: who.name }), at);
-          const askText = describeAsk(ev.tool_name, ev.input ?? {}, locale);
           effects.push({
             t: "attention",
             title: t("engine.permissionNotice", { name: who.name }),
-            body: clip(askText, NOTIFY_BODY),
+            body: clip(asked.text, NOTIFY_BODY),
             // 通知に入りきらない長い操作は、通知から直接は許可させない（見えていない後ろの部分まで通してしまうため）。開いて全部読んでもらう
-            ask: { tag: `perm:${askId}`, actions: fitsNotification(askText) ? [{ id: "allow", label: t("perm.allow") }, { id: "deny", label: t("perm.deny") }] : [{ id: "open", label: t("notify.openFull") }] },
+            ask: { tag: `perm:${askId}`, actions: fitsNotification(asked) ? [{ id: "allow", label: t("perm.allow") }, { id: "deny", label: t("perm.deny") }] : [{ id: "open", label: t("notify.openFull") }] },
           });
           return { run: settle(run, at), effects };
         }

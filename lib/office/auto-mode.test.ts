@@ -405,6 +405,67 @@ describe("自分の直しの監査で見つかった点（2026-11-22・2回目�
     const many = Array.from({ length: 10000 }, (_, i) => ({ id: `g-${i}`, staffId: "x", text: "t", at: i }));
     const base = JSON.parse(JSON.stringify(emptyRun(o)));
     expect(repairRun({ ...base, autoLog: many }, o)!.autoLog).toHaveLength(MAX_AUTO_LOG);
+    // 件数が多くても固まらない（重なりは1回の走査で落とす）
+    const huge = Array.from({ length: 200000 }, (_, i) => ({ id: `g-${i % 150}`, staffId: "x", text: "t", at: i }));
+    const t0 = Date.now();
+    expect(repairRun({ ...base, autoLog: huge }, o)!.autoLog).toHaveLength(150);
+    expect(Date.now() - t0).toBeLessThan(2000);
     expect(repairRun({ ...base, autoLog: [{ staffId: "x", text: "t", at: 1 }, { id: "a", staffId: "x", text: "t", at: 1 }, { id: "a", staffId: "x", text: "u", at: 2 }, { id: "b", staffId: "x", text: "t", at: Infinity }] }, o)!.autoLog).toEqual([{ id: "a", staffId: "x", text: "t", at: 1 }]);
+  });
+});
+
+describe("自分の直しの監査で見つかった点（2026-11-22・3回目）", () => {
+  const perm = (staffId: string, input: Record<string, unknown>, at: number): OfficeInput => ({
+    t: "agent", staffId, ev: { kind: "permission_request", request_id: `req-${at}`, tool_name: "mcp__mail__send", input } as OfficeAgentEvent, at,
+  });
+  const actionsOf = (effects: OfficeEffect[]) => {
+    const att = effects.find((e) => e.t === "attention");
+    return att && att.t === "attention" ? att.ask?.actions.map((a) => a.id) : null;
+  };
+
+  it.each([["\u1680", "オガム文字の空白"], ["\u2800", "点字の空白"], ["\u3164", "ハングルの埋め草"], ["\u2003", "全角幅の空白（EM SPACE）"], ["\u00a0", "改行しない空白"]])("変わった空白（%s）で後ろを隠しても、通知から直接は許可できない", (ch) => {
+    const o = office(false);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, perm(lead, { to: "a@b.c", body: `ok${ch.repeat(5000)}顧客名簿: 山田` }, 20)]);
+    expect(actionsOf(r.effects)).toEqual(["open"]);
+    // 札では、その空白は目に見える印になっている（何も無いように見せられない）
+    expect(r.run.permissions[0].text).not.toContain(ch);
+    expect(r.run.permissions[0].text).toContain("出していません");
+  });
+
+  it("中身が切られているときは、短く見えても通知から直接は許可できない", () => {
+    const o = office(false);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, perm(lead, { body: "x".repeat(6000) }, 20)]);
+    expect(actionsOf(r.effects)).toEqual(["open"]);
+  });
+
+  it("自動で通した記録の「出していない字数」は、本当に出していない字数を書く", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    const input = { command: `${"X".repeat(100000)}; Remove-Item -Recurse -Force D:\\important` };
+    const full = askDetail(input, "ja", 10_000_000).text.length;
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, { t: "agent", staffId: lead, ev: { kind: "permission_request", request_id: "r", tool_name: "Bash", input } as OfficeAgentEvent, at: 20 }]);
+    expect(r.run.autoLog?.[0].text).toContain(`ここから先の ${full - 2000}字は出していません`);
+  });
+
+  it("上限に届いた仕事の確認は、切り替え直しても通らない", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    let run = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }]).run;
+    for (let i = 0; i <= MAX_AUTO_APPROVALS; i++) run = drive(o, run, say(lead, REVIEW, 100 + i * 10)).run;
+    expect(run.approval).not.toBeNull();
+    run = drive({ ...o, autoMode: false }, run, [{ t: "auto", at: 900 }]).run;
+    const r = drive(o, run, [{ t: "auto", at: 910 }]);
+    expect(r.run.approval).not.toBeNull();
+    expect(r.effects.filter((e) => e.t === "send")).toHaveLength(0);
+    // 画面で「OKを出す」を押せば進む
+    expect(drive(o, r.run, [{ t: "approve", ok: true, comment: "", at: 920 }]).run.approval).toBeNull();
+  });
+
+  it("切るときに、絵文字などの文字の途中で切らない", () => {
+    const d = askDetail({ command: `${"a".repeat(3999)}😀tail` });
+    expect(d.text.startsWith("a".repeat(3999) + "\n")).toBe(true);
+    expect(d.cut).toBe(6);
   });
 });
