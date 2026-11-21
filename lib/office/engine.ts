@@ -19,6 +19,7 @@ import {
   unknownStaffMessage,
 } from "./protocol";
 import type {
+  AutoLevel,
   Office,
   OfficeEffect,
   OfficeInput,
@@ -247,13 +248,19 @@ export interface StepResult {
 /** 失敗で終わった返事の印（AI の種類ごとに書き方が違う） */
 const FAILED_RESULT = /error|fail|cancel|interrupt/i;
 
+/** その会社の、自動で進める度合い（古い保存の autoMode: true は「完全自動」として読む）。 */
+export function autoLevelOf(office: Office): AutoLevel {
+  if (office.autoLevel === "ask" || office.autoLevel === "tools" || office.autoLevel === "full") return office.autoLevel;
+  return office.autoMode ? "full" : "ask";
+}
+
 /** 自動で進める設定のとき、1つの仕事で質問に自動で返す回数の上限（同じ質問の繰り返しで回り続けないように。超えたら社長に聞く） */
 export const MAX_AUTO_ANSWERS = 8;
 /** 自動で進める設定のとき、1つの仕事で確認を待たずに OK にする回数の上限（確認→OK→また確認…で回り続けないように） */
 export const MAX_AUTO_APPROVALS = 8;
 
-const AUTO_OK = (title: string) => `【社長から】「${title}」は OK です（社長は「最後まで自動で進める」設定にしています。中身はあとで見ます）。\n続きを進めてください。`;
-const AUTO_ANSWER = "【社長から】いまは「最後まで自動で進める」設定で、質問にすぐ答えられません。あなたのおすすめの案で進めてください。あとで戻せるやり方を選び、決めたことと理由を報告に書いてください。外への公開・送信・支払い・消す操作だけは、進めずに報告に「社長の判断待ち」と書いてください。";
+const AUTO_OK = (title: string) => `【社長から】「${title}」は OK です（社長は「完全自動」の設定にしています。中身はあとで見ます）。\n続きを進めてください。`;
+const AUTO_ANSWER = "【社長から】いまは「完全自動」の設定で、質問にすぐ答えられません。あなたのおすすめの案で進めてください。あとで戻せるやり方を選び、決めたことと理由を報告に書いてください。外への公開・送信・支払い・消す操作だけは、進めずに報告に「社長の判断待ち」と書いてください。";
 
 /** 預かれる指示の数（これを超えたら受け付けない。黙って古い物を捨てない） */
 const MAX_PENDING = 30;
@@ -419,8 +426,9 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
 
     case "auto": {
       // 切り替えたことを記録に残す（いつから自動で進めたかが、あとで分かるように）
-      run = pushLog(run, { kind: "system", staffId: null, text: t(office.autoMode ? "auto.turnedOn" : "auto.turnedOff"), at: input.at });
-      if (!office.autoMode) return { run, effects };
+      const level = autoLevelOf(office);
+      run = pushLog(run, { kind: "system", staffId: null, text: t(`auto.set.${level}`), at: input.at });
+      if (level === "ask") return { run, effects };
       // いま待っている許可は全部通す
       for (const ask of run.permissions) {
         effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: true });
@@ -430,6 +438,8 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       }
       if (run.permissions.length > 0) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAllowedAll", { n: run.permissions.length }), at: input.at });
       run = { ...run, permissions: [] };
+      // 「ほぼ全自動」は道具の許可まで。できあがりの確認と質問は、社長を待ったままにする
+      if (level !== "full") return { run: settle(run, input.at), effects };
       const ap = run.approval;
       const openQ = [...run.log].reverse().find((m) => m.kind === "question" && !m.answered);
       if (ap && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) {
@@ -536,7 +546,7 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           // 止めたあと・終わったあとに遅れて届いた許可の求めは受けない（答える相手がもういない）
           if (rt.status !== "working" && rt.status !== "waiting") return { run, effects };
           const at = input.at;
-          if (office.autoMode) {
+          if (autoLevelOf(office) !== "ask") {
             // 最後まで自動で進める設定：聞かずに通す（何を通したかは記録に残す）
             const what = describeAsk(ev.tool_name, ev.input ?? {}, locale, AUTO_LOG_TEXT_MAX).text;
             effects.push({ t: "permission", staffId: who.id, requestId: ev.request_id, allow: true });
@@ -727,8 +737,8 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   }
 
   if (d.approval) {
-    if (office.autoMode && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) run = noteAutoLimit(run, "autoApprovals", MAX_AUTO_APPROVALS, at, locale);
-    else if (office.autoMode) {
+    if (autoLevelOf(office) === "full" && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) run = noteAutoLimit(run, "autoApprovals", MAX_AUTO_APPROVALS, at, locale);
+    else if (autoLevelOf(office) === "full") {
       // 最後まで自動で進める設定：確認を待たずに OK として続ける（題・書かれていた内容・見せるはずだったファイルを記録に残す）
       run = { ...run, cheerAt: at, autoApprovals: (run.autoApprovals ?? 0) + 1 };
       run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: d.approval.title, detail: approvalDetail(d.approval.body, d.approval.file, locale) }), at });
@@ -750,7 +760,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   }
 
   if (d.question) {
-    if (office.autoMode && (run.autoAnswers ?? 0) < MAX_AUTO_ANSWERS) {
+    if (autoLevelOf(office) === "full" && (run.autoAnswers ?? 0) < MAX_AUTO_ANSWERS) {
       // 最後まで自動で進める設定：質問は記録に残し、おすすめの案で進めてもらう
       run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: true });
       run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAnswered"), at });
@@ -759,7 +769,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
       effects.push({ t: "send", staffId: who.id, text: AUTO_ANSWER });
       return run;
     }
-    if (office.autoMode) run = noteAutoLimit(run, "autoAnswers", MAX_AUTO_ANSWERS, at, locale);
+    if (autoLevelOf(office) === "full") run = noteAutoLimit(run, "autoAnswers", MAX_AUTO_ANSWERS, at, locale);
     run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: false });
     run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.answer") });
     run = pushNotice(run, who.id, t("engine.question", { name: who.name }), at);

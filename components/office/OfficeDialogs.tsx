@@ -11,6 +11,7 @@ import { LOOK_SAMPLES, lookSample } from "@/lib/office/looks";
 import { buildOffice, newDepartment, newStaff, OFFICE_TEMPLATES } from "@/lib/office/templates";
 import { OFFICE_THEMES } from "@/lib/office/themes";
 import type { Office, OfficeRun, Staff } from "@/lib/office/types";
+import { autoLevelOf } from "@/lib/office/engine";
 import { CATEGORY_LABELS, CATEGORY_ORDER, PROVIDER_CATEGORY } from "@/lib/providerCategories";
 import { loadLastWorkspace, saveLastWorkspace } from "@/lib/storage";
 import { avatarSrc, isTauri, pickAndSaveAvatar, pickWorkspace } from "@/lib/tauri";
@@ -303,6 +304,21 @@ export function CompanyPanel({
               </button>
             ))}
           </div>
+        </div>
+        <div>
+          <span className={label}>{t("auto.title")}</span>
+          <div role="radiogroup" aria-label={t("auto.title")} className="grid grid-cols-1 gap-2">
+            {(["ask", "tools", "full"] as const).map((level) => {
+              const on = autoLevelOf(office) === level;
+              return (
+                <button key={level} type="button" role="radio" aria-checked={on} onClick={() => { if (!on) patch({ autoLevel: level, autoMode: level === "full" }); }} className={`rounded-xl border-2 px-3 py-2 text-left ${on ? "border-indigo-500" : "border-slate-200"}`}>
+                  <span className="block text-[12.5px] font-bold">{t(`auto.level.${level}`)}</span>
+                  <span className="mt-0.5 block text-[12px] font-normal leading-relaxed text-slate-600">{t(`auto.desc.${level}`)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-amber-800">{t("auto.warn")}</p>
         </div>
         <div>
           <span className={label}>{t("company.sceneFit")}</span>

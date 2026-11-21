@@ -21,11 +21,11 @@ import {
 } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { VoiceInputButton } from "@/components/VoiceInputButton";
-import { activeMsOf, boardOf, MAX_AUTO_LOG, waitingForBoss, type BoardColumn } from "@/lib/office/engine";
+import { activeMsOf, autoLevelOf, boardOf, MAX_AUTO_LOG, waitingForBoss, type BoardColumn } from "@/lib/office/engine";
 import { useOfficeT } from "@/lib/office/i18n";
 import { LookFace, OfficeAvatarContext } from "./OfficeCrew";
 import type { OfficeTheme } from "@/lib/office/themes";
-import type { Office, OfficeRun, Staff } from "@/lib/office/types";
+import type { AutoLevel, Office, OfficeRun, Staff } from "@/lib/office/types";
 import { showToast } from "@/lib/toast";
 import { readTextFile, writeClipboardText } from "@/lib/tauri";
 
@@ -185,13 +185,13 @@ export function BossDesk({
   onStop,
   onOpenFile,
   onPickWorkspace,
-  onAutoMode,
+  onAutoLevel,
 }: {
   office: Office;
   run: OfficeRun;
   theme: OfficeTheme;
-  /** 「最後まで自動で進める」の切り替え */
-  onAutoMode: (on: boolean) => void;
+  /** 自動で進める度合いの切り替え */
+  onAutoLevel: (level: AutoLevel) => void;
   onSend: (text: string) => void;
   onApprove: (ok: boolean, comment: string) => void;
   onPermission: (askId: string, allow: boolean) => void;
@@ -208,6 +208,7 @@ export function BossDesk({
   const lead = office.staff.find((s) => s.lead) ?? office.staff[0];
   const openQuestion = run.log.some((m) => m.kind === "question" && !m.answered);
   const waiting = waitingForBoss(run);
+  const autoLevel = autoLevelOf(office);
 
   useEffect(() => {
     const el = logRef.current;
@@ -246,20 +247,26 @@ export function BossDesk({
         <h2 className="flex-1 text-[14px] font-extrabold">{t("boss.title")}</h2>
         {waiting > 0 ? <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[12px] font-bold text-amber-900">{waiting}</span> : null}
       </header>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={!!office.autoMode}
-        title={t(office.autoMode ? "auto.hintOn" : "auto.hintOff")}
-        onClick={() => onAutoMode(!office.autoMode)}
-        className={`office-auto-switch flex items-center gap-2 border-b px-4 py-2 text-left text-[12.5px] font-bold ${theme.dark ? "border-white/10" : "border-slate-200"} ${office.autoMode ? (theme.dark ? "bg-emerald-400/15" : "bg-emerald-50") : ""}`}
+      <div
+        role="radiogroup"
+        aria-label={t("auto.title")}
+        className={`office-auto-level flex flex-wrap items-center gap-1.5 border-b px-4 py-2 text-[12px] font-bold ${theme.dark ? "border-white/10" : "border-slate-200"} ${autoLevel !== "ask" ? (theme.dark ? "bg-emerald-400/15" : "bg-emerald-50") : ""}`}
       >
-        <span aria-hidden="true" className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${office.autoMode ? "bg-emerald-500" : "bg-slate-400"}`}>
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${office.autoMode ? "left-[18px]" : "left-0.5"}`} />
-        </span>
-        <span className="flex-1">{t("auto.label")}</span>
-        <span className={office.autoMode ? "text-emerald-600" : sub(theme.dark)}>{t(office.autoMode ? "auto.on" : "auto.off")}</span>
-      </button>
+        <span className={`mr-auto ${sub(theme.dark)}`}>{t("auto.title")}</span>
+        {(["ask", "tools", "full"] as const).map((level) => (
+          <button
+            key={level}
+            type="button"
+            role="radio"
+            aria-checked={autoLevel === level}
+            title={t(`auto.desc.${level}`)}
+            onClick={() => { if (autoLevel !== level) onAutoLevel(level); }}
+            className={`rounded-full px-2.5 py-1 ${autoLevel === level ? (level === "ask" ? "bg-slate-600 text-white" : "bg-emerald-600 text-white") : theme.dark ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-700"}`}
+          >
+            {t(`auto.level.${level}`)}
+          </button>
+        ))}
+      </div>
 
       <div ref={logRef} className="unipilot-scroll min-h-[120px] flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {!office.workspace ? (

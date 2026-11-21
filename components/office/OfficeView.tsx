@@ -12,7 +12,7 @@ import { OfficeAvatarContext } from "./OfficeCrew";
 import OfficeScene from "@/components/office/OfficeScene";
 import { CompanyPanel, OfficeSetup, StaffPanel, newStaff } from "@/components/office/OfficeDialogs";
 import { BossDesk, OfficeBoard, OfficeSide, OfficeTopBar } from "@/components/office/OfficePanels";
-import { emptyRun, reconcileRun, canTakeInstruction } from "@/lib/office/engine";
+import { autoLevelOf, emptyRun, reconcileRun, canTakeInstruction } from "@/lib/office/engine";
 import { registerBossReceiver } from "@/lib/office/boss-bus";
 import { useOfficeT } from "@/lib/office/i18n";
 import { layoutOffice } from "@/lib/office/layout";
@@ -217,6 +217,13 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       setRun(rec);
     }
   }, []);
+
+  /** 会社の設定を変える。自動で進める度合いが変わったときは、記録に残し、いま待っている物もその度合いで進める */
+  const changeOffice = useCallback((next: Office) => {
+    const before = officeRef.current;
+    updateOffice(next);
+    if (before && before.id === next.id && autoLevelOf(before) !== autoLevelOf(next)) runnerRef.current?.dispatch({ t: "auto", at: Date.now() });
+  }, [updateOffice]);
 
   const switchOffice = useCallback((id: string) => {
     // 切り替え先は、画面が持っている一覧から選ぶ（保存に失敗していても、会社と「いま」を必ず一組で替える）
@@ -448,11 +455,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
               onApprove={(ok, comment) => dispatch({ t: "approve", ok, comment, at: Date.now() })}
               onPermission={(askId, allow) => dispatch({ t: "permission", askId, allow, at: Date.now() })}
               onStop={() => dispatch({ t: "stop", at: Date.now() })}
-              onAutoMode={(on) => {
-                updateOffice({ ...office, autoMode: on, updatedAt: Date.now() });
-                // 入れたときは、いま待っている許可・確認・質問もその場で進める
-                dispatch({ t: "auto", at: Date.now() });
-              }}
+              onAutoLevel={(level) => changeOffice({ ...office, autoLevel: level, autoMode: level === "full", updatedAt: Date.now() })}
               onOpenFile={openFile}
               onPickWorkspace={pickFolder}
             />
@@ -503,7 +506,7 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
                   /* 保存できなくても続ける */
                 }
               }}
-              onChange={updateOffice}
+              onChange={changeOffice}
               onAddStaff={(deptId) => {
                 const s = newStaff(office, deptId);
                 updateOffice({ ...office, staff: [...office.staff, s], updatedAt: Date.now() });

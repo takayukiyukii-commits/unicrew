@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { askDetail, visibleText } from "./ask-text";
-import { emptyRun, MAX_AUTO_ANSWERS, MAX_AUTO_APPROVALS, MAX_AUTO_LOG, step, waitingForBoss } from "./engine";
+import { autoLevelOf, emptyRun, MAX_AUTO_ANSWERS, MAX_AUTO_APPROVALS, MAX_AUTO_LOG, step, waitingForBoss } from "./engine";
 import { repairRun } from "./store";
 import { attentionInput } from "./runner";
 import { buildOffice, OFFICE_TEMPLATES } from "./templates";
@@ -153,7 +153,7 @@ describe("最後まで自動で進める：途中で切り替える", () => {
     expect(r.effects.filter((e) => e.t === "permission" && e.allow)).toHaveLength(2);
     expect(r.run.staff[member.id].status).toBe("working");
     expect(r.run.busy).toBe(true);
-    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("最後まで自動で進める」を入れました"))).toBe(true);
+    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("「完全自動」にしました"))).toBe(true);
     run = r.run;
   });
 
@@ -183,7 +183,7 @@ describe("最後まで自動で進める：途中で切り替える", () => {
     const r = drive(o, run, [{ t: "auto", at: 40 }]);
     expect(r.run.permissions).toHaveLength(1);
     expect(r.effects).toHaveLength(0);
-    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("を切りました"))).toBe(true);
+    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("「毎回聞く」にしました"))).toBe(true);
   });
 });
 
@@ -467,5 +467,77 @@ describe("自分の直しの監査で見つかった点（2026-11-22・3回目�
     const d = askDetail({ command: `${"a".repeat(3999)}😀tail` });
     expect(d.text.startsWith("a".repeat(3999) + "\n")).toBe(true);
     expect(d.cut).toBe(6);
+  });
+});
+
+describe("自動で進める度合い（毎回聞く／ほぼ全自動／完全自動）", () => {
+  const base = (): Office => buildOffice({ template: OFFICE_TEMPLATES.find((t) => t.id === "site")!, name: "試験の会社", workspace: "D:/work", now: 1000 });
+  const tools = (): Office => ({ ...base(), autoLevel: "tools" });
+
+  it("度合いの読み方：新しい設定を優先し、無ければ古い設定（autoMode）から読む。どちらも無ければ毎回聞く", () => {
+    expect(autoLevelOf(base())).toBe("ask");
+    expect(autoLevelOf({ ...base(), autoMode: true })).toBe("full");
+    expect(autoLevelOf({ ...base(), autoMode: true, autoLevel: "tools" })).toBe("tools");
+    expect(autoLevelOf({ ...base(), autoMode: true, autoLevel: "ask" })).toBe("ask");
+    expect(autoLevelOf({ ...base(), autoLevel: "everything" as never })).toBe("ask");
+  });
+
+  it("ほぼ全自動：道具の許可は聞かずに通し、記録に残す", () => {
+    const o = tools();
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ask(lead, "req-1", 20)]);
+    expect(r.run.permissions).toHaveLength(0);
+    expect(r.effects).toContainEqual({ t: "permission", staffId: lead, requestId: "req-1", allow: true });
+    expect(r.run.autoLog).toHaveLength(1);
+    expect(r.effects.some((e) => e.t === "attention")).toBe(false);
+  });
+
+  it("ほぼ全自動：できあがりの確認は、社長を待つ（勝手に OK にしない）", () => {
+    const o = tools();
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, REVIEW, 20)]);
+    expect(r.run.approval?.title).toBe("ホームページ（第1版）");
+    expect(r.run.staff[lead].status).toBe("waiting");
+    expect(r.effects.filter((e) => e.t === "send")).toHaveLength(1);
+    expect(r.effects.some((e) => e.t === "attention")).toBe(true);
+  });
+
+  it("ほぼ全自動：質問は、社長を待つ（勝手に答えない）", () => {
+    const o = tools();
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, QUESTION, 20)]);
+    expect(waitingForBoss(r.run)).toBe(1);
+    expect(r.run.autoAnswers ?? 0).toBe(0);
+  });
+
+  it("ほぼ全自動に切り替えた瞬間：待っていた許可だけ通し、待っていた確認はそのまま残す", () => {
+    const off = base();
+    const lead = leadId(off);
+    const member = off.staff.find((s) => !s.lead)!;
+    let run = drive(off, emptyRun(off), [
+      { t: "boss", text: "作って", at: 10 },
+      ...say(lead, `[[依頼:${member.name}]]\nお願いします。\n[[/依頼]]`, 20),
+      ask(member.id, "req-1", 30),
+    ]).run;
+    const r = drive({ ...off, autoLevel: "tools" }, run, [{ t: "auto", at: 40 }]);
+    expect(r.run.permissions).toHaveLength(0);
+    expect(r.effects.filter((e) => e.t === "permission" && e.allow)).toHaveLength(1);
+    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("「ほぼ全自動」にしました"))).toBe(true);
+    // 確認が待っているときは、確認は残る
+    run = drive(off, emptyRun(off), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, REVIEW, 20)]).run;
+    const r2 = drive({ ...off, autoLevel: "tools" }, run, [{ t: "auto", at: 40 }]);
+    expect(r2.run.approval).not.toBeNull();
+    expect(r2.effects.filter((e) => e.t === "send")).toHaveLength(0);
+  });
+
+  it("完全自動から、ほぼ全自動に下げたあとの確認と質問は、社長を待つ", () => {
+    const full: Office = { ...base(), autoLevel: "full" };
+    const lead = leadId(full);
+    let run = drive(full, emptyRun(full), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, QUESTION, 20)]).run;
+    expect(waitingForBoss(run)).toBe(0);
+    const down: Office = { ...full, autoLevel: "tools", autoMode: false };
+    run = drive(down, run, [{ t: "auto", at: 30 }]).run;
+    const r = drive(down, run, say(lead, QUESTION, 40));
+    expect(waitingForBoss(r.run)).toBe(1);
   });
 });

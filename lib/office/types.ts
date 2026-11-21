@@ -50,13 +50,22 @@ export interface Office {
   theme: string;
   /** 部屋の絵の出し方。fill＝窓に合わせて大きく（横長の窓では幅まで広げて上の端を11%まで切る。それより横長なら左右に余白。左右は切らない・既定）／whole＝絵を全部見せる（まわりに余白） */
   sceneFit?: "fill" | "whole";
-  /** true＝最後まで自動で進める（道具の許可・できあがりの確認・質問で社長を待たない）。既定は false */
+  /** 自動で進める度合い（無ければ、古い autoMode から読む。どちらも無ければ ask） */
+  autoLevel?: AutoLevel;
+  /** 古い保存の形（true＝完全自動）。新しく書くときは autoLevel と合わせて書く */
   autoMode?: boolean;
   departments: Department[];
   staff: Staff[];
   createdAt: number;
   updatedAt: number;
 }
+
+/**
+ * 自動で進める度合い。
+ * ask＝毎回聞く／tools＝ほぼ全自動（社員が道具を使う許可だけ、聞かずに通す。できあがりの確認と質問は社長を待つ）／
+ * full＝完全自動（確認は OK として進め、質問はおすすめの案で進めてもらう。1つの仕事でそれぞれ8回まで）
+ */
+export type AutoLevel = "ask" | "tools" | "full";
 
 export type StaffStatus = "idle" | "working" | "waiting" | "done";
 
