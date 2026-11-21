@@ -41,7 +41,7 @@ export default function OfficeScene(props: Props) {
       }} />)}
       <div className="office-door" aria-hidden="true"><i /><i /></div>
       <div className="office-place-sign" style={{ left: "29.5%", top: "74%" }}><LogIn size={13} />{t("scene.door")}</div>
-      <div className="office-place-sign" style={{ left: "49.5%", top: "17%" }}><BookOpen size={13} />{t("scene.books")}</div>
+      <div className="office-place-sign" style={{ left: "59%", top: "12%" }}><BookOpen size={13} />{t("scene.books")}</div>
       <div className="office-place-sign" style={{ left: "11%", top: "17%" }}><Presentation size={13} />{t("scene.meeting")}</div>
       <div className="office-place-sign" style={{ left: "88%", top: "17.5%" }}><Coffee size={13} />{t("scene.break")}</div>
       <div className="office-place-sign" style={{ left: "51%", top: "67%" }}><Users size={13} />{t("scene.lead")}</div>
