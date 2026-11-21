@@ -183,6 +183,10 @@ export interface OfficeRun {
   briefed: boolean;
   /** この仕事で、質問に「おすすめで進めて」と自動で返した回数（多すぎたら社長に聞く）。古い保存には無い */
   autoAnswers?: number;
+  /** この仕事で、確認を待たずに OK として進めた回数（多すぎたら社長に見てもらう）。古い保存には無い */
+  autoApprovals?: number;
+  /** 自動で通した道具の許可の記録（新しいものが先。あとで何を通したか確かめられるように、省略せずに残す）。古い保存には無い */
+  autoLog?: AutoLogEntry[];
 }
 
 /** 画面や AI から届く出来事。engine.step に渡す。 */
@@ -213,6 +217,15 @@ export type OfficeAgentEvent =
   | { kind: "usage_delta"; input_tokens?: number; output_tokens?: number; cache_read_tokens?: number; cache_creation_tokens?: number }
   | { kind: "result"; subtype: string }
   | { kind: "error"; message: string };
+
+/** 自動で通した道具の許可1件。 */
+export interface AutoLogEntry {
+  id: string;
+  staffId: string;
+  /** 何をしようとしていたか（コマンドは省略しない） */
+  text: string;
+  at: number;
+}
 
 /** 通知に付けるボタン。tag＝何への答えか（`perm:<許可の id>`／`approval:<確認の id>`）。 */
 export interface AttentionAsk {

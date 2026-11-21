@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { VoiceInputButton } from "@/components/VoiceInputButton";
-import { activeMsOf, boardOf, waitingForBoss, type BoardColumn } from "@/lib/office/engine";
+import { activeMsOf, boardOf, MAX_AUTO_LOG, waitingForBoss, type BoardColumn } from "@/lib/office/engine";
 import { useOfficeT } from "@/lib/office/i18n";
 import { LookFace, OfficeAvatarContext } from "./OfficeCrew";
 import type { OfficeTheme } from "@/lib/office/themes";
@@ -337,7 +337,7 @@ export function BossDesk({
           return (
             <div key={p.id} className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 text-slate-900">
               <div className="text-[12.5px] font-bold">{t("perm.title", { name: who?.name ?? "" })}</div>
-              <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] text-slate-700">{p.text}</p>
+              <p className="unipilot-scroll mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] text-slate-700">{p.text}</p>
               <div className="mt-2 flex gap-2">
                 <button type="button" onClick={() => onPermission(p.id, true)} className="rounded-full bg-indigo-500 px-4 py-1.5 text-[13px] font-bold text-white">
                   {t("perm.allow")}
@@ -550,6 +550,20 @@ export function OfficeSide({
               })}
             </ul>
           )
+        ) : null}
+        {tab === "notices" && (run.autoLog?.length ?? 0) > 0 ? (
+          <details className={`mb-2 rounded-lg px-2.5 py-2 text-[12.5px] ${theme.dark ? "bg-white/5" : "bg-slate-100"}`}>
+            <summary className="cursor-pointer font-bold">{t("side.autoLog", { n: run.autoLog?.length ?? 0 })}</summary>
+            <p className={`mt-1 text-[12px] ${sub(theme.dark)}`}>{t("side.autoLogHint", { max: MAX_AUTO_LOG })}</p>
+            <ul className="mt-1.5 space-y-1.5">
+              {(run.autoLog ?? []).map((g) => (
+                <li key={g.id} className="border-t border-slate-300/40 pt-1.5">
+                  <div className={`text-[12px] ${sub(theme.dark)}`}>{hhmm(g.at)}・{office.staff.find((s) => s.id === g.staffId)?.name ?? ""}</div>
+                  <div className="whitespace-pre-wrap break-words">{g.text}</div>
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
         {tab === "notices" ? (
           run.notices.length === 0 ? (

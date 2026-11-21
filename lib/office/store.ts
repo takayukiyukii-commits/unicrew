@@ -121,6 +121,11 @@ export function saveActiveOfficeId(id: string | null): void {
   write(ACTIVE_KEY, id);
 }
 
+/** 回数として読めるものだけ使う（無い・変な値は 0）。 */
+function count(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
 /** 保存されていた「いま」を、欠けている所を既定の値で埋めて使える形にする。直せない形なら null。 */
 export function repairRun(saved: unknown, office: Office): OfficeRun | null {
   if (!isRecord(saved) || saved.officeId !== office.id || !isRecord(saved.staff)) return null;
@@ -156,6 +161,10 @@ export function repairRun(saved: unknown, office: Office): OfficeRun | null {
     pending: Array.isArray(s.pending) ? s.pending.filter((x): x is string => typeof x === "string") : [],
     busy: s.busy === true,
     briefed: s.briefed === true,
+    // 自動で進めた回数と、自動で通した許可の記録（開き直しても上限と記録を引き継ぐ）
+    autoAnswers: count(s.autoAnswers),
+    autoApprovals: count(s.autoApprovals),
+    autoLog: arr<NonNullable<OfficeRun["autoLog"]>[number]>(s.autoLog, []).filter((x) => typeof x.text === "string" && typeof x.staffId === "string" && typeof x.at === "number"),
   };
 }
 

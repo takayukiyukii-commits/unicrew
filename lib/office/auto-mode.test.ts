@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emptyRun, MAX_AUTO_ANSWERS, step, waitingForBoss } from "./engine";
+import { emptyRun, MAX_AUTO_ANSWERS, MAX_AUTO_APPROVALS, step, waitingForBoss } from "./engine";
+import { repairRun } from "./store";
 import { attentionInput } from "./runner";
 import { buildOffice, OFFICE_TEMPLATES } from "./templates";
 import type { Office, OfficeAgentEvent, OfficeEffect, OfficeInput, OfficeRun } from "./types";
@@ -234,5 +235,94 @@ describe("通知のボタン", () => {
     const o = office(false);
     const r = drive(o, emptyRun(o), [attentionInput({ tag: "perm:p-gone", action: "allow" }, 5)!]);
     expect(r.effects).toHaveLength(0);
+  });
+});
+
+describe("監査で見つかった点（2026-11-22）", () => {
+  const LONG = `Write-Output '${"A".repeat(180)}'; Remove-Item -LiteralPath 'D:\\work\\important' -Recurse -Force`;
+  const askLong = (staffId: string, at: number): OfficeInput => ({
+    t: "agent", staffId, ev: { kind: "permission_request", request_id: "req-long", tool_name: "Bash", input: { command: LONG } } as OfficeAgentEvent, at,
+  });
+
+  it("長いコマンドは、許可の札に最後まで全部出る（後ろの操作が切れない）", () => {
+    const o = office(false);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, askLong(lead, 20)]);
+    expect(r.run.permissions[0].text).toContain("Remove-Item -LiteralPath 'D:\\work\\important' -Recurse -Force");
+  });
+
+  it("通知に入りきらない長い操作には「許可する」を出さず、開いて読むボタンだけにする", () => {
+    const o = office(false);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, askLong(lead, 20)]);
+    const att = r.effects.find((e) => e.t === "attention");
+    const ids = att && att.t === "attention" ? att.ask?.actions.map((a) => a.id) : null;
+    expect(ids).toEqual(["open"]);
+    // 「開いて読む」は答えにならない（窓が前に出るだけ）
+    expect(attentionInput({ tag: `perm:${r.run.permissions[0].id}`, action: "open" }, 30)).toBeNull();
+  });
+
+  it("自動で通した操作は、省略せずに記録に残る（知らせが60件を超えても消えない）", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    let run = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, askLong(lead, 20)]).run;
+    expect(run.autoLog?.[0].text).toContain("Remove-Item");
+    for (let i = 0; i < 70; i++) run = drive(o, run, [ask(lead, `req-${i}`, 100 + i)]).run;
+    expect(run.notices.length).toBeLessThanOrEqual(60);
+    expect(run.autoLog).toHaveLength(71);
+    expect(run.autoLog?.[70].text).toContain("Remove-Item");
+  });
+
+  it("切り替えた瞬間に通した許可も、中身ごと記録に残る", () => {
+    const off = office(false);
+    const lead = leadId(off);
+    const run = drive(off, emptyRun(off), [{ t: "boss", text: "作って", at: 10 }, askLong(lead, 20)]).run;
+    const r = drive({ ...off, autoMode: true }, run, [{ t: "auto", at: 40 }]);
+    expect(r.run.autoLog?.[0].text).toContain("Remove-Item");
+  });
+
+  it("確認を待たずに OK にしたときは、題だけでなく内容とファイルも記録に残す", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, REVIEW, 20)]);
+    const line = r.run.log.find((m) => m.kind === "system" && m.text.includes("確認を待たずに OK"))!;
+    expect(line.text).toContain("確認をお願いします。");
+    expect(line.text).toContain("site/index.html");
+    expect(line.text).not.toContain("納品");
+  });
+
+  it(`確認の自動 OK も${MAX_AUTO_APPROVALS}回まで。超えたら社長の確認を待つ（確認→OK→確認…で回り続けない）`, () => {
+    const o = office(true);
+    const lead = leadId(o);
+    let run = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }]).run;
+    for (let i = 0; i < MAX_AUTO_APPROVALS; i++) run = drive(o, run, say(lead, REVIEW, 100 + i * 10)).run;
+    expect(run.approval).toBeNull();
+    const r = drive(o, run, say(lead, REVIEW, 900));
+    expect(r.run.approval?.title).toBe("ホームページ（第1版）");
+    expect(r.run.staff[lead].status).toBe("waiting");
+    expect(r.run.log.some((m) => m.kind === "system" && m.text.includes("上限"))).toBe(true);
+    expect(r.effects.filter((e) => e.t === "send")).toHaveLength(0);
+  });
+
+  it("回数の上限と通した操作の記録は、保存して読み直しても引き継ぐ（開き直しで上限が戻らない）", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    let run = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ask(lead, "req-1", 15)]).run;
+    for (let i = 0; i < MAX_AUTO_ANSWERS; i++) run = drive(o, run, say(lead, QUESTION, 100 + i * 10)).run;
+    const back = repairRun(JSON.parse(JSON.stringify(run)), o)!;
+    expect(back.autoAnswers).toBe(MAX_AUTO_ANSWERS);
+    expect(back.autoLog).toHaveLength(1);
+    const r = drive(o, { ...back, staff: { ...back.staff, [lead]: { ...back.staff[lead], status: "working" } } }, say(lead, QUESTION, 900));
+    expect(waitingForBoss(r.run)).toBe(1);
+    // 変な値は 0 として読む
+    expect(repairRun({ ...JSON.parse(JSON.stringify(run)), autoAnswers: "8", autoApprovals: -3, autoLog: "x" }, o)).toMatchObject({ autoAnswers: 0, autoApprovals: 0, autoLog: [] });
+  });
+
+  it("画面の文は「アプリが止める」と約束しない（AI に頼んでいるだけ、と書く）", () => {
+    const o = office(true);
+    const lead = leadId(o);
+    const r = drive(o, emptyRun(o), [{ t: "boss", text: "作って", at: 10 }, ...say(lead, QUESTION, 20)]);
+    const line = r.run.log.find((m) => m.kind === "system" && m.text.includes("おすすめの案"))!;
+    expect(line.text).toContain("アプリが止める仕組みではありません");
   });
 });

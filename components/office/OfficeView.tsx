@@ -187,8 +187,11 @@ export default function OfficeView({ active, settings, onWorkspaceChange }: Prop
       const same = cur ? list.find((o) => o.id === cur.id) : undefined;
       if (same) {
         // 開いている会社が書き換わった（社員が消えた等）：待ち合わせをそろえ直す
+        const autoChanged = !!cur?.autoMode !== !!same.autoMode;
         officeRef.current = same;
         runnerRef.current?.dispatch({ t: "sync", at: Date.now() });
+        // 別の窓で「最後まで自動で進める」が切り替えられた：この窓でも切り替えとして扱う（記録に残し、入なら待っていた許可・確認も進める）
+        if (autoChanged) runnerRef.current?.dispatch({ t: "auto", at: Date.now() });
         return;
       }
       // 開いている会社が、別の窓で消された：動いている AI を止めて、残っている会社へ移る

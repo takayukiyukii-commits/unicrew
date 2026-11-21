@@ -29,6 +29,10 @@ import type {
 const MAX_LOG = 200;
 const MAX_NOTICES = 60;
 const MAX_DELIVERIES = 100;
+/** 自動で通した許可の記録の上限（これより古いものは消える） */
+export const MAX_AUTO_LOG = 300;
+/** 通知の本文に出す長さ（これより長い説明は切って出す） */
+const NOTIFY_BODY = 80;
 /** 報告の束に添える連絡（社員の報告ではないもの）の印 */
 const NOTE = "__note__";
 
@@ -190,10 +194,29 @@ function resultText(content: unknown): string {
 /** 道具の許可を求められたとき、何をしようとしているかを人の言葉にする。 */
 function describeAsk(toolName: string, input: Record<string, unknown>, locale: Locale): string {
   const doing = describeOfficeTool(toolName, input, locale);
-  const cmd = typeof input.command === "string" ? `\n${clip(input.command, 160)}` : "";
+  // コマンドは省略しない（後ろに危ない操作が続いていても、許可の札で全部読めるように）。とても長いものだけ端を切る
+  const cmd = typeof input.command === "string" ? `\n${input.command.trim().slice(0, 4000)}` : "";
   const action = locale === "en" ? officeT("engine.askTool", locale, { action: doing })
     : doing.replace(/(しています|ています)$/, (m) => (m === "しています" ? "しようとしています" : "ようとしています"));
   return `${action}${cmd}`;
+}
+
+/** 通知の本文に入りきるか（入りきらない説明には、通知から直接「許可する」を出さない）。 */
+function fitsNotification(text: string): boolean {
+  return text.replace(/\s+/g, " ").trim().length <= NOTIFY_BODY;
+}
+
+/** 自動で通した許可を、省略せずに記録に残す。 */
+function pushAutoLog(run: OfficeRun, staffId: string, text: string, at: number): OfficeRun {
+  return { ...run, autoLog: [{ id: uid("g", at), staffId, text, at }, ...(run.autoLog ?? [])].slice(0, MAX_AUTO_LOG) };
+}
+
+/** 確認を待たずに OK にしたとき、記録に残す中身（題だけでなく、書かれていた内容と見せるはずだったファイルも）。 */
+function approvalDetail(body: string, file: string | null, locale: Locale): string {
+  const parts: string[] = [];
+  if (body.trim()) parts.push(officeT("engine.autoApprovedBody", locale, { body: body.trim().slice(0, 1200) }));
+  if (file) parts.push(officeT("engine.autoApprovedFile", locale, { file }));
+  return parts.length > 0 ? `\n${parts.join("\n")}` : "";
 }
 
 /** 全員が手を止めたか（社長の番か）を見て busy と時計を合わせる。 */
@@ -213,6 +236,8 @@ const FAILED_RESULT = /error|fail|cancel|interrupt/i;
 
 /** 自動で進める設定のとき、1つの仕事で質問に自動で返す回数の上限（同じ質問の繰り返しで回り続けないように。超えたら社長に聞く） */
 export const MAX_AUTO_ANSWERS = 8;
+/** 自動で進める設定のとき、1つの仕事で確認を待たずに OK にする回数の上限（確認→OK→また確認…で回り続けないように） */
+export const MAX_AUTO_APPROVALS = 8;
 
 const AUTO_OK = (title: string) => `【社長から】「${title}」は OK です（社長は「最後まで自動で進める」設定にしています。中身はあとで見ます）。\n続きを進めてください。`;
 const AUTO_ANSWER = "【社長から】いまは「最後まで自動で進める」設定で、質問にすぐ答えられません。あなたのおすすめの案で進めてください。あとで戻せるやり方を選び、決めたことと理由を報告に書いてください。外への公開・送信・支払い・消す操作だけは、進めずに報告に「社長の判断待ち」と書いてください。";
@@ -238,7 +263,7 @@ function beginFreshJob(run: OfficeRun): OfficeRun {
   for (const [id, s] of Object.entries(run.staff)) {
     staff[id] = { ...s, status: "idle", bubble: null, task: null, turns: 0, inputTokens: 0, outputTokens: 0 };
   }
-  return { ...run, staff, autoAnswers: 0, usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null } };
+  return { ...run, staff, autoAnswers: 0, autoApprovals: 0, usage: { leadTurns: 0, staffTurns: 0, inputTokens: 0, outputTokens: 0, startedAt: null, activeMs: 0, activeSince: null } };
 }
 
 const BOSS_PREFIX = "【社長から】\n";
@@ -387,14 +412,15 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
       for (const ask of run.permissions) {
         effects.push({ t: "permission", staffId: ask.staffId, requestId: ask.requestId, allow: true });
         run = setStaff(run, ask.staffId, { status: "working", bubble: t("engine.continuing") });
+        run = pushAutoLog(run, ask.staffId, ask.text, input.at);
       }
       if (run.permissions.length > 0) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoAllowedAll", { n: run.permissions.length }), at: input.at });
       run = { ...run, permissions: [] };
       const ap = run.approval;
       const openQ = [...run.log].reverse().find((m) => m.kind === "question" && !m.answered);
       if (ap) {
-        run = { ...run, approval: null, cheerAt: input.at };
-        run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: ap.title }), at: input.at });
+        run = { ...run, approval: null, cheerAt: input.at, autoApprovals: (run.autoApprovals ?? 0) + 1 };
+        run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: ap.title, detail: approvalDetail(ap.body, ap.file, locale) }), at: input.at });
         sendToLead(AUTO_OK(ap.title), input.at);
       } else if (openQ && run.staff[lead.id]?.status === "waiting" && (run.autoAnswers ?? 0) < MAX_AUTO_ANSWERS) {
         run = { ...run, autoAnswers: (run.autoAnswers ?? 0) + 1, log: run.log.map((m) => (m.id === openQ.id ? { ...m, answered: true } : m)) };
@@ -496,8 +522,10 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           const at = input.at;
           if (office.autoMode) {
             // 最後まで自動で進める設定：聞かずに通す（何を通したかは記録に残す）
+            const what = describeAsk(ev.tool_name, ev.input ?? {}, locale);
             effects.push({ t: "permission", staffId: who.id, requestId: ev.request_id, allow: true });
-            run = pushNotice(run, who.id, t("engine.autoAllowed", { name: who.name, text: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80) }), at);
+            run = pushAutoLog(run, who.id, what, at);
+            run = pushNotice(run, who.id, t("engine.autoAllowed", { name: who.name, text: clip(what, NOTIFY_BODY) }), at);
             return { run, effects };
           }
           const askId = uid("p", at);
@@ -510,11 +538,13 @@ function stepInner(run0: OfficeRun, office: Office, input: OfficeInput, locale: 
           };
           run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.permission") });
           run = pushNotice(run, who.id, t("engine.permissionNotice", { name: who.name }), at);
+          const askText = describeAsk(ev.tool_name, ev.input ?? {}, locale);
           effects.push({
             t: "attention",
             title: t("engine.permissionNotice", { name: who.name }),
-            body: clip(describeAsk(ev.tool_name, ev.input ?? {}, locale), 80),
-            ask: { tag: `perm:${askId}`, actions: [{ id: "allow", label: t("perm.allow") }, { id: "deny", label: t("perm.deny") }] },
+            body: clip(askText, NOTIFY_BODY),
+            // 通知に入りきらない長い操作は、通知から直接は許可させない（見えていない後ろの部分まで通してしまうため）。開いて全部読んでもらう
+            ask: { tag: `perm:${askId}`, actions: fitsNotification(askText) ? [{ id: "allow", label: t("perm.allow") }, { id: "deny", label: t("perm.deny") }] : [{ id: "open", label: t("notify.openFull") }] },
           });
           return { run: settle(run, at), effects };
         }
@@ -681,10 +711,11 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
   }
 
   if (d.approval) {
-    if (office.autoMode) {
-      // 最後まで自動で進める設定：確認を待たずに OK として続ける（記録に残す。中身は納品の棚から見られる）
-      run = { ...run, cheerAt: at };
-      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: d.approval.title }), at });
+    if (office.autoMode && (run.autoApprovals ?? 0) >= MAX_AUTO_APPROVALS) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoLimit"), at });
+    else if (office.autoMode) {
+      // 最後まで自動で進める設定：確認を待たずに OK として続ける（題・書かれていた内容・見せるはずだったファイルを記録に残す）
+      run = { ...run, cheerAt: at, autoApprovals: (run.autoApprovals ?? 0) + 1 };
+      run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoApproved", { title: d.approval.title, detail: approvalDetail(d.approval.body, d.approval.file, locale) }), at });
       run = setStaff(run, who.id, { status: "working", bubble: t("engine.thinking"), draft: "", tools: {} });
       effects.push({ t: "send", staffId: who.id, text: AUTO_OK(d.approval.title) });
       return run;
@@ -712,6 +743,7 @@ function finishTurn(run0: OfficeRun, office: Office, who: Staff, at: number, eff
       effects.push({ t: "send", staffId: who.id, text: AUTO_ANSWER });
       return run;
     }
+    if (office.autoMode) run = pushLog(run, { kind: "system", staffId: null, text: t("engine.autoLimit"), at });
     run = pushLog(run, { kind: "question", staffId: who.id, text: d.question, at, answered: false });
     run = setStaff(run, who.id, { status: "waiting", bubble: t("engine.answer") });
     run = pushNotice(run, who.id, t("engine.question", { name: who.name }), at);
