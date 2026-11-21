@@ -27,7 +27,7 @@ export default function OfficeScene(props: Props) {
   useOfficeWalk(host, office, run, layout, running, reduced, props.animateIdle, lines, smallTalk);
   const seats = allSeats(layout);
   const placed = new Set(seats.map((s) => s.staff.id));
-  return <div className="office-scene-scroll" tabIndex={0} aria-label={t("scene.label")}>
+  return <div className="office-scene-scroll" data-fit={office.sceneFit ?? "fill"} tabIndex={0} aria-label={t("scene.label")}>
     <div ref={host} className="office-pixel-scene" data-motion={running && !reduced ? "on" : "off"}>
       <div className="office-scene-background" style={{ filter: theme.filter }} />
       <div className="office-scene-tint" style={{ background: theme.overlay }} />

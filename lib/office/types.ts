@@ -48,6 +48,8 @@ export interface Office {
   workspace: string | null;
   /** 部屋の雰囲気（lib/office/themes.ts の id） */
   theme: string;
+  /** 部屋の絵の出し方。fill＝窓いっぱい（端が少し切れる・既定）／whole＝絵を全部見せる（まわりに余白） */
+  sceneFit?: "fill" | "whole";
   departments: Department[];
   staff: Staff[];
   createdAt: number;
