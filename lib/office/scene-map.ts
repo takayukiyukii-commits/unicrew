@@ -1,4 +1,5 @@
 /** office-day.webp を開いて決めた足元の位置。左上が (0, 0)。 */
+import { isWalkable } from "./scene-walkable";
 export interface ScenePoint { x: number; y: number }
 const points: Record<string, ScenePoint> = {};
 const links: [string, string][] = [];
@@ -24,7 +25,8 @@ for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
     const hallRow = back ? r : r + 1;
     const entry = put(`${id}-entry`, x, rows[hallRow]);
     join(id, entry);
-    join(entry, `hall-${hallRow}-${c + (s % 2)}`);
+    // 席の前の通路は1本の直線。左右どちらの角へも行けるようにする（反対側の角まで行って引き返さない）
+    join(entry, `hall-${hallRow}-${c}`); join(entry, `hall-${hallRow}-${c + 1}`);
     seats.push(id);
   }
   islands.push(seats);
@@ -110,4 +112,35 @@ export function sceneRoute(from: string, to: string): string[] {
     }
   }
   return [];
+}
+/** 飛ばさない中継点：会議室のガラスの入口と、受付の手前を回る入口の道（床の地図の目より細い壁があるため） */
+const GATE = /^(meeting-door|meeting-inside|door|door-mat|front-low)/;
+/** 2点の間を、家具・壁をまたがずにまっすぐ歩けるか（席・椅子に座る所の近くは家具の上で正しいので数えない） */
+function straightClear(a: string, b: string): boolean {
+  const A = points[a], B = points[b];
+  const soft = (id: string) => /^seat-\d+-\d+$|^meeting-\d+$|^lead$/.test(id);
+  const n = Math.max(2, Math.ceil(sceneDistance(A, B) / 4));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, x = A.x + (B.x - A.x) * t, y = A.y + (B.y - A.y) * t;
+    const near = (id: string, P: ScenePoint) => soft(id) && Math.hypot((x - P.x) * SCENE.width, (y - P.y) * SCENE.height) < 46;
+    if (!near(a, A) && !near(b, B) && !isWalkable(x, y)) return false;
+  }
+  return true;
+}
+/** 実際に歩く道：通路の最短経路から、まっすぐ行ける所の角を省く（カクカク曲がらない・行き過ぎて戻らない） */
+export function sceneWalkRoute(from: string, to: string): string[] {
+  const route = sceneRoute(from, to);
+  if (route.length < 3) return route;
+  const out = [route[0]];
+  let i = 0;
+  while (i < route.length - 1) {
+    let j = i + 1;
+    for (let k = route.length - 1; k > i + 1; k--) {
+      if (route.slice(i + 1, k).some((id) => GATE.test(id))) continue;
+      if (straightClear(route[i], route[k])) { j = k; break; }
+    }
+    out.push(route[j]);
+    i = j;
+  }
+  return out;
 }

@@ -130,6 +130,35 @@ describe("通り道と家具（物理）", () => {
     expect(bad).toEqual([]);
   });
 
+  it("実際に歩く道は、通路の道より長くならず、省いた所も家具・壁をまたがない", async () => {
+    const { isWalkable } = await import("./scene-walkable");
+    const { sceneWalkRoute, sceneDistance } = await import("./scene-map");
+    const len = (r: string[]) => r.slice(1).reduce((sum, id, i) => sum + sceneDistance(SCENE.points[r[i]], SCENE.points[id]), 0);
+    const soft = (id: string) => /^seat-\d+-\d+$|^meeting-\d+$|^lead$/.test(id);
+    const from = [...SCENE.islands.flat(), ...SCENE.meeting, "lead", "door"];
+    const to = [...SCENE.meeting, ...SCENE.books, ...SCENE.waiting.slice(0, 12), "boss", "shelf", "report", "break", ...SCENE.islands.flat()];
+    let shorter = 0;
+    for (const a of from) for (const b of to) {
+      if (a === b) continue;
+      const walk = sceneWalkRoute(a, b), graph = sceneRoute(a, b);
+      expect(walk[0]).toBe(a); expect(walk[walk.length - 1]).toBe(b);
+      expect(len(walk)).toBeLessThanOrEqual(len(graph) + 0.001);
+      if (len(walk) < len(graph) - 1) shorter++;
+      if (SCENE.meeting.includes(b) && !SCENE.meeting.includes(a)) expect(walk).toContain("meeting-door");
+      for (let i = 1; i < walk.length; i++) {
+        const A = SCENE.points[walk[i - 1]], B = SCENE.points[walk[i]];
+        const n = Math.max(2, Math.ceil(sceneDistance(A, B) / 4));
+        for (let k = 0; k <= n; k++) {
+          const t = k / n, x = A.x + (B.x - A.x) * t, y = A.y + (B.y - A.y) * t;
+          const near = (id: string, P: { x: number; y: number }) => soft(id) && Math.hypot((x - P.x) * SCENE.width, (y - P.y) * SCENE.height) < 46;
+          const linked = SCENE.links.some(([p, q]) => (p === walk[i - 1] && q === walk[i]) || (q === walk[i - 1] && p === walk[i]));
+          if (!linked && !near(walk[i - 1], A) && !near(walk[i], B)) expect(isWalkable(x, y)).toBe(true);
+        }
+      }
+    }
+    expect(shorter).toBeGreaterThan(0);
+  });
+
   it("立ち止まる場所（報告・受け渡し口・棚の前・休憩・資料の棚・入口の前）は床の上", async () => {
     const { isWalkable } = await import("./scene-walkable");
     const ids = ["report", "boss", "shelf", "break", "door-mat", ...SCENE.books, ...SCENE.waiting.slice(0, 12)];

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, type RefObject } from "react";
 import { allSeats, type OfficeLayout } from "@/lib/office/layout";
-import { SCENE, sceneDistance, sceneRoute, type ScenePoint } from "@/lib/office/scene-map";
+import { SCENE, sceneDistance, sceneWalkRoute, type ScenePoint } from "@/lib/office/scene-map";
 import { depthFor } from "@/lib/office/scene-depth";
 import { SCENE_FRONT } from "@/lib/office/scene-front";
 import type { Office, OfficeRun } from "@/lib/office/types";
@@ -219,7 +219,7 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         else {
           // 途中で確認が届いた場合も、いまの区間の端まで歩いてから経路を切り替える。
           const approach = sceneDistance(actor.point, SCENE.points[actor.node]) > .01 ? [actor.node] : [];
-          actor.route = [...approach, ...sceneRoute(actor.node, target).slice(1)];
+          actor.route = [...approach, ...sceneWalkRoute(actor.node, target).slice(1)];
           actor.pauseUntil = 0;
           if (actor.cheerFirst) {
             // 仕事が終わった：歩き出す前に、その場でガッツポーズ
@@ -379,13 +379,14 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         if (actor.node !== seat.node || actor.route.length || actor.delay) continue;
         if (queue.some((s) => s.targets[id]) || current?.targets[id]) continue;
         const now = performance.now();
-        if (now - actor.researchAt < 9000) continue;
+        // 読む道具は数秒おきに続けて使われる。毎回は行かず、40秒に1回まで（席で作業している時間を長く見せる）
+        if (now - actor.researchAt < 40000) continue;
         const fresh = Object.entries(rt.tools).find(([toolId, t]) => !t.done && !before.staff[id]?.tools[toolId] && isResearchTool(t.name));
         if (!fresh) continue;
         let best = SCENE.books[0];
         for (const b of SCENE.books) if (Math.abs(SCENE.points[b].x - seat.x) < Math.abs(SCENE.points[best].x - seat.x)) best = b;
-        const go = sceneRoute(seat.node, best).slice(1);
-        const back = sceneRoute(best, seat.node).slice(1);
+        const go = sceneWalkRoute(seat.node, best).slice(1);
+        const back = sceneWalkRoute(best, seat.node).slice(1);
         if (!go.length || !back.length) continue;
         actor.researchAt = now;
         actor.route = [...go, "@wait:1500", ...back];
@@ -402,7 +403,7 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
       paint();
     } };
     controller.current = api;
-    // 待機中の毎コマ処理はしない。にぎやかしON時だけ、時々1人を休憩へ。
+    // 待機中の毎コマ処理はしない。にぎやかしON時だけ、時々1人を休憩へ（1分半に1人。うるさくならない間隔）。
     let idleIndex = 0;
     const idle = () => {
       if (!alive || !running || !chatter || reduced || document.visibilityState !== "visible") return;
@@ -412,9 +413,9 @@ export function useOfficeWalk(host: RefObject<HTMLDivElement | null>, office: Of
         const chat = smallTalkRef.current;
         if (seat) { queue.push({ kind: "break", targets: { [seat.staff.id]: "break" }, hold: 3000, talk: chat.length ? [{ id: seat.staff.id, text: chat[idleIndex % chat.length], delay: 300 }] : undefined }, { kind: "home", targets: { [seat.staff.id]: seat.node }, hold: 0 }); next(); }
       }
-      idleTimer = window.setTimeout(idle, 45000);
+      idleTimer = window.setTimeout(idle, 90000);
     };
-    if (running && chatter && !reduced) idleTimer = window.setTimeout(idle, 30000);
+    if (running && chatter && !reduced) idleTimer = window.setTimeout(idle, 60000);
     return () => {
       // 出社の途中で作り直しになったら、次にもう一度入り直せるようにする（途中で消えて、席に瞬間移動して終わるのを防ぐ）
       if (current?.kind === "enter" || queue.some((step) => step.kind === "enter")) entered.delete(office.id);
