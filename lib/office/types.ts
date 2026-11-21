@@ -48,7 +48,7 @@ export interface Office {
   workspace: string | null;
   /** 部屋の雰囲気（lib/office/themes.ts の id） */
   theme: string;
-  /** 部屋の絵の出し方。fill＝窓いっぱい（端が少し切れる・既定）／whole＝絵を全部見せる（まわりに余白） */
+  /** 部屋の絵の出し方。fill＝窓に合わせて大きく（横長の窓では幅いっぱいに広げて上の端を切る。左右は切らない・既定）／whole＝絵を全部見せる（まわりに余白） */
   sceneFit?: "fill" | "whole";
   /** true＝最後まで自動で進める（道具の許可・できあがりの確認・質問で社長を待たない）。既定は false */
   autoMode?: boolean;
