@@ -321,19 +321,6 @@ export function CompanyPanel({
           <p className="mt-1.5 text-[12px] leading-relaxed text-amber-800">{t("auto.warn")}</p>
         </div>
         <div>
-          <span className={label}>{t("company.sceneFit")}</span>
-          <div className="grid grid-cols-2 gap-2">
-            {(["fill", "whole"] as const).map((fit) => {
-              const on = (office.sceneFit ?? "fill") === fit;
-              return (
-                <button key={fit} type="button" aria-pressed={on} onClick={() => patch({ sceneFit: fit })} className={`rounded-xl border-2 px-2 py-1.5 text-left text-[12px] font-bold ${on ? "border-indigo-500" : "border-slate-200"}`}>
-                  {t(`sceneFit.${fit}`)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div>
           <span className={label}>{t("company.depts")}</span>
           <ul className="space-y-2">
             {office.departments.map((d) => (

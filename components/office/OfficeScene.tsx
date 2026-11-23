@@ -27,7 +27,7 @@ export default function OfficeScene(props: Props) {
   useOfficeWalk(host, office, run, layout, running, reduced, props.animateIdle, lines, smallTalk);
   const seats = allSeats(layout);
   const placed = new Set(seats.map((s) => s.staff.id));
-  return <div className="office-scene-scroll" data-fit={office.sceneFit ?? "fill"} style={{ background: theme.sky }} tabIndex={0} aria-label={t("scene.label")}>
+  return <div className="office-scene-scroll" tabIndex={0} aria-label={t("scene.label")}>
     <div ref={host} className="office-pixel-scene" data-motion={running && !reduced ? "on" : "off"}>
       <div className="office-scene-background" style={{ filter: theme.filter }} />
       <div className="office-scene-tint" style={{ background: theme.overlay }} />
@@ -41,9 +41,9 @@ export default function OfficeScene(props: Props) {
       }} />)}
       <div className="office-door" aria-hidden="true"><i /><i /></div>
       <div className="office-place-sign" style={{ left: "29.5%", top: "74%" }}><LogIn size={13} />{t("scene.door")}</div>
-      <div className="office-place-sign" style={{ left: "59%", top: "12%" }}><BookOpen size={13} />{t("scene.books")}</div>
-      <div className="office-place-sign" style={{ left: "11%", top: "17%" }}><Presentation size={13} />{t("scene.meeting")}</div>
-      <div className="office-place-sign" style={{ left: "88%", top: "17.5%" }}><Coffee size={13} />{t("scene.break")}</div>
+      <div className="office-place-sign" style={{ left: "49.5%", top: "9.5%" }}><BookOpen size={13} />{t("scene.books")}</div>
+      <div className="office-place-sign" style={{ left: "11%", top: "10%" }}><Presentation size={13} />{t("scene.meeting")}</div>
+      <div className="office-place-sign" style={{ left: "88%", top: "13%" }}><Coffee size={13} />{t("scene.break")}</div>
       <div className="office-place-sign" style={{ left: "51%", top: "67%" }}><Users size={13} />{t("scene.lead")}</div>
       <div className="office-place-sign" style={{ left: "47.5%", top: "96%" }}><DoorOpen size={13} />{t("scene.boss")}</div>
       <div className="office-place-sign" style={{ left: "68%", top: "91%" }}><PackageCheck size={13} />{t("scene.shelf", { n: run.deliveries.length })}</div>

@@ -48,8 +48,6 @@ export interface Office {
   workspace: string | null;
   /** 部屋の雰囲気（lib/office/themes.ts の id） */
   theme: string;
-  /** 部屋の絵の出し方。fill＝窓に合わせて大きく（横長の窓では幅まで広げて上の端を11%まで切る。それより横長なら左右に余白。左右は切らない・既定）／whole＝絵を全部見せる（まわりに余白） */
-  sceneFit?: "fill" | "whole";
   /** 自動で進める度合い（無ければ、古い autoMode から読む。どちらも無ければ ask） */
   autoLevel?: AutoLevel;
   /** 古い保存の形（true＝完全自動）。新しく書くときは autoLevel と合わせて書く */
